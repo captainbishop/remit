@@ -1,0 +1,46 @@
+MIT License
+
+Copyright (c) 2026 REPLACE-WITH-YOUR-NAME-OR-ENTITY
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Why this file exists, and one decision still open.
+
+All fourteen Solidity files in this repository already carry
+`// SPDX-License-Identifier: MIT` in their headers, and the source verified on
+Blockscout against the deployment at 0x3744E93B9e796E05CB66311d897559B6F3860196
+declares MIT publicly. A repository with no LICENSE file defaults to
+all-rights-reserved, which would contradict a licence grant that has already been
+published on a public chain. This file resolves that contradiction rather than
+making a new choice.
+
+The choice itself is still worth making deliberately before this repository goes
+public. MIT permits anyone to fork Remit, including commercially, with no
+obligation beyond attribution. That is the norm for infrastructure and it is a
+reasonable position. Some protocols in this space instead ship under BUSL-1.1,
+which reserves commercial use for a fixed term before converting to an open
+licence, precisely to prevent an immediate competing deployment. Changing the
+licence now is possible — the deployed bytecode does not encode it, only the
+verified source metadata does — but it becomes considerably more awkward once
+third parties have relied on MIT.
+
+While this repository is private, the licence grants nobody anything and the
+decision costs nothing to defer. Settle it before flipping to public.

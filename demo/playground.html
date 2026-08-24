@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remit — live policy playground</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #14161a;
+    --ink-2: #4a5058;
+    --ink-3: #7c848f;
+    --line: #e2e5ea;
+    --line-2: #eef0f3;
+    --bg: #fbfbfc;
+    --card: #ffffff;
+    --ok: #0f7a4a;
+    --ok-bg: #e8f6ee;
+    --no: #b02a37;
+    --no-bg: #fdecee;
+    --accent: #1f4fd8;
+    --accent-bg: #eef2fe;
+    --warn: #8a5a00;
+    --warn-bg: #fdf4e3;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 22px 60px; }
+
+  header.top { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 22px; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -0.01em; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 13.5px; max-width: 74ch; margin: 0; }
+  .badge {
+    display: inline-block; font: 600 10.5px/1 var(--mono); letter-spacing: .06em;
+    text-transform: uppercase; padding: 4px 7px; border-radius: 4px; vertical-align: 2px;
+    background: var(--warn-bg); color: var(--warn); margin-left: 8px;
+  }
+
+  .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 16px 16px 18px; }
+  .card + .card { margin-top: 16px; }
+  h2 { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+       color: var(--ink-3); margin: 0 0 13px; }
+  h3 { font-size: 13px; font-weight: 650; margin: 18px 0 8px; color: var(--ink); }
+  h3:first-child { margin-top: 0; }
+
+  label.f { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 3px; }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .row > div { flex: 1; min-width: 0; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px;
+    font: 13px var(--mono); color: var(--ink); background: #fff;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: var(--accent); }
+  .chk { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+
+  button {
+    font: 600 12.5px/1 inherit; padding: 8px 11px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--ink); transition: .12s;
+  }
+  button:hover { border-color: var(--ink-3); }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  button.primary:hover { background: #000; }
+  button.danger { color: var(--no); border-color: #f0ccd1; background: var(--no-bg); }
+  button.danger:hover { border-color: var(--no); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 7px; }
+
+  .clock { font: 600 13px var(--mono); background: var(--line-2); border-radius: 6px;
+           padding: 9px 11px; display: flex; justify-content: space-between; align-items: baseline; }
+  .clock small { color: var(--ink-3); font-weight: 400; font-size: 11px; }
+
+  /* window rings */
+  .win { margin-bottom: 18px; }
+  .win:last-child { margin-bottom: 0; }
+  .winhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .winname { font: 650 12.5px/1 inherit; }
+  .winnum { font: 12px var(--mono); color: var(--ink-2); }
+  .bar { height: 7px; border-radius: 4px; background: var(--line-2); overflow: hidden; margin-bottom: 8px; }
+  .bar > i { display: block; height: 100%; background: var(--ok); transition: width .2s; }
+  .bar.hot > i { background: var(--no); }
+  .ring { display: flex; gap: 3px; }
+  .slot {
+    flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 4px; padding: 4px 2px;
+    text-align: center; font: 10px/1.25 var(--mono); color: var(--ink-3); background: #fff;
+  }
+  .slot.counted { border-color: #bcd0f6; background: var(--accent-bg); color: var(--accent); }
+  .slot.cur { border-color: var(--ink); background: var(--ink); color: #fff; }
+  .slot b { display: block; font-size: 10.5px; font-weight: 700; }
+  .slot span { opacity: .7; font-size: 9px; }
+
+  /* ledger */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; font: 700 10.5px/1 inherit; letter-spacing: .06em; text-transform: uppercase;
+       color: var(--ink-3); padding: 0 8px 7px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  td.num, td.t { font: 12px var(--mono); white-space: nowrap; }
+  .pill { display: inline-block; font: 700 10px/1 var(--mono); padding: 3px 5px; border-radius: 3px; letter-spacing: .03em; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.no { background: var(--no-bg); color: var(--no); }
+  .why { color: var(--ink-2); font-size: 11.5px; }
+  .why code { font: 11px var(--mono); color: var(--no); }
+
+  /* comparison */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cmpbox { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .cmpbox.bad { border-color: #f0ccd1; background: var(--no-bg); }
+  .cmpbox.good { border-color: #bfe3d0; background: var(--ok-bg); }
+  .cmpbox .n { font: 700 20px/1 var(--mono); letter-spacing: -0.02em; }
+  .cmpbox .l { font-size: 11px; color: var(--ink-2); margin-top: 4px; }
+  .cmpbox.bad .n { color: var(--no); }
+  .cmpbox.good .n { color: var(--ok); }
+
+  .note { font-size: 12px; color: var(--ink-2); background: var(--line-2); border-radius: 7px;
+          padding: 11px 13px; margin-top: 14px; }
+  .note b { color: var(--ink); }
+  code.k { font: 12px var(--mono); background: var(--line-2); padding: 1px 4px; border-radius: 3px; }
+  .empty { color: var(--ink-3); font-size: 12.5px; padding: 14px 0; }
+  footer { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line);
+           font-size: 12px; color: var(--ink-3); }
+  .atk { font-size: 11.5px; color: var(--ink-2); margin: -2px 0 9px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Remit <span class="badge">simulation</span></h1>
+  <p class="sub">
+    Bounded, revocable spending authority for an agent. Grant a mandate on the left, then attack it on the
+    right. This runs the same algorithm as <code class="k">reference/policy.js</code> — including the
+    K+1 bucket ring whose earlier K-bucket version had a real cap bypass. Nothing here touches a chain.
+  </p>
+</header>
+
+<div class="grid">
+
+  <!-- ============ LEFT: the grant ============ -->
+  <div>
+    <div class="card">
+      <h2>The mandate</h2>
+      <div class="row">
+        <div><label class="f">Per-transaction cap</label><input type="number" id="perTx" value="250"></div>
+        <div><label class="f">Lifetime cap</label><input type="number" id="totalCap" value="5000"></div>
+      </div>
+      <div class="row">
+        <div><label class="f">Rolling daily cap</label><input type="number" id="dayCap" value="500"></div>
+        <div><label class="f">buckets (K)</label><input type="number" id="dayK" value="12" min="1" max="32"></div>
+      </div>
+      <div class="row">
+        <div><label class="f">Rolling weekly cap</label><input type="number" id="weekCap" value="2000"></div>
+        <div><label class="f">buckets (K)</label><input type="number" id="weekK" value="7" min="1" max="32"></div>
+      </div>
+      <div class="row">
+        <div><label class="f">Co-signature above</label><input type="number" id="cosign" value="200"></div>
+        <div><label class="f">Expires in (days)</label><input type="number" id="expDays" value="30"></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="useAllow" checked> Restrict to allowlist</label>
+      <label class="f">Allowed recipients</label>
+      <input type="text" id="allow" value="0xVENDOR, 0xPAYROLL">
+      <div class="btnrow" style="margin-top:13px">
+        <button class="primary" id="grant">Grant mandate</button>
+        <button class="danger" id="revoke">Revoke</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Clock</h2>
+      <div class="clock"><span id="clockT">day 0, 00:00</span><small id="clockE"></small></div>
+      <div class="btnrow" style="margin-top:11px">
+        <button data-adv="60">+1 min</button>
+        <button data-adv="3600">+1 hr</button>
+        <button data-adv="7200">+2 hr</button>
+        <button data-adv="86400">+1 day</button>
+        <button data-adv="-7200">&minus;2 hr</button>
+      </div>
+      <div class="note" style="margin-top:12px">
+        Arc block timestamps are <b>non-decreasing but not strictly increasing</b> — sub-second blocks
+        share one. So the engine never treats a timestamp as unique or as proof that time advanced.
+        Wind the clock backwards and watch the cap refuse to refill.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RIGHT: the attack surface ============ -->
+  <div>
+    <div class="card">
+      <h2>Spend</h2>
+      <div class="row">
+        <div><label class="f">Amount (USDC)</label><input type="number" id="amt" value="150"></div>
+        <div><label class="f">Recipient</label>
+          <select id="to"><option>0xVENDOR</option><option>0xPAYROLL</option><option>0xATTACKER</option><option>0x0000…0000</option></select>
+        </div>
+        <div style="flex:0 0 92px"><label class="f">Nonce</label><input type="text" id="nonce" value="n1"></div>
+      </div>
+      <div class="btnrow">
+        <button class="primary" id="spend">Attempt spend</button>
+        <button id="cosignBtn">Co-sign this exact spend</button>
+      </div>
+
+      <h3>Scripted attacks</h3>
+      <p class="atk">Each one resets the mandate and clock, then runs a fixed sequence.</p>
+      <div class="btnrow">
+        <button data-atk="burst">Boundary burst</button>
+        <button data-atk="drip">Slow drip past the cap</button>
+        <button data-atk="replay">Nonce replay</button>
+        <button data-atk="rewind">Rewind the clock</button>
+        <button data-atk="redirect">Redirect a co-signature</button>
+        <button data-atk="unlisted">Unlisted recipient</button>
+        <button data-atk="revoked">Spend after revocation</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Rolling windows — the bucket ring</h2>
+      <div id="rings"></div>
+      <div class="note">
+        Blue slots are inside the trailing window and counted. Black is the current sub-period.
+        Faded slots have aged out. The ring holds <b>K+1</b> slots and counts <b>K+1</b> buckets, not K:
+        summing only K covers a span that ends at the <i>end</i> of the current bucket, shifted forward by
+        up to one sub-period, so the oldest still-relevant bucket silently dropped out. That was a real
+        bypass — a fuzz test caught it at <code class="k">1267 &gt; 1000</code>.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Same requests, naive daily reset vs. rolling window</h2>
+      <div class="cmp">
+        <div class="cmpbox bad">
+          <div class="n" id="tumbTotal">0</div>
+          <div class="l"><b>Calendar-day cap</b> — resets at midnight. The obvious implementation, and
+            the one an agent can burst straight through.</div>
+        </div>
+        <div class="cmpbox good">
+          <div class="n" id="rollTotal">0</div>
+          <div class="l"><b>Rolling window</b> — this engine. Never exceeds the cap over any true
+            trailing 24 hours.</div>
+        </div>
+      </div>
+      <div class="note" id="cmpNote">Run the boundary burst to see the two diverge.</div>
+    </div>
+
+    <div class="card">
+      <h2>Ledger</h2>
+      <div id="ledger"><div class="empty">No attempts yet.</div></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Policy engine ported from <code class="k">reference/policy.js</code>, which passes 46 tests including a
+  greedy boundary-aiming fuzzer. The Solidity contract passes its own 139 Forge tests and is
+  <b>live on Arc Testnet</b> at <code class="k">0x3744E93B9e796E05CB66311d897559B6F3860196</code>, where it has
+  executed a real policed payment. This page still simulates the logic rather than calling that
+  contract — nothing here touches a blockchain. Amounts are whole USDC for legibility; the real engine
+  uses 6-decimal base units.
+</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DAY = 86400, WEEK = 7 * DAY;
+  var ZERO = "0x0000…0000";
+
+  // ---------------------------------------------------------------- engine
+  // Faithful port of reference/policy.js. Amounts are integers (whole USDC here).
+
+  function mkWindow(name, lengthSeconds, cap, buckets) {
+    if (lengthSeconds % buckets !== 0) buckets = 1;      // uniform sub-periods or nothing
+    return {
+      name: name, L: lengthSeconds, cap: cap, K: buckets,
+      S: lengthSeconds / buckets,
+      ringSize: buckets + 1,                             // K+1: live indices never collide
+      ring: new Array(buckets + 1).fill(null).map(function () { return { idx: 0, amt: 0 }; })
+    };
+  }
+
+  // Sum every sub-bucket overlapping the trailing window. Counts K+1 buckets.
+  // No upper bound on idx on purpose: excluding a "future" bucket would make
+  // recorded spending invisible and hand back headroom that was really consumed.
+  function usage(w, now) {
+    var b = Math.floor(now / w.S);
+    var oldest = b - w.K;
+    var eff = 0;
+    for (var i = 0; i < w.ring.length; i++) {
+      var s = w.ring[i];
+      if (s.amt !== 0 && s.idx >= oldest) eff += s.amt;
+    }
+    return { bucket: b, oldest: oldest, effective: eff };
+  }
+
+  function commitWindow(w, bucket, oldest, add) {
+    var slot = w.ring[((bucket % w.ringSize) + w.ringSize) % w.ringSize];
+    if (slot.amt === 0) { slot.idx = bucket; slot.amt = add; }          // empty: claim
+    else if (slot.idx === bucket) { slot.amt += add; }                  // same period
+    else if (slot.idx < oldest) { slot.idx = bucket; slot.amt = add; }  // aged out: recycle
+    else { slot.amt += add; }                                          // live collision: accumulate,
+                                                                       // never overwrite counted history
+  }
+
+  function makeMandate(cfg) {
+    var wins = [];
+    if (cfg.dayCap > 0) wins.push(mkWindow("Rolling 24h", DAY, cfg.dayCap, cfg.dayK));
+    if (cfg.weekCap > 0) wins.push(mkWindow("Rolling 7d", WEEK, cfg.weekCap, cfg.weekK));
+    return {
+      perTx: cfg.perTx, totalCap: cfg.totalCap, windows: wins,
+      allowlist: cfg.useAllow ? cfg.allow : null,
+      cosignThreshold: cfg.cosign, expiresAt: cfg.expiresAt,
+      totalSpent: 0, count: 0, revoked: false,
+      usedNonce: Object.create(null), cosignApproved: Object.create(null)
+    };
+  }
+
+  function spendKey(r) { return ["Remit:v1", r.to, r.amount, r.nonce].join("|"); }
+
+  // Check order mirrors the contract exactly. Co-signature is checked LAST so a
+  // cheaper failure reports itself instead of misleadingly demanding a signature.
+  function evaluate(m, r, now) {
+    if (m.revoked) return no("REVOKED", "Payer revoked. Final after one Arc confirmation — no reorg window.");
+    if (m.expiresAt && now >= m.expiresAt)
+      return no("EXPIRED", "Expiry is exclusive: dead at T, not after T. Sub-second blocks share a timestamp, so an inclusive bound would be ambiguous.");
+    if (r.to === ZERO) return no("ZERO_RECIPIENT", "Arc reverts value transfers to the zero address; refuse before burning gas.");
+    if (m.allowlist && m.allowlist.indexOf(r.to) === -1)
+      return no("RECIPIENT_NOT_ALLOWED", "Not on the allowlist the payer named at grant time.");
+    if (r.amount <= 0) return no("ZERO_AMOUNT", "A zero-value spend would consume a nonce for nothing.");
+    if (m.usedNonce[r.nonce])
+      return no("NONCE_ALREADY_USED", "Idempotency. A retrying worker cannot double-pay.");
+    if (m.perTx > 0 && r.amount > m.perTx)
+      return no("OVER_PER_TX_CAP", "Exceeds the per-transaction cap of " + m.perTx + ".");
+    if (m.totalCap > 0 && m.totalSpent + r.amount > m.totalCap)
+      return no("OVER_TOTAL_CAP", "Would exceed the lifetime cap. " + (m.totalCap - m.totalSpent) + " left.");
+
+    var effects = [];
+    for (var i = 0; i < m.windows.length; i++) {
+      var w = m.windows[i], u = usage(w, now);
+      if (u.effective + r.amount > w.cap) {
+        return no("OVER_WINDOW_CAP", w.name + ": " + u.effective + " already counted against a cap of " +
+          w.cap + ", so at most " + Math.max(0, w.cap - u.effective) + " more right now.");
+      }
+      effects.push({ w: w, bucket: u.bucket, oldest: u.oldest, add: r.amount });
+    }
+
+    var key = spendKey(r);
+    if (m.cosignThreshold >= 0 && r.amount > m.cosignThreshold && !m.cosignApproved[key]) {
+      return no("COSIGN_REQUIRED", "Above the co-sign threshold of " + m.cosignThreshold +
+        ". An approval is bound to this exact recipient, amount and nonce — it cannot be redirected.");
+    }
+    return { ok: true, key: key, effects: effects };
+    function no(reason, why) { return { ok: false, reason: reason, why: why }; }
+  }
+
+  function apply(m, d, r) {
+    for (var i = 0; i < d.effects.length; i++) {
+      var e = d.effects[i];
+      commitWindow(e.w, e.bucket, e.oldest, e.add);
+    }
+    m.totalSpent += r.amount; m.count += 1;
+    m.usedNonce[r.nonce] = true;
+    delete m.cosignApproved[d.key];     // one signature authorises exactly one spend
+  }
+
+  // Shadow engine: the naive calendar-day cap, for comparison only.
+  function tumblingTry(t, amount, now) {
+    var d = Math.floor(now / DAY);
+    if (d !== t.day) { t.day = d; t.used = 0; }
+    if (t.used + amount > t.cap) return false;
+    t.used += amount; t.moved += amount; return true;
+  }
+
+  // ---------------------------------------------------------------- state
+  var S = { m: null, tumb: null, now: 0, t0: 0, ledger: [], nonceSeq: 1 };
+
+  function $(id) { return document.getElementById(id); }
+  function n(id) { return Math.max(0, Math.floor(Number($(id).value) || 0)); }
+
+  function readCfg() {
+    var days = n("expDays");
+    return {
+      perTx: n("perTx"), totalCap: n("totalCap"),
+      dayCap: n("dayCap"), dayK: Math.min(32, Math.max(1, n("dayK"))),
+      weekCap: n("weekCap"), weekK: Math.min(32, Math.max(1, n("weekK"))),
+      cosign: n("cosign"), useAllow: $("useAllow").checked,
+      allow: $("allow").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean),
+      expiresAt: days > 0 ? S.t0 + days * DAY : 0
+    };
+  }
+
+  function grant(quiet) {
+    S.t0 = 0; S.now = 0;
+    S.m = makeMandate(readCfg());
+    S.tumb = { cap: n("dayCap"), day: -1, used: 0, moved: 0 };
+    S.ledger = []; S.nonceSeq = 1;
+    $("nonce").value = "n1";
+    if (!quiet) log(null, "GRANTED", "Mandate granted. Funds stay in the payer's wallet — this is an allowance plus a policy, not an escrow.");
+    render();
+  }
+
+  function attempt(amount, to, nonce, note) {
+    if (!S.m) { grant(true); }
+    var r = { amount: amount, to: to, nonce: nonce };
+    var d = evaluate(S.m, r, S.now);
+    var tOk = tumblingTry(S.tumb, amount, S.now);
+    if (d.ok) apply(S.m, d, r);
+    S.ledger.push({
+      t: S.now, amount: amount, to: to, nonce: nonce,
+      ok: d.ok, reason: d.ok ? "ALLOWED" : d.reason,
+      why: d.ok ? (note || "Within every bound.") : d.why,
+      tumbling: tOk
+    });
+    render();
+    return d.ok;
+  }
+
+  function log(amount, reason, why) {
+    S.ledger.push({ t: S.now, amount: amount, to: "—", nonce: "—", ok: null, reason: reason, why: why, tumbling: null });
+  }
+
+  // ---------------------------------------------------------------- render
+  function fmtT(sec) {
+    var d = Math.floor(sec / DAY), rem = sec - d * DAY;
+    var h = Math.floor(rem / 3600), mm = Math.floor((rem % 3600) / 60), ss = rem % 60;
+    return "day " + d + ", " + p2(h) + ":" + p2(mm) + (ss ? ":" + p2(ss) : "");
+  }
+  function p2(x) { return (x < 10 ? "0" : "") + x; }
+
+  function render() {
+    $("clockT").textContent = fmtT(S.now);
+    $("clockE").textContent = S.m
+      ? (S.m.revoked ? "revoked" : (S.m.expiresAt && S.now >= S.m.expiresAt ? "expired"
+          : "live · spent " + S.m.totalSpent + (S.m.totalCap ? " / " + S.m.totalCap : "")))
+      : "no mandate";
+
+    // rings
+    var out = "";
+    if (!S.m || !S.m.windows.length) {
+      out = '<div class="empty">No rolling windows configured.</div>';
+    } else {
+      for (var i = 0; i < S.m.windows.length; i++) {
+        var w = S.m.windows[i], u = usage(w, S.now);
+        var pct = Math.min(100, Math.round(u.effective / w.cap * 100));
+        out += '<div class="win"><div class="winhead"><span class="winname">' + w.name +
+          '</span><span class="winnum">' + u.effective + ' / ' + w.cap +
+          '  ·  K=' + w.K + ', ring ' + w.ringSize + '</span></div>' +
+          '<div class="bar' + (pct >= 100 ? ' hot' : '') + '"><i style="width:' + pct + '%"></i></div><div class="ring">';
+        // display in bucket order, oldest counted first
+        for (var b = u.oldest; b <= u.bucket; b++) {
+          var slot = w.ring[((b % w.ringSize) + w.ringSize) % w.ringSize];
+          var live = slot.amt !== 0 && slot.idx === b;
+          var cls = b === u.bucket ? "slot cur" : (live ? "slot counted" : "slot");
+          out += '<div class="' + cls + '"><b>' + (live ? slot.amt : "·") + '</b><span>' +
+                 (b === u.bucket ? "now" : "&minus;" + (u.bucket - b)) + '</span></div>';
+        }
+        out += '</div></div>';
+      }
+    }
+    $("rings").innerHTML = out;
+
+    // comparison
+    $("tumbTotal").textContent = S.tumb ? S.tumb.moved : 0;
+    $("rollTotal").textContent = S.m ? S.m.totalSpent : 0;
+    var gap = (S.tumb ? S.tumb.moved : 0) - (S.m ? S.m.totalSpent : 0);
+    $("cmpNote").innerHTML = gap > 0
+      ? "The naive cap let <b>" + gap + " USDC</b> more out the door than the payer's stated policy allowed. " +
+        "Both engines saw the identical request sequence."
+      : "Run the boundary burst to see the two diverge.";
+
+    // ledger
+    if (!S.ledger.length) { $("ledger").innerHTML = '<div class="empty">No attempts yet.</div>'; return; }
+    var rows = '<table><thead><tr><th>Time</th><th>Amount</th><th>To</th><th>Nonce</th>' +
+               '<th>Rolling</th><th>Naive</th><th>Reason</th></tr></thead><tbody>';
+    for (var j = S.ledger.length - 1; j >= 0; j--) {
+      var e = S.ledger[j];
+      rows += '<tr><td class="t">' + fmtT(e.t) + '</td>' +
+        '<td class="num">' + (e.amount == null ? "—" : e.amount) + '</td>' +
+        '<td class="num">' + e.to + '</td><td class="num">' + e.nonce + '</td>' +
+        '<td>' + (e.ok === null ? "—" : '<span class="pill ' + (e.ok ? "ok" : "no") + '">' + (e.ok ? "PAID" : "DENIED") + '</span>') + '</td>' +
+        '<td>' + (e.tumbling === null ? "—" : '<span class="pill ' + (e.tumbling ? "ok" : "no") + '">' + (e.tumbling ? "PAID" : "DENIED") + '</span>') + '</td>' +
+        '<td class="why">' + (e.ok === false ? '<code>' + e.reason + '</code> — ' : (e.ok === null ? '<b>' + e.reason + '</b> — ' : '')) + e.why + '</td></tr>';
+    }
+    $("ledger").innerHTML = rows + '</tbody></table>';
+  }
+
+  // ---------------------------------------------------------------- attacks
+  var attacks = {
+    // Spend the whole daily cap just before midnight, then again just after.
+    // A calendar-day cap resets and lets both through: 2x the stated limit in
+    // four minutes. The rolling window is unimpressed.
+    burst: function () {
+      grant(true);
+      var cap = n("dayCap"), tx = n("perTx");
+      var chunk = Math.min(cap, tx > 0 ? tx : cap);
+      var slices = Math.max(1, Math.ceil(cap / chunk));
+      S.now = DAY - 120;
+      log(null, "ATTACK", "Boundary burst: fill the daily cap at 23:58, then immediately refill after midnight.");
+      for (var i = 0; i < slices; i++) { attempt(chunk, "0xVENDOR", "burst-a" + i); S.now += 20; }
+      S.now = DAY + 120;
+      for (var k = 0; k < slices; k++) { attempt(chunk, "0xVENDOR", "burst-b" + k); S.now += 20; }
+    },
+    // Many small spends, well under every per-tx bound, aimed at the cap.
+    drip: function () {
+      grant(true);
+      log(null, "ATTACK", "Slow drip: repeated small spends, each individually legal, aimed at the rolling cap.");
+      var step = Math.max(1, Math.floor(n("dayCap") / 9));
+      for (var i = 0; i < 14; i++) { attempt(step, "0xVENDOR", "drip" + i); S.now += 1800; }
+    },
+    replay: function () {
+      grant(true);
+      log(null, "ATTACK", "Nonce replay: submit an identical spend twice, as a crashed-and-retrying worker would.");
+      attempt(100, "0xVENDOR", "invoice-8841");
+      S.now += 30;
+      attempt(100, "0xVENDOR", "invoice-8841");
+      S.now += 30;
+      attempt(100, "0xVENDOR", "invoice-8842", "Fresh nonce, so the genuine retry with a new invoice goes through.");
+    },
+    // Wind the clock back by exactly K+1 sub-periods to force a ring-slot
+    // collision, then try to spend the "freed" headroom.
+    rewind: function () {
+      grant(true);
+      var w = S.m.windows[0];
+      if (!w) { log(null, "SKIPPED", "Needs a rolling window."); render(); return; }
+      log(null, "ATTACK", "Backwards clock: spend, then rewind time by exactly K+1 sub-periods so the spend lands on the same ring slot, and try to reuse the cap.");
+      S.now = 40 * w.S + Math.floor(w.S / 2);
+      var half = Math.max(1, Math.floor(Math.min(w.cap, n("perTx") || w.cap) / 1));
+      attempt(half, "0xVENDOR", "rw-1");
+      S.now -= (w.K + 1) * w.S;
+      attempt(half, "0xVENDOR", "rw-2", "Refused: the engine never filters out a bucket for being 'in the future', and a commit accumulates into a live slot rather than overwriting it.");
+    },
+    redirect: function () {
+      grant(true);
+      var thr = n("cosign"), amt = Math.min(n("perTx") || thr + 50, thr + 50);
+      log(null, "ATTACK", "Co-signature redirect: get an approval for a legitimate vendor payment, then try to reuse it.");
+      S.m.cosignApproved[spendKey({ to: "0xVENDOR", amount: amt, nonce: "cs-1" })] = true;
+      log(null, "CO-SIGNED", "Approver signed exactly: " + amt + " to 0xVENDOR, nonce cs-1.");
+      attempt(amt, "0xATTACKER", "cs-1");
+      S.now += 10;
+      attempt(amt + 1, "0xVENDOR", "cs-1");
+      S.now += 10;
+      attempt(amt, "0xVENDOR", "cs-1", "Exactly what was approved, so it settles — and the approval is consumed.");
+      S.now += 10;
+      attempt(amt, "0xVENDOR", "cs-2", "The same approval cannot authorise a second spend.");
+    },
+    unlisted: function () {
+      grant(true);
+      log(null, "ATTACK", "Recipient substitution: same amount, attacker's address.");
+      attempt(120, "0xATTACKER", "u1");
+      S.now += 10;
+      attempt(120, ZERO, "u2");
+      S.now += 10;
+      attempt(120, "0xVENDOR", "u3", "The allowlisted vendor is fine.");
+    },
+    revoked: function () {
+      grant(true);
+      log(null, "ATTACK", "Race the revocation: keep spending after the payer pulls authority.");
+      attempt(100, "0xVENDOR", "r1");
+      S.now += 60;
+      S.m.revoked = true;
+      log(null, "REVOKED", "Payer revoked. On Arc this bites after one confirmation — deterministic finality means no window where a revoked mandate is still spendable.");
+      attempt(100, "0xVENDOR", "r2");
+    }
+  };
+
+  // ---------------------------------------------------------------- wiring
+  $("grant").onclick = function () { grant(false); };
+  $("revoke").onclick = function () {
+    if (!S.m) return;
+    S.m.revoked = true;
+    log(null, "REVOKED", "Immediate and permanent. The payer can also pull the ERC-20 allowance independently.");
+    render();
+  };
+  $("spend").onclick = function () {
+    var nc = $("nonce").value.trim() || ("n" + S.nonceSeq);
+    attempt(Math.floor(Number($("amt").value) || 0), $("to").value, nc);
+    S.nonceSeq += 1;
+    $("nonce").value = "n" + S.nonceSeq;
+  };
+  $("cosignBtn").onclick = function () {
+    if (!S.m) grant(true);
+    var r = { amount: Math.floor(Number($("amt").value) || 0), to: $("to").value, nonce: $("nonce").value.trim() };
+    S.m.cosignApproved[spendKey(r)] = true;
+    log(null, "CO-SIGNED", "Bound to " + r.amount + " → " + r.to + ", nonce " + r.nonce + ". Any other combination is a different hash.");
+    render();
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-adv]"), function (b) {
+    b.onclick = function () { S.now = Math.max(0, S.now + Number(b.dataset.adv)); render(); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-atk]"), function (b) {
+    b.onclick = function () { attacks[b.dataset.atk](); };
+  });
+
+  grant(true);
+  render();
+})();
+</script>
+</body>
+</html>

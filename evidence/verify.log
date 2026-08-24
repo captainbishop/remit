@@ -1,0 +1,34 @@
+=== sizes ===
+No files changed, compilation skipped
+
+╭------------------------+------------------+-------------------+--------------------+---------------------╮
+| Contract               | Runtime Size (B) | Initcode Size (B) | Runtime Margin (B) | Initcode Margin (B) |
++==========================================================================================================+
+| MandateManager         | 11,572           | 11,868            | 13,004             | 37,284              |
+|------------------------+------------------+-------------------+--------------------+---------------------|
+| MockIdentityRegistry   | 429              | 457               | 24,147             | 48,695              |
+|------------------------+------------------+-------------------+--------------------+---------------------|
+| MockUSDC               | 2,130            | 2,158             | 22,446             | 46,994              |
+|------------------------+------------------+-------------------+--------------------+---------------------|
+| MockValidationRegistry | 1,711            | 1,739             | 22,865             | 47,413              |
+|------------------------+------------------+-------------------+--------------------+---------------------|
+| WindowHandler          | 2,614            | 2,985             | 21,962             | 46,167              |
+╰------------------------+------------------+-------------------+--------------------+---------------------╯
+
+=== verify ===
+Start verifying contract `0x3744E93B9e796E05CB66311d897559B6F3860196` deployed on arc-testnet
+Constructor args: 0x00000000000000000000000036000000000000000000000000000000000000000000000000000000000000008004a818bfb912233c491871b3d84c89a494bd9e0000000000000000000000008004cb1bf31daf7788923b405b754f57aceb4272
+
+Submitting verification for [contracts/MandateManager.sol:MandateManager] 0x3744E93B9e796E05CB66311d897559B6F3860196.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `3744e93b9e796e05cb66311d897559b6f38601966a8b9a82`
+	URL: https://testnet.arcscan.app/address/0x3744e93b9e796e05cb66311d897559b6f3860196
+Contract verification status:
+Response: `OK`
+Details: `Pending in queue`
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified

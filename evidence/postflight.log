@@ -1,0 +1,15 @@
+--- state after the spend ---
+vendor balance   want 100000               100000 [1e5]
+allowance        want 1900000              1900000 [1.9e6]
+spendable        want 500000               500000 [5e5]
+
+--- gates, dry-run against live bytecode: all must revert ---
+replay nonce 1   want 0x1fb09b80           r: server returned an error response: error code 3: execution reverted, data: "0x1fb09b80"
+not allowlisted  want 0x4ccc1eec           r: server returned an error response: error code 3: execution reverted, data: "0x4ccc1eec"
+over per-tx cap  want 0x2da7c2d3           r: server returned an error response: error code 3: execution reverted, data: "0x2da7c2d3"
+payer as spender want 0x6627fd16           r: server returned an error response: error code 3: execution reverted, data: "0x6627fd16"
+zero amount      want 0x1f2a2005           erver returned an error response: error code 3: execution reverted: * , data: "0x1f2a2005"
+unknown mandate  want 0x473251f4           r: server returned an error response: error code 3: execution reverted, data: "0x473251f4"
+
+--- a legitimate second spend must still simulate clean ---
+nonce 2, 0.10    want a spendHash          0xb8b12f2d791271d31509a214891e12df7786494f58d29b430a665889ce6c52e1

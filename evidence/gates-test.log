@@ -1,0 +1,17 @@
+=== are the three mandates live at all? (expect true,true,true) ===
+true
+true
+true
+
+--- salt 3 identity: agent 16330 belongs to 0x2F061aA5..., not our delegate
+    expecting IdentityNotHeld()  0x6eab756c
+Error: server returned an error response: error code 3: execution reverted, data: "0x6eab756c"
+--- salt 4 credential: live response is 1, gate demands 100
+    expecting CredentialMissing()  0x9e586322
+Error: server returned an error response: error code 3: execution reverted, data: "0x9e586322"
+--- salt 5 credential: response 1 passes minResponse 1, then 97-day age fails
+    expecting CredentialStale()  0xca36b069
+Error: server returned an error response: error code 3: execution reverted, data: "0xca36b069"
+
+=== control: mandate 1 has no gates, same shape of call should SUCCEED ===
+0x5540b47cd748c0818064012a49324118960a6e4f3287fd62080f3db04041bf05

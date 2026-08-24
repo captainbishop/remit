@@ -1,0 +1,7 @@
+--- allowance restored (expect 1700000) ---
+1700000 [1.7e6]
+--- spendable M1 / M2 (expect 500000 both, back to perTxCap-bound) ---
+500000 [5e5]
+500000 [5e5]
+--- gas on the restore ---
+gasUsed              38338

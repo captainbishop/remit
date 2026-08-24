@@ -1,0 +1,13 @@
+=== salt 3, identity gate (agentId 16330, no owner pin), flags 25 ===
+  predicted 0xd97ac489ddcff3d515cbdf5b5a04d283f09c78b6bfd4c0e0211e82372ad4af61
+  returned  0xd97ac489ddcff3d515cbdf5b5a04d283f09c78b6bfd4c0e0211e82372ad4af61
+=== salt 4, credential gate minResponse=100, no staleness, flags 41 ===
+  predicted 0x196db6b1679927aa20e05db057939393741f22e8ea93a748c2706ea78b11312a
+  returned  0x196db6b1679927aa20e05db057939393741f22e8ea93a748c2706ea78b11312a
+=== salt 5, credential gate minResponse=1, maxStaleness=86400, flags 41 ===
+  predicted 0xf1836df74ff8dfc0f79180085b2fbf7442cf8a860ae7bc07a04347aa69063986
+  returned  0xf1836df74ff8dfc0f79180085b2fbf7442cf8a860ae7bc07a04347aa69063986
+=== gas estimates, so we know what the three sends will cost ===
+128924
+152218
+152254

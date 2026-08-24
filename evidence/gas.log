@@ -1,0 +1,366 @@
+Compiling 12 files with Solc 0.8.28
+Solc 0.8.28 finished in 4.01s
+Compiler run successful with warnings:
+Warning (2018): Function state mutability can be restricted to pure
+   --> test/Base.t.sol:279:5:
+    |
+279 |     function assertRevertedWith(bytes memory err, bytes4 expected, string memory ctx) internal {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+
+Ran 14 tests for test/Views.t.sol:ViewsTest
+[PASS] test_isAllowedRecipient_withAnAllowlist() (gas: 229318)
+[PASS] test_isAllowedRecipient_withoutAnAllowlist() (gas: 197915)
+[PASS] test_isLive_tracksEveryLifecycleCondition() (gas: 285318)
+[PASS] test_policyHeadroom_expiryOnlyMandateIsUnlimited() (gas: 179208)
+[PASS] test_policyHeadroom_isZeroWhenNotSpendable() (gas: 369477)
+[PASS] test_policyHeadroom_reportsTheBindingConstraint() (gas: 639796)
+[PASS] test_policyHeadroom_windowCanBeTheBindingConstraint() (gas: 961953)
+[PASS] test_spendHash_dependsOnEveryField() (gas: 252208)
+[PASS] test_spendHash_isDeterministic() (gas: 368997)
+[PASS] test_spendable_clampsToTheAllowance() (gas: 443848)
+[PASS] test_spendable_clampsToTheBalance() (gas: 352383)
+[PASS] test_spendable_isAchievable() (gas: 450066)
+[PASS] test_spendable_onUnknownMandate_isZero() (gas: 10708)
+[PASS] test_unknownMandate_readsAsEmptyRatherThanReverting() (gas: 54100)
+Suite result: ok. 14 passed; 0 failed; 0 skipped; finished in 5.12ms (3.46ms CPU time)
+
+Ran 26 tests for test/Creation.t.sol:CreationTest
+[PASS] test_constructor_zeroUsdc_reverts() (gas: 529328)
+[PASS] test_createMandate_allowlistFlagMismatch_reverts() (gas: 45837)
+[PASS] test_createMandate_cosignFlagWithoutCosigner_reverts() (gas: 46009)
+[PASS] test_createMandate_cosignerWithoutFlag_reverts() (gas: 48473)
+[PASS] test_createMandate_credentialWithZeroMinResponse_reverts() (gas: 143209)
+[PASS] test_createMandate_emitsMandateCreated() (gas: 156631)
+[PASS] test_createMandate_expiryAloneIsEnoughOfABound() (gas: 148546)
+[PASS] test_createMandate_expiryNotAfterNotBefore_reverts() (gas: 45894)
+[PASS] test_createMandate_flagWithoutValue_reverts() (gas: 43367)
+[PASS] test_createMandate_fourWindows_isAccepted() (gas: 258807)
+[PASS] test_createMandate_gateWithoutRegistry_reverts() (gas: 2675732)
+[PASS] test_createMandate_sameSaltTwice_reverts() (gas: 179338)
+[PASS] test_createMandate_storesEveryField() (gas: 206022)
+[PASS] test_createMandate_tooManyBuckets_reverts() (gas: 115227)
+[PASS] test_createMandate_tooManyWindows_reverts() (gas: 52335)
+[PASS] test_createMandate_totalCapFlagMismatch_reverts() (gas: 46033)
+[PASS] test_createMandate_unbounded_reverts() (gas: 43052)
+[PASS] test_createMandate_valueWithoutFlag_reverts() (gas: 43540)
+[PASS] test_createMandate_windowLengthNotDivisibleByBuckets_reverts() (gas: 115506)
+[PASS] test_createMandate_zeroAddressInAllowlist_reverts() (gas: 166460)
+[PASS] test_createMandate_zeroLengthOrCapOrBuckets_reverts() (gas: 324913)
+[PASS] test_createMandate_zeroSpender_reverts() (gas: 45210)
+[PASS] test_domainSeparator_isRemitV1() (gas: 8808)
+[PASS] test_flagConstants_matchTheContract() (gas: 60273)
+[PASS] test_gasBounds_areWhatTheModelAssumes() (gas: 16629)
+[PASS] test_mandateId_isDerivedFromDomainChainContractPayerAndSalt() (gas: 292160)
+Suite result: ok. 26 passed; 0 failed; 0 skipped; finished in 5.29ms (4.15ms CPU time)
+
+Ran 25 tests for test/Bounds.t.sol:BoundsTest
+[PASS] test_allowlist_isAddressValuedNotStringValued() (gas: 216417)
+[PASS] test_allowlist_multipleRecipients() (gas: 586201)
+[PASS] test_allowlist_permitsNamedRecipientOnly() (gas: 445086)
+[PASS] test_amountAboveUint96_reverts_beforeTheCapIsConsulted() (gas: 222351)
+[PASS] test_expiry_isExclusive() (gas: 451535)
+[PASS] test_notBefore_isInclusive() (gas: 465431)
+[PASS] test_perTxCap_doesNotBoundTheTotal() (gas: 619643)
+[PASS] test_perTxCap_isInclusiveAtTheCap() (gas: 358506)
+[PASS] test_perTxCap_oneUnitOver_reverts() (gas: 237133)
+[PASS] test_revoke_byPayer_stopsEverything() (gas: 468313)
+[PASS] test_revoke_bySpender_isAlsoPermitted() (gas: 215324)
+[PASS] test_revoke_byStranger_reverts() (gas: 210892)
+[PASS] test_revoke_doesNotTouchTheUnderlyingAllowance() (gas: 231010)
+[PASS] test_revoke_isIdempotent() (gas: 241702)
+[PASS] test_revoke_outranksAValidCosignature() (gas: 333766)
+[PASS] test_revoke_unknownMandate_reverts() (gas: 34414)
+[PASS] test_spend_movesMoneyAndRecordsIt() (gas: 428932)
+[PASS] test_spend_neverCustodiesFunds() (gas: 497992)
+[PASS] test_spend_unknownMandate_reverts() (gas: 60556)
+[PASS] test_totalCap_doesNotRecoverWithTime() (gas: 387067)
+[PASS] test_totalCap_exactFitThenRefusal() (gas: 669595)
+[PASS] test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping() (gas: 414061)
+[PASS] test_wrongSpender_reverts() (gas: 256446)
+[PASS] test_zeroAmount_reverts() (gas: 222232)
+[PASS] test_zeroRecipient_reverts_evenWithNoAllowlist() (gas: 219894)
+Suite result: ok. 25 passed; 0 failed; 0 skipped; finished in 8.10ms (6.55ms CPU time)
+
+Ran 13 tests for test/Idempotency.t.sol:IdempotencyTest
+[PASS] test_blocklistedPayer_unwindsTheEntireSpend() (gas: 373272)
+[PASS] test_blocklistedRecipient_unwindsTheEntireSpend() (gas: 666219)
+[PASS] test_deniedSpends_consumeNothing() (gas: 672743)
+[PASS] test_failedTransfer_rollsBackSoTheSameSpendCanBeRetried() (gas: 629435)
+[PASS] test_identicalSpendsUnderDifferentNonces_bothSucceed() (gas: 482665)
+[PASS] test_insufficientAllowance_unwindsAndIsRetryable() (gas: 542357)
+[PASS] test_insufficientBalance_unwinds() (gas: 476951)
+[PASS] test_nonceIsCheckedBeforeTheCaps() (gas: 362381)
+[PASS] test_noncesAreScopedToTheMandate() (gas: 633511)
+[PASS] test_replayingANonceWithADifferentPayload_stillReverts() (gas: 364558)
+[PASS] test_replayingANonce_reverts() (gas: 408792)
+[PASS] test_transferReturningFalse_raisesTransferFailed() (gas: 360810)
+[PASS] test_windowBreach_doesNotPartiallyConsumeTheWindow() (gas: 692567)
+Suite result: ok. 13 passed; 0 failed; 0 skipped; finished in 9.42ms (7.78ms CPU time)
+
+Ran 17 tests for test/Cosign.t.sol:CosignTest
+[PASS] test_ATTACK_inflatingAnApprovedSpend_isRefused() (gas: 389465)
+[PASS] test_ATTACK_redirectingAnApprovedSpend_isRefused() (gas: 404156)
+[PASS] test_ATTACK_swappingTheReference_isRefused() (gas: 390149)
+[PASS] test_DOCUMENTED_SOFT_SPOT_perTxCapBelowThresholdMakesCosignUnreachable() (gas: 350531)
+[PASS] test_aboveTheThreshold_requiresASignature() (gas: 322906)
+[PASS] test_approval_isConsumedByTheSpend() (gas: 447278)
+[PASS] test_approval_survivesAnUnrelatedFailure() (gas: 673054)
+[PASS] test_approveCosign_onAMandateWithoutCosigning_reverts() (gas: 195857)
+[PASS] test_approveCosign_onUnknownMandate_reverts() (gas: 34687)
+[PASS] test_atTheThreshold_noSignatureRequired() (gas: 384164)
+[PASS] test_cosignRequired_carriesTheHashToApprove() (gas: 555496)
+[PASS] test_cosign_isCheckedAfterEveryCap() (gas: 319884)
+[PASS] test_onlyTheNamedCosignerMayApprove() (gas: 265299)
+[PASS] test_spendHash_isBoundToChainAndContract() (gas: 208558)
+[PASS] test_withApproval_theSpendGoesThrough() (gas: 462299)
+[PASS] test_withdrawCosign_byAStranger_reverts() (gas: 290723)
+[PASS] test_withdrawCosign_revokesAnUnusedApproval() (gas: 415032)
+Suite result: ok. 17 passed; 0 failed; 0 skipped; finished in 9.84ms (6.40ms CPU time)
+
+Ran 18 tests for test/Gates.t.sol:GatesTest
+[PASS] test_ATTACK_attestationFromAnUnnamedValidator_denies() (gas: 374924)
+[PASS] test_ATTACK_realAttestationAboutADifferentAgent_denies() (gas: 373002)
+[PASS] test_ATTACK_transferringTheAgentIdentity_killsTheMandate() (gas: 515262)
+[PASS] test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent() (gas: 613777)
+[PASS] test_bothGates_mustPassIndependently() (gas: 719875)
+[PASS] test_credentialGate_failingAttestation_denies() (gas: 366227)
+[PASS] test_credentialGate_fallsBackToTheIdentityGatesAgentId() (gas: 604326)
+[PASS] test_credentialGate_missingAttestation_denies() (gas: 363876)
+[PASS] test_credentialGate_passesWithAFreshAttestation() (gas: 456670)
+[PASS] test_credentialGate_revertingRegistry_alsoDenies() (gas: 406796)
+[PASS] test_credentialGate_staleAttestation_denies() (gas: 735883)
+[PASS] test_credentialGate_stalenessBoundaryIsInclusive() (gas: 559077)
+[PASS] test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement() (gas: 504313)
+[PASS] test_gates_areCheckedBeforeTheCaps() (gas: 363876)
+[PASS] test_identityGate_burnedIdentity_deniesLegibly() (gas: 301820)
+[PASS] test_identityGate_expectedOwnerMismatch_reportsIdentityTransferred() (gas: 282385)
+[PASS] test_identityGate_passesWhileTheSpenderHoldsTheIdentity() (gas: 414117)
+[PASS] test_identityGate_unpinnedExpectedOwner_onlyRequiresTheCallerToHoldIt() (gas: 393742)
+Suite result: ok. 18 passed; 0 failed; 0 skipped; finished in 24.01ms (22.04ms CPU time)
+
+Ran 14 tests for test/Windows.t.sol:WindowsTest
+[PASS] test_ATTACK_backwardsClockCannotRefillTheWindow() (gas: 463087)
+[PASS] test_ATTACK_rewindOntoTheSameRingSlot_accumulatesRatherThanOverwrites() (gas: 654910)
+[PASS] test_ATTACK_tumblingWindowBoundaryBurst_findsNoHole() (gas: 3203898)
+[PASS] test_DOCUMENTED_COST_fullRefillTakesWindowPlusOneSubPeriod() (gas: 665172)
+[PASS] test_DOCUMENTED_COST_sustainedThroughputIsKOverKPlusOne() (gas: 7223331)
+[PASS] test_REGRESSION_spendLateInASubBucketIsStillCountedKBucketsLater() (gas: 464003)
+[PASS] test_headroom_returnsIncrementallyAsBucketsAgeOut() (gas: 2345891)
+[PASS] test_higherBucketCount_shrinksTheOverhead() (gas: 521681)
+[PASS] test_longIdleGap_clearsTheWindowCompletely() (gas: 561908)
+[PASS] test_multipleWindows_denialNamesTheBindingWindow() (gas: 856543)
+[PASS] test_refusalByLaterWindow_doesNotConsumeEarlierWindows() (gas: 703389)
+[PASS] test_repeatedIdenticalTimestamps_bothCount() (gas: 601377)
+[PASS] test_windowRemaining_onUnconfiguredIndex_isZero() (gas: 183016)
+[PASS] test_windowsAreIsolatedPerMandate() (gas: 733052)
+Suite result: ok. 14 passed; 0 failed; 0 skipped; finished in 12.76s (24.66ms CPU time)
+
+Ran 4 tests for test/WindowFuzz.t.sol:WindowFuzzTest
+[PASS] testFuzz_exactTrailingWindowNeverExceedsTheCap(uint256,uint256) (runs: 512, μ: 17485806, ~: 15420088)
+[PASS] testFuzz_greedyAdversaryCannotBreachTheExactWindow(uint256,uint256) (runs: 512, μ: 13290011, ~: 11530181)
+[PASS] testFuzz_lifetimeCapIsNeverExceeded(uint256) (runs: 512, μ: 5118651, ~: 5130803)
+[PASS] testFuzz_twoWindowsBothHoldExactly(uint256) (runs: 512, μ: 16388103, ~: 16440468)
+Suite result: ok. 4 passed; 0 failed; 0 skipped; finished in 12.80s (42.18s CPU time)
+
+Ran 5 tests for test/WindowInvariant.t.sol:WindowInvariantTest
+[PASS] invariant_exactTrailingWindowNeverExceedsTheCap() (runs: 256, calls: 16384, reverts: 0)
+
+╭---------------+-----------+-------+---------+----------╮
+| Contract      | Selector  | Calls | Reverts | Discards |
++========================================================+
+| WindowHandler | idle      | 5432  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendAll  | 5463  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendSome | 5489  | 0       | 0        |
+╰---------------+-----------+-------+---------+----------╯
+
+[PASS] invariant_theContractsBooksAgreeWithTheLedger() (runs: 256, calls: 16384, reverts: 0)
+
+╭---------------+-----------+-------+---------+----------╮
+| Contract      | Selector  | Calls | Reverts | Discards |
++========================================================+
+| WindowHandler | idle      | 5432  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendAll  | 5463  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendSome | 5489  | 0       | 0        |
+╰---------------+-----------+-------+---------+----------╯
+
+[PASS] invariant_theWindowIsTheOnlyThingThatEverRefuses() (runs: 256, calls: 16384, reverts: 0)
+
+╭---------------+-----------+-------+---------+----------╮
+| Contract      | Selector  | Calls | Reverts | Discards |
++========================================================+
+| WindowHandler | idle      | 5432  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendAll  | 5463  | 0       | 0        |
+|---------------+-----------+-------+---------+----------|
+| WindowHandler | spendSome | 5489  | 0       | 0        |
+╰---------------+-----------+-------+---------+----------╯
+
+[PASS] test_greedyHandlerReachesTheCap_soRefusalIsExercised() (gas: 896588)
+[PASS] test_handlerCanActuallySpend_soTheInvariantsAreNotVacuous() (gas: 3828690)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 12.85s (30.94s CPU time)
+
+╭------------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| contracts/MandateManager.sol:MandateManager Contract |                 |        |        |        |         |
++=============================================================================================================+
+| Deployment Cost                                      | Deployment Size |        |        |        |         |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                              2557693 |           11964 |        |        |        |         |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                      |                 |        |        |        |         |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                        | Min             | Avg    | Median | Max    | # Calls |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| DOMAIN                                               |             283 |    283 |    283 |    283 |       4 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_ALLOWLIST                                          |             237 |    237 |    237 |    237 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_COSIGN                                             |             282 |    282 |    282 |    282 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_CREDENTIAL                                         |             258 |    258 |    258 |    258 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_EXPIRY                                             |             302 |    302 |    302 |    302 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_IDENTITY                                           |             239 |    239 |    239 |    239 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_PER_TX                                             |             238 |    238 |    238 |    238 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| F_TOTAL                                              |             260 |    260 |    260 |    260 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| MAX_BUCKETS                                          |             240 |    240 |    240 |    240 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| MAX_WINDOWS                                          |             239 |    239 |    239 |    239 |       1 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| approveCosign                                        |           23979 |  45682 |  53114 |  53114 |      14 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| createMandate                                        |           28630 | 128623 | 128465 | 241218 |    1159 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getMandate                                           |           10425 |  10425 |  10425 |  10425 |   15444 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getWindow                                            |            3014 |   3014 |   3014 |   3014 |       2 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| isAllowedRecipient                                   |            2782 |   4172 |   5007 |   5007 |       8 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| isCosignApproved                                     |            2609 |   2609 |   2609 |   2609 |       7 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| isLive                                               |            2612 |   4885 |   5217 |   5219 |      13 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| isNonceUsed                                          |            2653 |   2653 |   2653 |   2653 |      12 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| policyHeadroom                                       |            2711 |  26508 |  40879 |  43828 |      12 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| revoke                                               |           23773 |  29598 |  30808 |  32945 |      10 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| spend                                                |           24898 | 105321 | 110380 | 201786 |  125708 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| spendHash                                            |            1003 |   1003 |   1003 |   1003 |      26 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| spendable                                            |            2541 |  38371 |  49945 |  52665 |      10 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| windowRemaining                                      |            2862 |  29869 |  35342 |  67443 |   68032 |
+|------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| withdrawCosign                                       |           24677 |  25789 |  25789 |  26901 |       2 |
+╰------------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+╭---------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| test/WindowInvariant.t.sol:WindowHandler Contract |                 |        |        |        |         |
++==========================================================================================================+
+| Deployment Cost                                   | Deployment Size |        |        |        |         |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                            621797 |            3145 |        |        |        |         |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                   |                 |        |        |        |         |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                     | Min             | Avg    | Median | Max    | # Calls |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| attempts                                          |            2328 |   2328 |   2328 |   2328 |       1 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| entry                                             |            9108 |   9169 |   9158 |   9208 |      67 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| idle                                              |             450 |   3287 |   3556 |   3736 |   16356 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| ledgerLength                                      |            2337 |   2337 |   2337 |   2337 |       5 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| refusals                                          |            2371 |   2371 |   2371 |   2371 |       1 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| setMandate                                        |           43939 |  43939 |  43939 |  43939 |       5 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| spendAll                                          |           96077 | 202380 | 206670 | 340821 |   16467 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| spendSome                                         |           89794 | 159819 | 165420 | 300906 |   16547 |
+|---------------------------------------------------+-----------------+--------+--------+--------+---------|
+| unexpectedRefusal                                 |            2394 |   2394 |   2394 |   2394 |       3 |
+╰---------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+╭-------------------------------------------------------------+-----------------+-------+--------+-------+---------╮
+| test/mocks/MockRegistries.sol:MockIdentityRegistry Contract |                 |       |        |       |         |
++==================================================================================================================+
+| Deployment Cost                                             | Deployment Size |       |        |       |         |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                                      146071 |             457 |       |        |       |         |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                                             |                 |       |        |       |         |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                                               | Min             | Avg   | Median | Max   | # Calls |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| burn                                                        |           21687 | 21687 |  21687 | 21687 |       1 |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| mint                                                        |           44102 | 44102 |  44102 | 44102 |     136 |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| ownerOf                                                     |            2487 |  2499 |   2501 |  2501 |      11 |
+|-------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| transferAgent                                               |           27024 | 27032 |  27036 | 27036 |       3 |
+╰-------------------------------------------------------------+-----------------+-------+--------+-------+---------╯
+
+╭---------------------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| test/mocks/MockRegistries.sol:MockValidationRegistry Contract |                 |        |        |        |         |
++======================================================================================================================+
+| Deployment Cost                                               | Deployment Size |        |        |        |         |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                        423236 |            1739 |        |        |        |         |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                               |                 |        |        |        |         |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                                 | Min             | Avg    | Median | Max    | # Calls |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| clear                                                         |           45741 |  45741 |  45741 |  45741 |       4 |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getValidationStatus                                           |           16499 |  16885 |  16499 |  18431 |      19 |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| setRevertOnUnknown                                            |           43606 |  43606 |  43606 |  43606 |       1 |
+|---------------------------------------------------------------+-----------------+--------+--------+--------+---------|
+| setStatus                                                     |           42092 | 170202 | 178592 | 178592 |     145 |
+╰---------------------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+╭-------------------------------------------+-----------------+-------+--------+-------+---------╮
+| test/mocks/MockUSDC.sol:MockUSDC Contract |                 |       |        |       |         |
++================================================================================================+
+| Deployment Cost                           | Deployment Size |       |        |       |         |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                    513991 |            2158 |       |        |       |         |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                           |                 |       |        |       |         |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                             | Min             | Avg   | Median | Max   | # Calls |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| allowance                                 |            2755 |  2755 |   2755 |  2755 |      10 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| approve                                   |           24202 | 45833 |  46486 | 46486 |     141 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| balanceOf                                 |            2539 |  2539 |   2539 |  2539 |   15474 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| burnFrom                                  |           27284 | 31863 |  34153 | 34153 |       3 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| mint                                      |           68374 | 68374 |  68374 | 68374 |     136 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| setBlocklisted                            |           22400 | 36965 |  44248 | 44248 |       3 |
+|-------------------------------------------+-----------------+-------+--------+-------+---------|
+| setReturnFalseOnTransfer                  |           21751 | 36359 |  43663 | 43663 |       3 |
+╰-------------------------------------------+-----------------+-------+--------+-------+---------╯
+
+
+Ran 9 test suites in 13.77s (38.47s CPU time): 136 tests passed, 0 failed, 0 skipped (136 total tests)

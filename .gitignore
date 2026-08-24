@@ -1,0 +1,49 @@
+# Foundry build artefacts. Regenerable with `forge build`.
+out/
+cache/
+broadcast/
+
+# NOTE: lib/ is deliberately NOT ignored. forge-std 1.9.6 is vendored into this
+# repository as ordinary tracked files rather than pulled as a git submodule.
+#
+# Two reasons, and the second is the load-bearing one. First, `git clone` followed by
+# `forge test` has to work on the first attempt without a --recursive flag anyone can
+# forget. Second, and more important: the 140 tests and every gas figure in DESIGN.md
+# are properties of *these exact bytes* compiled by solc 0.8.28 at optimizer_runs = 200,
+# and the deployed bytecode at 0x3744E93B9e796E05CB66311d897559B6F3860196 is verified
+# on-chain against them. Re-resolving the dependency risks silently fetching a different
+# forge-std and invalidating the whole baseline. Vendoring is what makes the build
+# reproducible, which for an audited contract matters more than a tidy dependency graph.
+#
+# Cost of this choice, stated honestly: `forge update` will fight it, and the diff on any
+# future forge-std bump will be large. Bump deliberately, in its own commit, and re-run
+# the full suite plus `forge test --profile deep` afterwards.
+
+# Node
+node_modules/
+
+# Scratch logs from build and test runs, tee'd at the project root for troubleshooting.
+# Ignored by default so the repo does not accumulate them. A log gets PROMOTED into
+# evidence/ once it proves a published number or records a live-chain observation, and
+# evidence/README.md maps every file there to the specific claim it backs.
+*.log
+!evidence/*.log
+
+# Editors and OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Never commit these. There is no .env in this project and there should never be one:
+# both testnet wallets live in Foundry's encrypted keystore under ~/.foundry/keystores,
+# outside this tree, and are referenced by account NAME (--account remit-testnet) so no
+# key material ever enters a command, a shell history, or a file. Arc's own tutorial uses
+# `cast wallet new` with no path plus a plaintext PRIVATE_KEY in .env; this project
+# deliberately deviates. The keystore password belongs in a password manager or on paper,
+# never in this folder.
+.env
+*.key
+*.keystore
+keystore*
+*.mnemonic

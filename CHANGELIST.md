@@ -1,0 +1,151 @@
+# Redeploy changelist
+
+## Why this file exists
+
+`MandateManager` has no proxy, no `initialize`, no `upgradeTo`, no `delegatecall`,
+no `selfdestruct`, and no owner or admin role. It has a constructor and three
+`immutable` fields. It cannot be modified after deployment by anyone, including
+its authors.
+
+That is deliberate and it is the strongest thing the contract does. A payer who
+grants a mandate is trusting the rules they read, not the people who wrote them.
+An upgrade hatch would mean that trust was misplaced — whoever held the key could
+raise a cap, drop an allowlist, or remove a cosigner requirement after the fact.
+The absence of an upgrade path is the feature.
+
+The cost of that choice is that "fix the contract" always means "deploy a new
+contract at a new address and migrate." This file is the list of what would go
+into that next deployment, so the decision is made once, deliberately, from a
+written list — rather than piecemeal every time something turns up.
+
+## Standing answer: has a bug been found since deployment?
+
+**No.** As of 2026-08-24, with ten live transactions and two live mandates
+exercised against `0x3744E93B9e796E05CB66311d897559B6F3860196`, nothing
+discovered on-chain has been a defect in the deployed bytecode.
+
+What has actually been found sorts into four piles, and the distinction matters:
+
+**Documentation errors — real, need fixing, cost nothing.** The published
+marginal spend of ~142,500 gas was wrong; it compared a *first-ever* spend
+against a bare transfer. The true steady-state marginal spend is 177,429 and the
+policy overhead is 103,479, with 216,458 being the worst case rather than the
+typical one. Separately, the contract size was published as 11,964 bytes when
+the measured figures are 11,572 runtime and 11,868 initcode. Both are fixed in
+prose, not in Solidity.
+
+**Assumptions the contract already got right, now confirmed against live data.**
+The 6-decimal truncation of Arc's 18-decimal balances was already documented
+correctly at `MandateManager.sol:856-863`, including the direction of the error.
+`getValidationStatus` really does return the six-value tuple the interface
+expects. `ownerOf` really does revert for a nonexistent token rather than
+returning the zero address — Arc's registry is OpenZeppelin v5 and raises
+`ERC721NonexistentToken(uint256)` (`0x7e273289`), so the `try/catch` at line 628
+has something real to catch. These are verifications, not discoveries, and a
+local mock could not have established any of them.
+
+**Design warts that were known and documented before deploying.** The credential
+gate accepts an attestation with no agent binding, which has a test named after
+the fact. `perTxCap < cosignThreshold` is accepted at grant time. Whether an
+EIP-7702-delegated EOA counts as an EOA on the Memo and Multicall3From paths is
+unresolved. None of these are new information.
+
+**My own analysis mistakes, with zero contract impact.** The direction of the
+cosign gas delta, a 160,000 prediction that came in at 193,837, a mis-designed
+allowance-ceiling test, three refuted balance-rounding models, and a call to a
+`getBucket` view that does not exist. All corrected in the record.
+
+## When to cut the next deployment
+
+Not yet, and for a concrete reason beyond tidiness.
+
+Every gas figure measured this session is a property of *this exact bytecode*
+compiled at `optimizer_runs = 200`. The 177,429 marginal spend, the 38,338
+allowance reset, the 20,164 cosigner-slot delta, the 212-gas cosign gate, the
+~5,333 first-credit premium — change one line and every one of those moves, and
+the baseline that took a full session to establish is gone. The two live mandates
+and their spend history are also tied to this address; a new deployment orphans
+them and the ring-bucket state has to be rebuilt from scratch.
+
+So: finish the live investigation against this deployment first. Cut v2 when the
+ERC-8004 gate work (#32) is done, the 53,114 question (#31) is settled, and the
+docs are corrected (#33) — then make every change below in one pass, re-run the
+140 tests plus `forge test --profile deep`, redeploy, and re-measure.
+
+*Status, 2026-08-24:* #32 is done and #31 is settled — the 53,114 match was a
+coincidence between two figures measured on different bases, and settling it
+exposed a larger problem with the published USDC premium numbers that #42 now
+tracks. #33 is the remaining blocker.
+
+## The changelist
+
+**Certain, and free.** Update the file-header banner in `MandateManager.sol`. It was
+correctly rewritten at deploy time — `NOT DEPLOYED. NEVER RUN AGAINST A LIVE CHAIN`
+became `NOT AUDITED. LIVE ON ARC TESTNET SINCE 2026-08-24`, because the first was
+false the moment the contract landed and a banner that lies trains readers to ignore
+it. But its body has since gone stale: it says "one mandate has been granted and one
+spend executed live" and "cosignature, both ERC-8004 gates and revoke have 139 passing
+tests and zero live transactions." As of 2026-08-24 there are **five** live mandates,
+four spends, and fifteen live transactions all with status 1; cosignature has three of
+them, and both ERC-8004 gates have been exercised against Arc's live registries. Only
+`revoke` still has zero live transactions. The test count is now 140. The unaudited /
+no-real-money half of the warning stays exactly as it is.
+
+**Near-certain.** Revert `BadConfig` at grant time when `F_COSIGN` is set and
+`perTxCap < cosignThreshold`. Today that combination is accepted and silently
+produces a mandate whose cosign gate can never fire, because no amount can be
+simultaneously under the per-transaction cap and over the cosign threshold. The
+payer believes a human approves large spends; no spend is ever large enough to
+ask. It is a footgun rather than an exploit — no funds are at risk and the caps
+still bind — but it defeats a control the payer deliberately configured, which is
+the worst kind of silent failure.
+
+**Likely, additive, low risk.** A `spendableAcross(bytes32[] mandateIds)` view.
+Demonstrated live on 2026-08-24: with the allowance at 90,000, two mandates each
+returned `spendable` = 90,000, summing to 180,000, and 50,000 dry-runs succeeded
+on both. `spendable()` is honest per-mandate and silent about the joint
+constraint, because the allowance is global and the view is not. No funds are at
+risk — the losing delegate's transfer reverts — but two delegates sharing a payer
+have no way to see the shared ceiling. A view that intersects the policy headroom
+of several mandates with the single allowance would expose it. This does not fix
+the race, which is inherent to layering per-mandate policy over one ERC-20
+allowance; it makes it visible.
+
+**Committed, as of 2026-08-24.** `F_ALLOWLIST_ROOT` on bit 7, storing a merkle
+root instead of an `address[]`, so the vendors a payer has authorised but not yet
+paid stop being public in the grant calldata. Previously listed here as undecided
+and gated on the privacy decision; that decision is made — privacy is a required
+user-facing option in Remit, and this is the one piece of it that belongs inside
+the contract. See PRIVACY.md for the full four-layer argument, including why it
+must not be named `F_PRIVATE`. Bit 7 is the last free bit in `uint8 flags`;
+widening to `uint16` fits in slot 3's three spare bytes but would invalidate the
+packing measurements. It needs grant-time validation beside the existing
+invariant at line 363, a new branch in `spend`, and its own tests.
+
+**Open questions that must be answered before the list is final.** Whether an
+EIP-7702-delegated EOA counts as an EOA for the Memo and Multicall3From paths —
+now load-bearing beyond its original scope, because stealth-address sweeps on Arc
+depend on gas sponsorship (PRIVACY.md, layer 2). Whether the credential gate's
+no-agent-binding shape should stay permitted, now that the attestation with
+response 1 and the tag `"verified"` has been confirmed live and shown to be
+refused by a correctly configured gate.
+
+*Resolved since this file was written:* the ERC-8004 gate testing (#32) turned up
+no contract defect. All three gates fired with their predicted selectors against
+Arc's live registries with a passing control, and the grant-time guard at line 407
+already refuses `minResponse == 0`. Nothing to change.
+
+## What does not go in
+
+**No privacy mechanism inside `MandateManager` beyond the allowlist root.** This
+previously read "nothing that hides amounts or recipients," which was wrong, and
+the reasoning behind the correction is in PRIVACY.md. Amounts and recipients
+genuinely can be hidden — just not by this contract. Because `createMandate` sets
+`payer: msg.sender` (line 371), any contract that can hold an allowance can be a
+Remit payer, so a shielded vault composes *above* Remit without touching it.
+Privacy is a payer, not a flag. That is what keeps it out of this changelist
+rather than an argument that it should not exist.
+
+No upgrade mechanism. If a future version needs one, that is a different product
+with a different trust story, and it should be argued for on its own terms rather
+than added because it would have been convenient this once.

@@ -1,0 +1,13 @@
+--- allowance now (expect 90000) ---
+90000 [9e4]
+--- policyHeadroom M1 / M2 (expect 500000 both, unchanged) ---
+500000 [5e5]
+500000 [5e5]
+--- spendable M1 / M2 (expect 90000 EACH, summing to 180000) ---
+90000 [9e4]
+90000 [9e4]
+--- dry-run 50000 on M1 (expect success, a hash) ---
+0x7b74538358f5e3afa48e598cd62a771179c3d6236e35aa313d4f1985a5b88bb7
+--- dry-run 50000 on M2 (expect success, a hash) ---
+0xc026779933e0cb570d87256f0556c0e1e14ab4cc4ea35732c2b936b7e89dce21
+both simulated fine; 50000+50000 = 100000 against a 90000 allowance

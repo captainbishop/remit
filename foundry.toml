@@ -1,0 +1,133 @@
+[profile.default]
+src = "contracts"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+
+# 200 is correct, and this is now measured rather than guessed. Do not raise it without
+# reading the rest of this comment.
+#
+# `optimizer_runs` is solc's "expected calls per deployment" — it trades bytecode size
+# for execution cost. The obvious argument for raising it is that deployment happens
+# once (2,557,693 gas predicted, 2,557,453 actually charged on Arc Testnet, ~0.0537 USDC)
+# while `spend` runs forever, so a low value looks like it optimises the wrong end. That
+# argument was tested on 2026-08-24 by building the whole tree at 10000 and re-running the
+# gas report. It is wrong:
+#
+#   min gas, same deterministic path      200      10000    delta
+#   createMandate                      28,630     28,630        0
+#   spend                              24,898     24,892       -6
+#   revoke                             23,773     23,767       -6
+#   deployment size (bytes)            11,964     15,236   +3,272   <- SEE BELOW
+#
+# Six gas on a spend, for 27% of the bytecode. The reason is structural: a spend's cost
+# is (buckets + 1) cold SLOADs per window at 2,100 gas each, plus an external
+# transferFrom. Both are priced by the EVM, not by codegen. The optimizer can only win
+# on instruction selection and layout, which is noise at this scale. Raising `runs`
+# cannot help a function whose cost is storage and call overhead.
+#
+# Deploying to Arc on 2026-08-24 confirmed this from the other direction: ~32,700 gas of a
+# real spend is Arc's own native-USDC accounting inside `transferFrom`, which no compiler
+# flag can reach. The gas case for raising `runs` is weaker on the real chain, not stronger.
+#
+# THE SIZE ROW ABOVE IS WRONG and is kept only because the delta is the point. `forge build
+# --sizes` reports **11,572 runtime / 11,868 initcode**, and the deployed contract's
+# on-chain code length independently confirms 11,572. 11,964 matches neither column; it was
+# published in three files for weeks on a single unverified measurement. Assume 15,236 is
+# wrong by a similar margin — it was measured the same way. The *gas* columns reproduced
+# against the live chain to 0.009%, so the conclusion rests on those and still stands.
+#
+# So the size budget stays spent on headroom instead: 11,572 of 24,576 bytes, leaving
+# 13,004 free for the EIP-712 cosign variant and anything else still to come.
+#
+# METHOD NOTE for anyone re-running this comparison: the fuzz seed is not pinned, so
+# two runs do not execute the same call sequences and the Median/Avg columns are not
+# comparable between them (`spend` was called 125,708 times in one run and 125,447 in
+# the other). Compare the Min column, or pass `--fuzz-seed` to both runs. A 40% median
+# "improvement" in this table was pure seed noise.
+
+[profile.default.fuzz]
+runs = 512
+max_test_rejects = 200000
+
+[profile.default.invariant]
+runs = 256
+depth = 64
+# MUST stay false. The handler deliberately submits spends that the policy should
+# refuse; a revert is the expected outcome for most calls, not a failure. With
+# fail_on_revert = true this suite reports noise instead of breaches.
+fail_on_revert = false
+shrink_run_limit = 5000
+
+# `forge test --profile deep` before an audit. Minutes, not seconds.
+[profile.deep]
+src = "contracts"
+test = "test"
+solc_version = "0.8.28"
+optimizer = true
+# MUST match [profile.default]. A pre-audit gate that compiles different bytecode from
+# the one being audited and deployed is not a gate.
+optimizer_runs = 200
+
+[profile.deep.fuzz]
+runs = 20000
+max_test_rejects = 500000
+
+[profile.deep.invariant]
+runs = 2000
+depth = 256
+fail_on_revert = false
+shrink_run_limit = 20000
+
+# `forge lint` on 2026-08-24 reported 91 warnings: 5 in the contract, 86 in the tests.
+# The split below is deliberate and the asymmetry is the point.
+#
+# The contract's five are annotated INDIVIDUALLY, in place, each with a written reason
+# for why that specific cast cannot truncate or why that specific timestamp read is
+# sound. Three unsafe-typecast (two `uint96(amount)`, one `uint64(nowTs / subLength)`)
+# and two block-timestamp, both in `isLive`. Those five are exactly the questions an
+# auditor opens with, and we are paying for an audit, so the answers belong next to the
+# code rather than in a config file that suppresses the question.
+#
+# The tests are excluded as a CLASS, because 76 of the 86 are `bytes32("literal")` —
+# a conversion solc itself rejects at compile time if the literal exceeds 32 bytes, so
+# no runtime value can truncate there. Annotating 76 provably-impossible cases one at a
+# time would be noise pretending to be rigour, and noise is how a real finding hides.
+# The remaining ten were read, not waved through, and three turned out to be real:
+# `usd()` was safe only by current usage and now has a `require`; `assertRevertedWith`
+# carried a comment about forge-std that stopped being true at 1.9.6; and three helpers
+# were dead code and are deleted. See FORGE.md.
+#
+# If a future test does something genuinely unsafe, this exclusion hides it. The
+# mitigation is that test code cannot hold funds — the worst case is a test that passes
+# for the wrong reason, which is what the reference model in reference/policy.js exists
+# to cross-check.
+#
+# The glob spelling is EMPIRICAL and the obvious one does not work. Measured 2026-08-24 by
+# swapping this single line and re-running `forge lint`; 85 is the unfiltered baseline:
+#
+#   **/*.t.sol          ->  0     <- what we use
+#   test/**             -> 85     the spelling anyone would write first. Does nothing.
+#   **/test/**          -> 85
+#   *.t.sol             -> 85     a single `*` does not cross a path separator
+#   test                -> 85
+#   test/Views.t.sol    -> 65     so exact relative paths DO match
+#
+# Matching is against the path relative to the project root, `*` stops at `/`, and a
+# leading `**/` is needed to reach into a directory. The trap is that a non-matching
+# pattern fails silently and `forge config` echoes it straight back, so the exclusion
+# *looks* applied — only the warning count says otherwise. Check the count, not the config.
+#
+# Do not try to test candidate globs with `forge lint --config-path <file>`. It requires
+# the file to be named exactly `foundry.toml` and PANICS with a backtrace if it is not
+# (Foundry 1.7.1), which returns zero warnings and looks like success. Swap this file in
+# place instead, and always include a control pattern that must come back non-zero.
+#
+# The pattern deliberately covers test *files*, not the test *directory*: `test/mocks/`
+# stays linted. MockUSDC reproduces Arc's real failure modes and is source-like, and the
+# false-positive class that motivates this exclusion lives in the `.t.sol` files.
+[lint]
+ignore = ["**/*.t.sol"]

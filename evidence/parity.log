@@ -1,0 +1,40 @@
+Compiling 1 files with Solc 0.8.28
+Solc 0.8.28 finished in 1.37s
+Compiler run successful!
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityApproveTest
+[PASS] test_arcParity_1_approve() (gas: 65184)
+Logs:
+  approve(MandateManager, 2.00 USDC)
+    calldata bytes             68
+    execution (gasleft delta)  23085
+    intrinsic (21k + bytes)    21596
+    PREDICTED receipt gasUsed  44681
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.15ms (143.40µs CPU time)
+
+Ran 1 test for test/ArcParity.t.sol:ArcParitySpendTest
+[PASS] test_arcParity_3_spend() (gas: 258977)
+Logs:
+  spend(id, 0x...c0de, 0.10 USDC)
+    calldata bytes             164
+    execution (gasleft delta)  167816
+    intrinsic (21k + bytes)    22304
+    PREDICTED receipt gasUsed  190120
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.55ms (484.20µs CPU time)
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityCreateTest
+[PASS] test_arcParity_2_createMandate() (gas: 397522)
+Logs:
+  createMandate(salt, params)
+    calldata bytes             804
+    execution (gasleft delta)  133764
+    intrinsic (21k + bytes)    24816
+    PREDICTED receipt gasUsed  158580
+  mandateId on THIS chain (the id is chain-scoped, so Arc's will differ):
+  0x26fcadd2dc0a53051008e4550eb3be85bdd20950aaa1d299d32130385dc0d25a
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.85ms (739.80µs CPU time)
+
+Ran 3 test suites in 68.51ms (4.55ms CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)

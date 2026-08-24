@@ -1,0 +1,31 @@
+Compiling 1 files with Solc 0.8.28
+Solc 0.8.28 finished in 1.56s
+Compiler run successful!
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityApproveCosignTest
+[PASS] test_arcParity_4_approveCosign() (gas: 146591)
+Logs:
+  approveCosign(id, spendHash)
+    calldata bytes             68
+    execution (gasleft delta)  36231
+    intrinsic (21k + bytes)    22088
+    PREDICTED receipt gasUsed  58319
+    less cold-account adj      2700
+    PREDICTED, adjusted        55619
+    charged on Arc             53114
+    residual (predicted-live)  2505
+  A/B cold-surcharge isolation:
+    A, everything cold         36231
+    B, warm but target slot    25634
+    A - B  (model says 8500)   10597
+  hand decomposition of the execution a real tx would pay:
+    3 cold SLOAD (payer s0, cosigner s2, flags s3)  6300
+    SSTORE_SET cold on _cosignApproved             22100
+    LOG4, three indexed args, empty data            1875
+    3x keccak256(64 bytes): 1 mandate + 2 nested     126
+    ---- accounted                                 30401
+    execution a real tx would pay (test - adj)    33531
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.45ms (325.61µs CPU time)
+
+Ran 1 test suite in 58.62ms (1.45ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)

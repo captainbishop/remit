@@ -1,0 +1,8 @@
+isLive      true
+headroom    500000 [5e5]
+spendable   500000 [5e5]
+allowance   2000000 [2e6]
+payer bal   18940379 [1.894e7]
+agent bal   1000000 [1e6]
+vendor bal  0
+dry run     0x8e78a6320af85e2bba62b20846ebb2cf0a7581864e694ce591267e6ab1305897
