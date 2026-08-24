@@ -438,10 +438,10 @@ correctness evidence for the whole project.
 `contracts/MandateManager.sol` is the on-chain implementation, written to mirror the
 model, with every deliberate deviation commented at the point it occurs.
 
-`test/` is the Forge port: 139 tests against the real storage layout, covering the same
+`test/` is the Forge port: 140 tests against the real storage layout, covering the same
 ground plus the three properties a model structurally cannot express — transactional
 rollback, storage aliasing in the bucket ring, and packed-`uint96` arithmetic. See
-FORGE.md. As of 2026-08-24 it compiles and all 139 pass.
+FORGE.md. As of 2026-08-24 it compiles and all 140 pass.
 
 ## Honest status
 
@@ -483,7 +483,7 @@ shape appears is worth auditing mechanically rather than reasoning about case by
 **The Solidity compiles and passes its suite, as of 2026-08-24.** It was authored in an
 environment with no `solc` and no network access, so this was the first mechanical check
 it had ever received. Under `solc` 0.8.28 with the optimizer at 200 runs it compiles with
-no errors, and `forge test` reports 139 of 139 passing: 2,048 fuzz runs across four
+no errors, and `forge test` reports 140 of 140 passing: 2,048 fuzz runs across four
 property tests and 49,152 calls across three stateful invariants, with both anti-vacuity
 guards green — so the suite is exercising the engine rather than agreeing with itself.
 
@@ -720,12 +720,23 @@ does not say the model is right about the world, and it says nothing about what 
 under an adversary with a budget. **Remit is intended to hold real money**, which makes the
 audit a scheduled requirement rather than a disclaimer.
 
-The live exercise covered exactly one mandate shape: no cosigner, no identity gate, no
-credential gate, one window, one allowlist entry. The cosignature path, both ERC-8004 gates
-and `revoke` have 139 passing tests behind them and zero live transactions. That is a real
-gap, because the ERC-8004 registries are ERC-1967 proxies whose behaviour can change under
-us — and one of them already reverts with `Error(string) = "unknown"` where the design had
-hedged that it might return a zero tuple.
+~~The live exercise covered exactly one mandate shape.~~ **Superseded 2026-08-24.** Five
+mandate shapes have now been exercised live: ungated, cosigned, identity-gated, and
+credential-gated both with and without a staleness bound. The cosignature path has three
+live transactions, and both ERC-8004 gates have fired against Arc's real registries with
+their predicted selectors and a passing ungated control beside them. **`revoke` is the only
+path left with zero live transactions** — it is terminal, so it goes last, and the three
+gate-blocked mandates are the ones to spend on it.
+
+What remains open is narrower than "untested paths", and worth naming precisely rather than
+letting the old sentence stand as a stale proxy for it. The ERC-8004 registries are
+ERC-1967 proxies whose behaviour can change under us: one already reverts with
+`Error(string) = "unknown"` where the design had hedged it might return a zero tuple, and
+the live attestation we found carries response 1 under the tag `"verified"` while being 97
+days stale. Neither is a contract defect — the gate correctly refused it — but neither is
+pinned by anything we control. Separately, the identity gate's *positive* path stays
+untestable, because it needs an identity NFT minted to our delegate and agent 16330 belongs
+to someone else.
 
 Two Arc behaviours remain asserted from documentation rather than observed: sub-second
 blocks sharing a timestamp, and the CallFrom precompile. Whether an EIP-7702-delegated EOA

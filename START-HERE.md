@@ -7,7 +7,7 @@ one is written for someone who doesn't yet, and it assumes nothing.
 ## Where you are
 
 **All five stages below are done, as of 2026-08-24.** Node is installed and the 46
-reference tests pass. Foundry is installed under WSL, the contract compiles, and all 139
+reference tests pass. Foundry is installed under WSL, the contract compiles, and all 140
 Forge tests pass — including 2,048 randomised fuzz runs and 49,152 invariant calls. Gas is
 measured. And stage 4 is complete: the contract is deployed to Arc Testnet with its source
 published, a mandate has been granted, and **an agent has spent your money under policy
@@ -40,11 +40,11 @@ It decides every question: is this spend allowed, and if not, exactly why. It wo
 right now. Its 46 tests pass.
 
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
-Solidity, the language blockchains run. As of 2026-08-24 it compiles, the 139 tests written
-against it all pass, and it is **deployed and working on Arc's test network** — one real
-mandate, one real payment, both visible in the explorer.
+Solidity, the language blockchains run. As of 2026-08-24 it compiles, the 140 tests written
+against it all pass, and it is **deployed and working on Arc's test network** — five real
+mandates, four real payments, all visible in the explorer.
 
-The **Forge tests** (`test/`, 139 of them) check the contract against its real storage
+The **Forge tests** (`test/`, 140 of them) check the contract against its real storage
 layout, including thousands of randomised runs. They all pass.
 
 The **demo** (`demo/playground.html`) is a web page that simulates the whole thing in a
@@ -217,13 +217,13 @@ lesson rather than the detail — a warning you have decided to ignore stops bei
 the count I was carrying in my head had drifted from five to ninety-one without anyone
 noticing.
 
-## Stage 3 — run the 139 contract tests ✅ done
+## Stage 3 — run the 140 contract tests ✅ done
 
 ```
 forge test
 ```
 
-All 139 pass, in about twelve seconds. Then two specific checks, which matter more than they
+All 140 pass, in about twelve seconds. Then two specific checks, which matter more than they
 look:
 
 ```

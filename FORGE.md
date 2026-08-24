@@ -1,13 +1,13 @@
 # Running the Forge suite
 
-139 tests across eleven files — which `forge test` reports as **12 suites**, for reasons
+140 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
 is the port of `reference/policy.test.js`, which has 46 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 139 pass, and `forge lint` is clean.** First compiled and first run on
+**Status: all 140 pass, and `forge lint` is clean.** First compiled and first run on
 2026-08-24, under `solc` 0.8.28
 with the optimizer at 200 runs, in about twelve seconds. That covers 2,048 fuzz runs across
 the four property tests and 49,152 calls across the three stateful invariants. What the
@@ -116,17 +116,17 @@ test/ArcParity.t.sol        3  matched local control for the real Arc Testnet tr
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-Nine of the 139 are named attack simulations (`test_ATTACK_*`), one is a regression for
+Nine of the 140 are named attack simulations (`test_ATTACK_*`), one is a regression for
 a bug that shipped into the model (`test_REGRESSION_*`), and four pin behaviour that is
 deliberately weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
-**`forge test` prints `Ran 12 test suites`, and the arithmetic is worth writing down once
+**`forge test` prints `Ran 13 test suites`, and the arithmetic is worth writing down once
 so the number never looks wrong.** Forge counts *contracts with test functions*, not files.
-Eleven files hold thirteen non-abstract contracts; `ArcParity.t.sol` alone declares three,
+Eleven files hold fourteen non-abstract contracts; `ArcParity.t.sol` alone declares four,
 one per measured transaction, because each needs cold storage. Subtract `WindowHandler` —
-non-abstract but a fuzzing handler with no test functions of its own — and you get 12.
+non-abstract but a fuzzing handler with no test functions of its own — and you get 13.
 `Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. So: 11 files,
-12 suites, 139 tests, and all three numbers are correct at the same time.
+13 suites, 140 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
 

@@ -30,8 +30,8 @@ policy) are all inadequate, and what this does *not* bound.
 ```
 reference/policy.js        the normative spec — executable model of every decision
 reference/policy.test.js   46 tests, including boundary-aiming fuzzers
-contracts/MandateManager.sol   on-chain implementation (139 tests pass; live on Arc Testnet)
-test/                      139 Forge tests against the real storage layout
+contracts/MandateManager.sol   on-chain implementation (140 tests pass; live on Arc Testnet)
+test/                      140 Forge tests against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 demo/playground.html       browser simulation with 7 scripted attacks
 DESIGN.md                  rationale, threat model, verification worksheet
@@ -55,12 +55,12 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-There is now a second suite, in Solidity: 139 Forge tests in `test/`, covering the
+There is now a second suite, in Solidity: 140 Forge tests in `test/`, covering the
 same ground plus the three properties a JavaScript model structurally cannot express —
 that a failed spend consumes nothing (real transaction rollback), that rewinding onto
 the same physical ring slot accumulates rather than overwrites (real storage aliasing),
 and that `totalSpent` panics rather than wrapping near 2^96 (real packed arithmetic).
-All 139 pass, under `solc` 0.8.28 — 2,048 fuzz runs and 49,152 invariant calls.
+All 140 pass, under `solc` 0.8.28 — 2,048 fuzz runs and 49,152 invariant calls.
 **[FORGE.md](FORGE.md)** covers setup, the two commands that check the suite is not
 passing vacuously, and what the first build and the first run actually found.
 
@@ -205,11 +205,13 @@ over-cap amount `OverPerTxCap()`, the payer signing in the delegate's place
 legitimate spend with a fresh nonce still simulates clean afterwards, so the gate rejects
 the duplicate rather than the mandate seizing up.
 
-**Not verified.** It has not been audited, and the live exercise covered one mandate
-shape: no cosigner, no identity gate, no credential gate, one window, one allowlist entry.
-The cosignature and ERC-8004 paths have 139 passing tests behind them and zero live
-transactions. Sub-second blocks sharing a timestamp and the CallFrom precompile remain
-asserted from documentation rather than observed.
+**Not verified.** It has not been audited. Five mandate shapes have now been exercised
+live — ungated, cosigned, identity-gated, and credential-gated with and without a staleness
+bound — and both ERC-8004 gates fired against Arc's real registries with a passing ungated
+control beside them. **`revoke` is the one path with zero live transactions**, and the
+identity gate's *positive* path stays untestable until an identity NFT is minted to our
+delegate. Sub-second blocks sharing a timestamp and the CallFrom precompile remain asserted
+from documentation rather than observed.
 
 **Measured against Arc's real USDC, as of 2026-08-24.** The steady-state marginal spend,
 measured inside an already-written window bucket, costs **177,429 gas ≈ 0.0037 USDC**. A
@@ -355,7 +357,7 @@ The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 139 tests, including exact-ledger property tests and
+The Forge port is written and runs — 140 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence. All pass. Gas is
 measured against Arc's real USDC, `K=24` is settled as affordable, and the contract is
 deployed and exercised on testnet.
