@@ -547,26 +547,88 @@ calldata so its predictions are directly comparable to a receipt.
 `createMandate` touches no USDC, so its deviation is the harness, not Arc. Part of it is
 that a real transaction gets its `to` address pre-warmed under EIP-2929 while the test pays
 ~2,600 for a cold `CALL` into the contract; the remainder is undecomposed and is recorded
-as undecomposed. Using it as a calibration constant, Arc's `NativeFiatToken` costs roughly
-**17,100 gas more than a minimal ERC-20 for an `approve`** (one slot, one log) and **32,700
-more for a `transferFrom`** (three slots, two logs).
+as undecomposed.
 
-**The premium scales with balance slots touched, not per call.** This was got wrong in
-advance: the spend was predicted at ~203,000 by carrying `approve`'s premium across and
-adding one log, and it came in at 216,458. Anyone re-deriving these numbers should assume
-the overhead is per-slot.
+~~Using it as a calibration constant, Arc's `NativeFiatToken` costs roughly 17,100 gas more
+than a minimal ERC-20 for an `approve` and 32,700 more for a `transferFrom`.~~
+**Both figures were wrong. Withdrawn and replaced by direct measurement on 2026-08-24.**
+They were produced by taking `createMandate`'s −6,337 as a flat additive constant and
+applying it to two operations that touch far more state. `evidence/cosign-parity.log` had
+already shown that deviation is not constant — 6,337 for `createMandate` against 2,505 for
+`approveCosign` — so the premise had failed before the arithmetic began.
+
+#### The premium, measured without a harness
+
+`evidence/premium.log`. The replacement method removes the test harness from the comparison
+entirely: deploy `test/mocks/MockUSDC` **to Arc**, then run the same operation against both
+tokens from the same wallet, minutes apart, with byte-identical calldata. The token address
+rides in the transaction's `to` field and not in calldata, so intrinsic gas cancels exactly
+within each pair and the whole receipt difference is Arc's own accounting.
+
+The comparison is only valid if every storage slot is in the same class on both tokens,
+since EIP-2200 charges 20,000 to write a slot that held zero and 2,900 to overwrite one that
+did not — a 17,100 gap, the same size as the number being measured. `evidence/premium-check.log`
+establishes the preconditions: the vendor's balance is non-zero on Arc (0.35 USDC), so the
+mock's vendor was minted to match, and `allowance(payer → agent)` is zero on Arc, so the
+mock's is too.
+
+| | MockUSDC | Arc USDC | premium |
+|---|---|---|---|
+| `approve`, onto a **zero** allowance slot | 46,138 | **55,438** | **9,300** |
+| `transferFrom`, three non-zero overwrites | 46,688 | **59,798** | **13,110** |
+| `approve`, onto a **live** allowance slot | 29,038 | **38,338** | **9,300** |
+
+**The premium is not per-slot. It is very nearly per-call.** `approve` costs the same 9,300
+whether it writes a virgin slot or overwrites a live one — the same number twice, from two
+independent transaction pairs. A `transferFrom` touching three slots instead of one costs
+13,110, not the ~27,900 a per-slot model predicts. Of the 3,810 difference, 1,756 is Arc's
+second `Transfer` log (`LOG3`, 375 + 3×375 + 8×32) emitted by the native system emitter at
+`0xffff…fe` in 18-decimal wei alongside the 6-decimal ERC-20 one; that leaves ~2,054 for two
+additional balance-slot writes, about 1,027 each. **The superseded text here said the
+opposite** — that the overhead is per-slot and should be assumed so by anyone re-deriving.
+That conclusion came from predicting the spend at ~203,000, seeing 216,458, and attributing
+the shortfall to slot count when it belonged to the non-constant harness deviation.
+
+**The old 17,100 was never a premium.** It is the EIP-2200 storage-class gap, and it appears
+identically on *both* tokens: 46,138 − 29,038 = 17,100 on the mock, 55,438 − 38,338 = 17,100
+on Arc. Being identical, it cancels. The discarded derivation reached 10,757 + 6,337 = 17,094
+and rounded, landing six gas from a constant that has nothing to do with Arc — which is
+precisely what made a broken figure look independently corroborated. Treat arithmetic that
+lands on a famous constant as a prompt to re-derive, not as confirmation.
+
+Two incidental confirmations. The Arc receipts reproduce
+`evidence/approve.log` and `evidence/approve-lo.log` to the gas — 55,438 and 38,338 — with a
+different spender and a different amount, days apart. That is forced rather than lucky:
+intrinsic gas depends only on the *count* of zero and non-zero calldata bytes, and both
+spender addresses contain no `0x00` byte (20 non-zero each) while 2,000,000, 200,000, 90,000
+and 100,000 all encode to exactly 3 non-zero bytes.
+
+And the mock itemises exactly, which is what licenses attributing the residual to Arc.
+Intrinsic for `approve` is 21,000 + 16(27) + 4(41) = 21,596, leaving 7,442 of execution on
+the live slot — 5,000 (cold `SLOAD` 2,100 + `SSTORE_RESET` 2,900) + 1,756 (`LOG3`) + 686 of
+dispatch — and 24,542 on the virgin slot, which is 22,100 (2,100 + `SSTORE_SET` 20,000) +
+1,756 + **the same 686**. Both exact, same residual, no slack for the premium to hide in.
+
 
 The intrinsic-gas model came out exact rather than approximate, which is what licenses
 attributing the residual to Arc: 22,304 predicted and 22,304 charged for the spend's 164
 calldata bytes, and 24,828 against the suite's 24,816 for `createMandate` — a 12-gas gap
 caused by one byte of the spender address differing between the mock and the real agent.
 
-**So the real price of the policy machinery is about 142,500 gas, or 0.3 cents.** A fully
-policed spend is 216,458; a bare `transfer` to a fresh account on the same chain is 73,950.
-The difference buys a per-transaction cap, a lifetime cap, a 24-bucket rolling daily window,
-an expiry, an allowlist, an idempotency nonce and a reconcilable audit event. A policed
-payment costs about 3× a bare one. The figure flatters itself slightly — `transferFrom`
-touches the allowance slot and `transfer` does not — so read it as ~130,000–142,500.
+**So the real price of the policy machinery is about 103,479 gas, or 0.217 cents.** The
+steady-state marginal spend, measured inside an already-written window bucket, is 177,429
+(`evidence/marginal-a.log`); a bare `transfer` to a fresh account on the same chain is
+73,950. The difference buys a per-transaction cap, a lifetime cap, a 24-bucket rolling daily
+window, an expiry, an allowlist, an idempotency nonce and a reconcilable audit event. A
+policed payment costs about **2.4×** a bare one.
+
+~~about 142,500 gas, or 0.3 cents … about 3×~~ — that figure compared a *first-ever* spend
+at 216,458, with every slot cold and every counter virgin, against a bare transfer, and so
+charged one-time initialisation to the recurring cost. It overstated the overhead by 39,029
+gas. One caveat survives the correction and one is retired: `transferFrom` touches the
+allowance slot and `transfer` does not, worth ~5,000 gas, so read the floor as ~98,000; but
+Arc's token premium now largely *cancels* in this comparison rather than inflating it, since
+both sides of the subtraction pay it.
 
 **`K=24` is affordable, and it is not close.** Each additional bucket adds one cold
 `SLOAD` on a packed slot to the ring read loop: 2,100 gas plus loop and mapping-key
@@ -581,10 +643,11 @@ is doing real work.
 Two caveats remain, because this is a measurement and measurements have conditions.
 
 ~~The suite runs against `MockUSDC`.~~ **Resolved on 2026-08-24.** Arc's real USDC does
-cost strictly more, as predicted, and the magnitude is now measured: ~32,700 gas on the
-`transferFrom`. It is a constant per spend, not a per-bucket cost, so it does not touch the
-`K` decision — it raises every spend by the same amount whether the mandate has one window
-or four.
+cost strictly more, as predicted, and the magnitude is now measured directly rather than
+inferred: **13,110 gas on the `transferFrom`**, from `evidence/premium.log`. It is a
+per-call constant, not a per-bucket cost, so it does not touch the `K` decision — it raises
+every spend by the same amount whether the mandate has one window or four. The figure this
+paragraph used to carry, ~32,700, was too high by a factor of 2.5.
 
 21 Gwei is what has been observed, not a promise either. Arc advertises stable, predictable
 pricing, and 20 Gwei is a documented floor, but under congestion the effective price rises
@@ -625,10 +688,13 @@ optimizer can only win on instruction selection and layout, which is noise at th
 it cannot make a storage read cheaper. `200` stays, and the 13,004 spare bytes stay
 available for the EIP-712 cosign variant.
 
-Deploying to Arc confirmed this from the other direction. About 32,700 gas of a real spend
-is Arc's own native-USDC accounting inside `transferFrom` — a cost no compiler flag can
-reach. The gas case for raising `runs` is weaker on the real chain than it looked locally,
-not stronger.
+Deploying to Arc confirmed this from the other direction, though less forcefully than first
+claimed. **13,110 gas** of a real spend is Arc's own native-USDC accounting — a cost no
+compiler flag can reach — and this paragraph previously put that at ~32,700, which inflated
+the unreachable share of a 216,458-gas spend from 6% to 15%. The correction weakens a
+supporting argument without touching the decision: `runs = 200` stays because 10,000 bought
+**six gas** for 27% more bytecode, and that measurement is independent of anything Arc's
+token does.
 
 The general lesson is worth more than the setting. "This is the hot path, so optimise it
 harder" is not an argument unless the hot *cost* is the kind of thing the optimiser can

@@ -50,17 +50,31 @@ Transaction hashes in these files remain independently checkable at
 | `gas.log` | The full gas report at `optimizer_runs = 200`. Also the incidental proof that gas reports are execution-only: `spendHash` at 1,003 gas. |
 | `gas-10000.log` | The same tree built at `optimizer_runs = 10000`. Six gas saved on a spend for 27% more bytecode — the measurement behind the decision to stay at 200, recorded in full in `foundry.toml`. |
 | `marginal-a.log` | The steady-state marginal spend, **177,429 gas**, measured inside one already-written window bucket. This replaced the published ~142,500, which had wrongly compared a first-ever spend against a bare transfer. |
-| `approve.log`, `approve-lo.log` | ERC-20 `approve` receipts, including the 38,338 reset and the ~17,100 virgin-slot premium. |
+| `approve.log`, `approve-lo.log` | ERC-20 `approve` receipts: **55,438** onto a virgin allowance slot and **38,338** onto a live one. The 17,100 difference is the EIP-2200 storage-class gap, *not* an Arc premium — it appears identically on a plain mock, as `premium.log` shows. Both receipts were later reproduced to the gas with a different spender and amount. |
+| `premium-check.log` | The read-only pre-flight for the premium measurement, at block 58680613. Establishes the preconditions the comparison depends on: the vendor's USDC balance is non-zero (0.35), `allowance(payer → agent)` is exactly zero, and no allowance is `uint256.max`. Also re-confirms the 6-decimal truncation — a native balance of `18575004317000000000` reads as `18575004`. |
+| `premium.log` | **The USDC premium, measured without a harness: 9,300 gas on an `approve`, 13,110 on a `transferFrom`.** `MockUSDC` deployed to Arc at `0x5949872a6fB7928bC5507d9D03D4b8078C233303`, then the same operation run against both tokens with byte-identical calldata so intrinsic gas cancels exactly. Nine transactions, all status 1. Contains the self-check that validates the method: A−C equals **17,100 on each token independently**, which is `SSTORE_SET − SSTORE_RESET` and therefore cancels. This log replaces the 17,100 / 32,700 figures published for weeks. |
 | `parity.log` | The first three harness-versus-receipt parity measurements: `createMandate`, `approve`, `spend`. |
 | `cosign-parity.log` | The `approveCosign` parity measurement and the A/B cold-surcharge isolation. A = 36,231 all cold, B = 25,634 warm but for the target slot, A−B = **10,597** against a predicted 8,500. Landing *above* the prediction is what ruled out the possibility that Foundry carries warmth from `setUp` into the test body. The 2,097 excess is one unattributed cold-slot delta and is still open. |
 
 `parity.log` and `cosign-parity.log` together are why the published USDC premium
-figures of 17,100 and 32,700 should be treated as **unsound**. Both USDC-free
-operations overshoot the real receipt and both USDC-touching ones undershoot it,
-and the two USDC-free overshoots differ from each other in proportion to how much
-state each touches — 6,337 for `createMandate` against 2,505 for `approveCosign`.
-The premiums were derived by treating the first of those as a flat calibration
-constant. It is not constant.
+figures of 17,100 and 32,700 were **withdrawn**, and `premium.log` is what replaced
+them. The originals were derived by treating `createMandate`'s −6,337 harness
+deviation as a flat calibration constant and adding it to two operations that touch
+far more state. It is not constant: both USDC-free operations overshoot the real
+receipt and both USDC-touching ones undershoot it, and the two overshoots differ from
+each other in proportion to how much state each touches — 6,337 for `createMandate`
+against 2,505 for `approveCosign`.
+
+Two things the replacement measurement established that the original method could not
+have caught. The premium is **very nearly per-call, not per-slot**: `approve` costs the
+same 9,300 whether it writes a virgin slot or overwrites a live one, and a
+`transferFrom` touching three slots costs 13,110 rather than the ~27,900 a per-slot
+model predicts. DESIGN.md previously stated the opposite and instructed re-derivers to
+assume per-slot. And **17,100 was never a premium** — it is the storage-class gap,
+identical on both tokens. The discarded route reached 10,757 + 6,337 = 17,094 and
+rounded, landing six gas from a constant with nothing to do with Arc. That near-collision
+is the reason this folder exists: arithmetic that lands on a famous number is a prompt
+to re-derive, not a confirmation.
 
 ## Live mandates and spends
 

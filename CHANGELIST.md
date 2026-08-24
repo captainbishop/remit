@@ -91,6 +91,27 @@ them, and both ERC-8004 gates have been exercised against Arc's live registries.
 `revoke` still has zero live transactions. The test count is now 140. The unaudited /
 no-real-money half of the warning stays exactly as it is.
 
+Line 26 of that banner also carries two superseded gas figures — `~142,500` for the
+policy machinery and `~32,700` for Arc's native-USDC accounting. Both are corrected
+elsewhere in the tree as of 2026-08-24: the policy overhead is **103,479** gas
+(0.217 cents), measured as the steady-state marginal spend of 177,429 less a bare
+transfer of 73,950 rather than a first-ever spend of 216,458, and the token premium is
+**13,110** on a `transferFrom`, measured receipt-against-receipt in
+`evidence/premium.log`. The replacement line should read: *"of which ~103,500 is the
+policy machinery and ~13,100 is Arc's own native-USDC accounting."*
+
+**Why this one waits, even though it is free.** Solc appends a hash of the source
+metadata to the bytecode, so editing even a comment changes the compiled bytes. The
+deployment at `0x3744E93B9e796E05CB66311d897559B6F3860196` is verified against the tree
+as it stands, and `FORGE.md` makes that claim explicitly — vendoring `forge-std` into
+`lib/` exists precisely so a clone reproduces those bytes. Editing the banner today
+would silently retire a checkable property in exchange for fixing a comment that is
+already published on Blockscout and cannot be recalled there anyway. Since v2 needs a
+redeploy regardless — `F_ALLOWLIST_ROOT` claims bit 7 — the banner edit rides along with
+it, and until then the corrected figures live in `DESIGN.md` and `README.md`. Anyone
+reading the header on-chain should treat its gas numbers as a snapshot of 2026-08-24 and
+the repository documents as current.
+
 **Near-certain.** Revert `BadConfig` at grant time when `F_COSIGN` is set and
 `perTxCap < cosignThreshold`. Today that combination is accepted and silently
 produces a mandate whose cosign gate can never fire, because no amount can be

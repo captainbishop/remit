@@ -1,0 +1,28 @@
+=== chain ===
+chainId:  5042002
+gasPrice: 21000000000
+block:    58680613
+
+=== USDC balances, 6 decimals (must all be NON-ZERO except where noted) ===
+payer  balanceOf: 18575004 [1.857e7]
+agent  balanceOf: 979266 [9.792e5]   <- also pays gas for 2 txs
+vendor balanceOf: 350000 [3.5e5]   <- must be NON-ZERO for symmetry
+
+=== native balances, 18 decimals (gas) ===
+payer: 18575004317000000000
+agent: 979266516250000000
+
+=== allowances ===
+payer -> manager: 1650000 [1.65e6]   <- expect 90000 from approve-lo
+payer -> agent:   0   <- expect 0, will be created as setup
+
+=== is the allowance infinite? (matters: neither token decrements uint256.max) ===
+uint256 max is 115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+=== toolchain ===
+cast Version: 1.7.1
+Commit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8
+Build Timestamp: 2026-05-08T07:50:55.527285345Z (1778226655)
+forge Version: 1.7.1
+Commit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8
+Build Timestamp: 2026-05-08T07:50:55.527285345Z (1778226655)

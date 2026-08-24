@@ -299,15 +299,37 @@ the full table and the three conditions on believing it.
 The one thing this couldn't tell you was what the *real* USDC costs, because the tests use
 a stand-in token. Arc's actual USDC does its own accounting on every transfer, and that is
 not free. **Stage 4 produced that number: a real policed spend cost 216,458 gas, which at
-the 21 Gwei the chain actually charged is 0.0045 USDC — under half a cent.** The stand-in
-token was cheap by about 40%, all of it inside Arc's own USDC where no setting we control
-can reach it.
+the 21 Gwei the chain actually charged is 0.0045 USDC — under half a cent.**
 
-The more interesting figure fell out of comparing the policed spend against the plain
-transfer in the same table above: **the entire policy machinery — every cap, the allowlist,
-the expiry, the replay check, the receipt — costs 142,500 gas, about a third of a cent.** A
-payment with rules attached costs roughly three times one without. That is the price of the
-whole idea, and it is the number the design documents had been guessing at for weeks.
+Two figures in this section were wrong for weeks, and both were corrected on 2026-08-24 by
+measuring instead of inferring. They are worth walking through, because the mistakes are the
+ordinary kind rather than the exotic kind.
+
+**How much of a spend is Arc's own token?** The honest way to find out is to put the
+stand-in token *on Arc itself* and run the identical transaction against both, which is what
+`evidence/premium.log` does. Answer: **13,110 gas**, about 6% of a spend. This file used to
+say the stand-in was "cheap by about 40%." It wasn't. The earlier number came from comparing
+a test-harness prediction against a real receipt, and a test harness has costs of its own
+that have nothing to do with Arc — so the comparison was measuring the harness as much as
+the chain.
+
+**What does the policy machinery cost?** Comparing the policed spend against the plain
+transfer in the table above gives **103,479 gas, about 0.217 cents** — every cap, the
+allowlist, the expiry, the replay check, the receipt. A payment with rules attached costs
+roughly **2.4×** one without. This used to read 142,500 gas, a third of a cent, and three
+times. The error is worth understanding because it is so easy to make: 216,458 was a
+*first-ever* spend on a brand-new mandate, where every storage slot is being written for the
+first time. Writing a fresh slot costs about seven times more than updating one that already
+holds a value, so the first spend on any mandate is unusually expensive. Charging that
+one-time setup to the recurring per-payment price overstated it by 39,029 gas. The right
+comparison is the *second* spend and every one after — 177,429 gas, measured in
+`evidence/marginal-a.log`.
+
+Neither correction changes any decision in this project. Both make Remit look cheaper than
+it was advertised as being, which is a pleasant direction for an error to run, but the useful
+lesson is the method: a number derived by subtracting two things measured on different
+footings is not a measurement, and it will usually be wrong in the direction that flatters
+whoever derived it.
 
 ## What you can safely defer
 
