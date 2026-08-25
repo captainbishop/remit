@@ -401,7 +401,25 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         console.log("A/B cold-surcharge isolation:");
         console.log("  A, everything cold        ", used);
         console.log("  B, warm but target slot   ", usedWarm);
-        console.log("  A - B  (model says 8500)  ", used - usedWarm);
+        // A > B is a PROPERTY OF THE MEASUREMENT MODE, not of the contract, so it is
+        // guarded rather than asserted. Under `--gas-report` Foundry adds per-call
+        // tracing overhead that lands INSIDE the `gasleft()` window and is not constant
+        // between two calls: on 2026-08-25 this read A = 58,319 against B = 60,222 and
+        // the bare `used - usedWarm` below panicked with 0x11 on the unsigned subtraction
+        // — 139 passed, 1 failed, from a comment-only commit. Plain `forge test` gives
+        // A = 36,231 and 140/140. Same bytecode, ~22,000 gas of swing.
+        //
+        // That inversion is worth more than the isolation it breaks. In the same failing
+        // trace Foundry metered the inner call at exactly 53,114 — the live Arc receipt to
+        // the gas — while this `gasleft()` wrapper around that identical call read 58,319.
+        // The instrument this file was built to check is mode-independent and correct; the
+        // file's own instrument is neither. See the reversal note above and DESIGN.md.
+        if (usedWarm >= used) {
+            console.log("  A - B  SKIPPED: B >= A, so gasleft() is contaminated.");
+            console.log("  Re-run without --gas-report for a meaningful A/B isolation.");
+        } else {
+            console.log("  A - B  (model says 8500)  ", used - usedWarm);
+        }
         console.log("");
         console.log("hand decomposition of the execution a real tx would pay:");
         console.log("  3 cold SLOAD (payer s0, cosigner s2, flags s3)  6300");
@@ -416,8 +434,21 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // `createMandate` also touches no USDC and also overshoots (−6,337), while
         // `approve` and `spend` both touch USDC and undershoot. A tight numeric bound
         // here would be tuning; the printed residual is the finding.
+        //
+        // The direction holds in every mode, so it is asserted unconditionally. The
+        // MAGNITUDE does not: under `--gas-report` the residual inflates from ~2,700 to
+        // 24,593 because tracing overhead is inside the `gasleft()` window, so bounding it
+        // would fail for a reason that has nothing to do with the model. B >= A is the
+        // signal that the measurement is contaminated — the same signal used above.
         assertGt(predicted, ARC_LIVE_GASUSED, "harness should overshoot on a USDC-free operation");
-        assertLt(predicted - ARC_LIVE_GASUSED, 6_000, "overshoot should be small; a big one means the model is wrong");
-
+        if (usedWarm >= used) {
+            console.log("");
+            console.log("Residual bound SKIPPED: gasleft() contaminated by tracing overhead.");
+            console.log("This test is only quantitative under plain `forge test`.");
+        } else {
+            assertLt(
+                predicted - ARC_LIVE_GASUSED, 6_000, "overshoot should be small; a big one means the model is wrong"
+            );
+        }
     }
 }

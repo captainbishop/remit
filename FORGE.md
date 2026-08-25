@@ -14,6 +14,22 @@ the four property tests and 49,152 calls across the three stateful invariants. W
 first compile and the first run each cost is recorded below, because a suite's first green
 is the only time you learn whether it was testing anything.
 
+**They also pass under `--gas-report`, but only since 2026-08-25, and the reason is worth
+knowing before you trust a `gasleft()` figure.** `--gas-report` adds per-call tracing
+overhead that lands *inside* a `gasleft()` window, and it is not constant between two calls.
+`ArcParity.t.sol`'s A/B isolation measured A = 36,231 without the flag and **58,319** with
+it, for identical bytecode, and B came out larger than A — so `used - usedWarm` panicked
+`0x11` on the unsigned subtraction and the suite reported 139 passed, 1 failed. Both the
+isolation and the residual bound are now guarded on `usedWarm >= used` and print a skip
+notice instead. Two consequences: a `gasleft()` measurement is only quantitative under plain
+`forge test`, and an unsigned subtraction in a test is an assertion with a worse error
+message — `assertGt` first.
+
+The same run made the larger point for free. Foundry's gas report listed `approveCosign` at
+a max of **53,114** under the flag, which is the live Arc receipt to the gas, while the
+harness wrapped around that identical call read 58,319. The tool this file was built to
+check is mode-independent and correct; the harness is neither.
+
 `ArcParity.t.sol` is not a correctness test, and it is not one suite — it declares four
 contracts holding one test each, because every measurement needs its own cold storage.
 Those four reproduce the exact four transactions that were sent to Arc Testnet — same
