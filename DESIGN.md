@@ -515,12 +515,23 @@ earlier draft of this table priced everything at 20, which made every published 
 
 | | gas | USDC @ 21 Gwei |
 |---|---|---|
-| deploy `MandateManager` | 2,557,693 predicted / **2,557,453 charged** | **0.0537** |
+| deploy `MandateManager` | 2,557,681 predicted / **2,557,453 charged** | **0.0537** |
 | `createMandate` median / max | 128,465 / 241,218 | 0.0027 / 0.0051 |
-| **`spend` median / max** | **110,380 / 201,786** | **0.0023 / 0.0042** |
+| **`spend` median / max** | **105,935 / 201,786** | **0.0022 / 0.0042** |
 | `spend` min (simplest mandate) | 24,898 | 0.0005 |
 | `revoke` max | 32,945 | 0.0007 |
 | `approveCosign` max | 53,114 | 0.0011 |
+
+**These rows are now generated with a pinned fuzz seed, and two of them moved when that
+happened.** `evidence/gas.log` was regenerated on 2026-08-25 with
+`forge test --gas-report --fuzz-seed 5042002`, the seed being Arc's chain id so the number
+is derivable. Without a pinned seed the median column is not reproducible at all — the
+`spend` median read 110,380 in the old unseeded log against 105,935 in three consecutive
+seeded runs, which is why the figure above changed. The deploy figure moved 12 gas, from
+2,557,693 to 2,557,681, for reasons that are **not** resolved; the header of
+`evidence/gas.log` records what was ruled out. Min, Max and call counts reproduced exactly
+across all three seeded runs; Avg never did, which is why no Avg figure is published
+anywhere in this repository.
 
 Those are mock-USDC figures and are kept because they are the only ones covering the whole
 configuration space. **For what a real spend actually costs, the live numbers below
@@ -724,12 +735,22 @@ The general lesson is worth more than the setting. "This is the hot path, so opt
 harder" is not an argument unless the hot *cost* is the kind of thing the optimiser can
 reach. Here it never was.
 
-**A methodological correction, which matters for anyone repeating this.** The fuzz seed is
-not pinned, so two runs do not execute the same call sequences — `spend` was called 125,708
-times in the first run and 125,447 in the second. The Median and Avg columns are therefore
-not comparable across runs. On first reading, this table appeared to show `windowRemaining`
-improving by 40%; that was entirely seed noise. Compare the Min column, which is the same
-deterministic path in both runs, or pass `--fuzz-seed` to both.
+**A methodological correction, which matters for anyone repeating this — and it was itself
+corrected on 2026-08-25.** The original note said the fuzz seed was not pinned, so two runs
+did not execute the same call sequences (`spend` was called 125,708 times in the first run
+and 125,447 in the second), that Median and Avg were therefore not comparable across runs,
+and that the fix was to compare the Min column or pass `--fuzz-seed` to both. On first
+reading this table appeared to show `windowRemaining` improving by 40%; that was entirely
+seed noise, and that part stands.
+
+What did not stand is the fix. Pinning the seed was then tested: three runs at
+`--fuzz-seed 5042002` against identical bytecode produced **three different tables**. The
+seed pins the call counts exactly (125,844 in all three), and it pins Max in all 49 rows and
+Min in 48 of 49, but Avg still moved in all five rows the stateful invariant campaign drives
+and Median moved in two of them. The mechanism is not known and is not guessed at. So the
+corrected advice is: compare Min, Max and call counts; pin the seed so published medians are
+reproducible; never compare Avg across runs at all. `evidence/gas.log`'s header carries the
+full measurement.
 
 ## What is still unverified
 

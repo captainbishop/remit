@@ -291,7 +291,7 @@ was answering a question the design documents had been guessing at.
 There was an open question about how finely the rolling spending window should be sliced.
 More slices means more accurate rate limiting and a more expensive transaction, and
 nobody knew where the line was. The command turned that into arithmetic: **a median spend
-costs 110,380 gas against the stand-in token.** Each extra slice adds about 2,150 gas, so
+costs 105,935 gas against the stand-in token.** Each extra slice adds about 2,150 gas, so
 going from 12 slices to 24 costs a twentieth of a cent and takes the rate limiter from 92%
 accurate to 96%. It isn't close. The generous setting is the right default. `DESIGN.md` has
 the full table and the three conditions on believing it.

@@ -1,0 +1,445 @@
+# Pre-audit deep gate — Remit
+#
+# Command:  FOUNDRY_PROFILE=deep forge test
+#           (env-var form, not --profile, so a rejected flag cannot silently
+#            fall back to the default profile)
+# Date:     2026-08-25, finished 16:32:28Z
+# Result:   140 passed, 0 failed, 0 skipped, exit 0
+# Wall:     real 15m51.857s, user 81m27.476s, sys 0m3.112s (13 suites, ~5.1x parallel)
+#           Foundry self-reports 4124.55s aggregate; it undercounts, see FORGE.md
+#
+# The forge config dump below is the CONTROL: it is what proves the deep profile
+# was actually resolved. Look for fuzz runs = 20000, invariant runs = 2000,
+# depth = 256, shrink_run_limit = 20000, and optimizer_runs = 200 matching the
+# default profile. A gate that compiles different bytecode is not a gate.
+#
+### CONFIG PROOF ###
+[profile.deep]
+src = "contracts"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+remappings = ["forge-std/=lib/forge-std/src/"]
+auto_detect_remappings = true
+libraries = []
+cache = true
+cache_path = "cache"
+dynamic_test_linking = false
+snapshots = "snapshots"
+gas_snapshot_check = false
+gas_snapshot_emit = true
+broadcast = "broadcast"
+allow_paths = []
+include_paths = []
+skip = []
+force = false
+evm_version = "prague"
+gas_reports = ["*"]
+gas_reports_ignore = []
+gas_reports_include_tests = false
+solc = "0.8.28"
+auto_detect_solc = true
+offline = false
+optimizer = true
+optimizer_runs = 200
+verbosity = 0
+eth_rpc_accept_invalid_certs = false
+eth_rpc_no_proxy = false
+eth_rpc_curl = false
+ignored_error_codes = [
+    "license",
+    "code-size",
+    "init-code-size",
+    "transient-storage",
+    "transfer-deprecated",
+    "natspec-memory-safe-assembly-deprecated",
+]
+ignored_error_codes_from = []
+ignored_warnings_from = []
+deny = "never"
+test_failures_file = "cache/test-failures"
+show_progress = false
+ffi = false
+live_logs = false
+allow_internal_expect_revert = false
+always_use_create_2_factory = false
+prompt_timeout = 120
+sender = "0x1804c8ab1f12e6bbf3894d4083f33e07309d1f38"
+tx_origin = "0x1804c8ab1f12e6bbf3894d4083f33e07309d1f38"
+initial_balance = "0xffffffffffffffffffffffff"
+block_number = 1
+gas_limit = 1073741824
+block_base_fee_per_gas = 0
+block_coinbase = "0x0000000000000000000000000000000000000000"
+block_timestamp = 1
+block_difficulty = 0
+block_prevrandao = "0x0000000000000000000000000000000000000000000000000000000000000000"
+memory_limit = 134217728
+extra_output = []
+extra_output_files = []
+names = false
+sizes = false
+via_ir = false
+ast = false
+no_storage_caching = false
+no_rpc_rate_limit = false
+use_literal_content = false
+bytecode_hash = "ipfs"
+cbor_metadata = true
+sparse_mode = false
+build_info = false
+isolate = false
+disable_block_gas_limit = false
+enable_tx_gas_limit = false
+unchecked_cheatcode_artifacts = false
+create2_library_salt = "0x0000000000000000000000000000000000000000000000000000000000000000"
+create2_deployer = "0x4e59b44847b379578588920ca78fbf26c0b4956c"
+assertions_revert = true
+legacy_assertions = false
+celo = false
+bypass_prevrandao = false
+transaction_timeout = 120
+additional_compiler_profiles = []
+compilation_restrictions = []
+script_execution_protection = true
+
+[profile.deep.rpc_storage_caching]
+chains = "all"
+endpoints = "all"
+
+[[profile.deep.fs_permissions]]
+access = "read"
+path = "out"
+
+[fmt]
+line_length = 120
+tab_width = 4
+style = "space"
+bracket_spacing = false
+int_types = "long"
+multiline_func_header = "attributes_first"
+quote_style = "double"
+number_underscore = "preserve"
+hex_underscore = "remove"
+single_line_statement_blocks = "preserve"
+override_spacing = false
+wrap_comments = false
+docs_style = "preserve"
+ignore = []
+contract_new_lines = false
+sort_imports = false
+namespace_import_style = "prefer_plain"
+pow_no_space = false
+prefer_compact = "all"
+single_line_imports = false
+
+[lint]
+severity = [
+    "high",
+    "medium",
+    "low",
+]
+exclude_lints = []
+ignore = ["**/*.t.sol"]
+lint_on_build = true
+
+[lint.lint_specific]
+mixed_case_exceptions = [
+    "ERC",
+    "URI",
+    "ID",
+    "URL",
+    "API",
+    "JSON",
+    "XML",
+    "HTML",
+    "HTTP",
+    "HTTPS",
+]
+multi_contract_file_exceptions = []
+
+[doc]
+out = "docs"
+title = ""
+book = "book.toml"
+homepage = "README.md"
+ignore = []
+
+[fuzz]
+runs = 20000
+fail_on_revert = true
+max_test_rejects = 500000
+dictionary_weight = 40
+include_storage = true
+include_push_bytes = true
+max_fuzz_dictionary_addresses = 15728640
+max_fuzz_dictionary_values = 9830400
+max_fuzz_dictionary_literals = 6553600
+gas_report_samples = 256
+corpus_gzip = true
+corpus_min_mutations = 5
+corpus_min_size = 0
+show_edge_coverage = false
+sancov_edges = false
+sancov_trace_cmp = false
+failure_persist_dir = "cache/fuzz"
+show_logs = false
+
+[invariant]
+runs = 2000
+depth = 256
+fail_on_revert = false
+call_override = false
+dictionary_weight = 80
+include_storage = true
+include_push_bytes = true
+max_fuzz_dictionary_addresses = 15728640
+max_fuzz_dictionary_values = 9830400
+max_fuzz_dictionary_literals = 6553600
+shrink_run_limit = 20000
+max_assume_rejects = 65536
+gas_report_samples = 256
+corpus_gzip = true
+corpus_min_mutations = 5
+corpus_min_size = 0
+show_edge_coverage = false
+sancov_edges = false
+sancov_trace_cmp = false
+failure_persist_dir = "cache/invariant"
+show_metrics = true
+show_solidity = false
+check_interval = 1
+
+[labels]
+
+[vyper]
+
+[bind_json]
+out = "utils/JsonBindings.sol"
+include = []
+exclude = []
+
+
+### DEEP RUN START 2026-08-25T16:16:36Z ###
+No files changed, compilation skipped
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityApproveTest
+[PASS] test_arcParity_1_approve() (gas: 65184)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 2.86ms (383.70µs CPU time)
+
+Ran 1 test for test/ArcParity.t.sol:ArcParitySpendTest
+[PASS] test_arcParity_3_spend() (gas: 258977)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 3.55ms (1.04ms CPU time)
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityApproveCosignTest
+[PASS] test_arcParity_4_approveCosign() (gas: 146637)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 3.99ms (738.60µs CPU time)
+
+Ran 1 test for test/ArcParity.t.sol:ArcParityCreateTest
+[PASS] test_arcParity_2_createMandate() (gas: 397522)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 4.44ms (2.03ms CPU time)
+
+Ran 18 tests for test/Gates.t.sol:GatesTest
+[PASS] test_ATTACK_attestationFromAnUnnamedValidator_denies() (gas: 276390)
+[PASS] test_ATTACK_realAttestationAboutADifferentAgent_denies() (gas: 274456)
+[PASS] test_ATTACK_transferringTheAgentIdentity_killsTheMandate() (gas: 364240)
+[PASS] test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent() (gas: 400515)
+[PASS] test_bothGates_mustPassIndependently() (gas: 455403)
+[PASS] test_credentialGate_failingAttestation_denies() (gas: 272505)
+[PASS] test_credentialGate_fallsBackToTheIdentityGatesAgentId() (gas: 439478)
+[PASS] test_credentialGate_missingAttestation_denies() (gas: 255424)
+[PASS] test_credentialGate_passesWithAFreshAttestation() (gas: 387770)
+[PASS] test_credentialGate_revertingRegistry_alsoDenies() (gas: 275140)
+[PASS] test_credentialGate_staleAttestation_denies() (gas: 477447)
+[PASS] test_credentialGate_stalenessBoundaryIsInclusive() (gas: 404769)
+[PASS] test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement() (gas: 396561)
+[PASS] test_gates_areCheckedBeforeTheCaps() (gas: 255412)
+[PASS] test_identityGate_burnedIdentity_deniesLegibly() (gas: 223714)
+[PASS] test_identityGate_expectedOwnerMismatch_reportsIdentityTransferred() (gas: 225171)
+[PASS] test_identityGate_passesWhileTheSpenderHoldsTheIdentity() (gas: 347661)
+[PASS] test_identityGate_unpinnedExpectedOwner_onlyRequiresTheCallerToHoldIt() (gas: 327514)
+Suite result: ok. 18 passed; 0 failed; 0 skipped; finished in 9.22ms (7.67ms CPU time)
+
+Ran 14 tests for test/Views.t.sol:ViewsTest
+[PASS] test_isAllowedRecipient_withAnAllowlist() (gas: 179950)
+[PASS] test_isAllowedRecipient_withoutAnAllowlist() (gas: 150927)
+[PASS] test_isLive_tracksEveryLifecycleCondition() (gas: 164382)
+[PASS] test_policyHeadroom_expiryOnlyMandateIsUnlimited() (gas: 133608)
+[PASS] test_policyHeadroom_isZeroWhenNotSpendable() (gas: 261289)
+[PASS] test_policyHeadroom_reportsTheBindingConstraint() (gas: 370638)
+[PASS] test_policyHeadroom_windowCanBeTheBindingConstraint() (gas: 493287)
+[PASS] test_spendHash_dependsOnEveryField() (gas: 164042)
+[PASS] test_spendHash_isDeterministic() (gas: 297827)
+[PASS] test_spendable_clampsToTheAllowance() (gas: 229630)
+[PASS] test_spendable_clampsToTheBalance() (gas: 207735)
+[PASS] test_spendable_isAchievable() (gas: 312252)
+[PASS] test_spendable_onUnknownMandate_isZero() (gas: 10708)
+[PASS] test_unknownMandate_readsAsEmptyRatherThanReverting() (gas: 33100)
+Suite result: ok. 14 passed; 0 failed; 0 skipped; finished in 4.44ms (6.08ms CPU time)
+
+Ran 13 tests for test/Idempotency.t.sol:IdempotencyTest
+[PASS] test_blocklistedPayer_unwindsTheEntireSpend() (gas: 271794)
+[PASS] test_blocklistedRecipient_unwindsTheEntireSpend() (gas: 367797)
+[PASS] test_deniedSpends_consumeNothing() (gas: 374861)
+[PASS] test_failedTransfer_rollsBackSoTheSameSpendCanBeRetried() (gas: 384995)
+[PASS] test_identicalSpendsUnderDifferentNonces_bothSucceed() (gas: 323275)
+[PASS] test_insufficientAllowance_unwindsAndIsRetryable() (gas: 372219)
+[PASS] test_insufficientBalance_unwinds() (gas: 287215)
+[PASS] test_nonceIsCheckedBeforeTheCaps() (gas: 274061)
+[PASS] test_noncesAreScopedToTheMandate() (gas: 475313)
+[PASS] test_replayingANonceWithADifferentPayload_stillReverts() (gas: 276082)
+[PASS] test_replayingANonce_reverts() (gas: 285386)
+[PASS] test_transferReturningFalse_raisesTransferFailed() (gas: 265688)
+[PASS] test_windowBreach_doesNotPartiallyConsumeTheWindow() (gas: 378231)
+Suite result: ok. 13 passed; 0 failed; 0 skipped; finished in 19.88ms (10.08ms CPU time)
+
+Ran 17 tests for test/Cosign.t.sol:CosignTest
+[PASS] test_ATTACK_inflatingAnApprovedSpend_isRefused() (gas: 282765)
+[PASS] test_ATTACK_redirectingAnApprovedSpend_isRefused() (gas: 294456)
+[PASS] test_ATTACK_swappingTheReference_isRefused() (gas: 283449)
+[PASS] test_DOCUMENTED_SOFT_SPOT_perTxCapBelowThresholdMakesCosignUnreachable() (gas: 246745)
+[PASS] test_aboveTheThreshold_requiresASignature() (gas: 254760)
+[PASS] test_approval_isConsumedByTheSpend() (gas: 326632)
+[PASS] test_approval_survivesAnUnrelatedFailure() (gas: 391574)
+[PASS] test_approveCosign_onAMandateWithoutCosigning_reverts() (gas: 145653)
+[PASS] test_approveCosign_onUnknownMandate_reverts() (gas: 13307)
+[PASS] test_atTheThreshold_noSignatureRequired() (gas: 319718)
+[PASS] test_cosignRequired_carriesTheHashToApprove() (gas: 402410)
+[PASS] test_cosign_isCheckedAfterEveryCap() (gas: 236240)
+[PASS] test_onlyTheNamedCosignerMayApprove() (gas: 173451)
+[PASS] test_spendHash_isBoundToChainAndContract() (gas: 170932)
+[PASS] test_withApproval_theSpendGoesThrough() (gas: 332699)
+[PASS] test_withdrawCosign_byAStranger_reverts() (gas: 198375)
+[PASS] test_withdrawCosign_revokesAnUnusedApproval() (gas: 266598)
+Suite result: ok. 17 passed; 0 failed; 0 skipped; finished in 210.83s (8.88ms CPU time)
+
+Ran 14 tests for test/Windows.t.sol:WindowsTest
+[PASS] test_ATTACK_backwardsClockCannotRefillTheWindow() (gas: 318423)
+[PASS] test_ATTACK_rewindOntoTheSameRingSlot_accumulatesRatherThanOverwrites() (gas: 370994)
+[PASS] test_ATTACK_tumblingWindowBoundaryBurst_findsNoHole() (gas: 1061390)
+[PASS] test_DOCUMENTED_COST_fullRefillTakesWindowPlusOneSubPeriod() (gas: 374004)
+[PASS] test_DOCUMENTED_COST_sustainedThroughputIsKOverKPlusOne() (gas: 1798799)
+[PASS] test_REGRESSION_spendLateInASubBucketIsStillCountedKBucketsLater() (gas: 319155)
+[PASS] test_headroom_returnsIncrementallyAsBucketsAgeOut() (gas: 1132093)
+[PASS] test_higherBucketCount_shrinksTheOverhead() (gas: 350329)
+[PASS] test_longIdleGap_clearsTheWindowCompletely() (gas: 370336)
+[PASS] test_multipleWindows_denialNamesTheBindingWindow() (gas: 481533)
+[PASS] test_refusalByLaterWindow_doesNotConsumeEarlierWindows() (gas: 449583)
+[PASS] test_repeatedIdenticalTimestamps_bothCount() (gas: 365607)
+[PASS] test_windowRemaining_onUnconfiguredIndex_isZero() (gas: 149030)
+[PASS] test_windowsAreIsolatedPerMandate() (gas: 511724)
+Suite result: ok. 14 passed; 0 failed; 0 skipped; finished in 544.88s (43.42ms CPU time)
+
+Ran 4 tests for test/WindowFuzz.t.sol:WindowFuzzTest
+[PASS] testFuzz_exactTrailingWindowNeverExceedsTheCap(uint256,uint256) (runs: 20000, μ: 6880400, ~: 6521612)
+[PASS] testFuzz_greedyAdversaryCannotBreachTheExactWindow(uint256,uint256) (runs: 20000, μ: 4069667, ~: 3784273)
+[PASS] testFuzz_lifetimeCapIsNeverExceeded(uint256) (runs: 20000, μ: 1369654, ~: 1352782)
+[PASS] testFuzz_twoWindowsBothHoldExactly(uint256) (runs: 20000, μ: 7294463, ~: 7296545)
+Suite result: ok. 4 passed; 0 failed; 0 skipped; finished in 544.88s (1757.06s CPU time)
+
+Ran 25 tests for test/Bounds.t.sol:BoundsTest
+[PASS] test_allowlist_isAddressValuedNotStringValued() (gas: 176049)
+[PASS] test_allowlist_multipleRecipients() (gas: 419843)
+[PASS] test_allowlist_permitsNamedRecipientOnly() (gas: 333716)
+[PASS] test_amountAboveUint96_reverts_beforeTheCapIsConsulted() (gas: 169367)
+[PASS] test_expiry_isExclusive() (gas: 307989)
+[PASS] test_notBefore_isInclusive() (gas: 310631)
+[PASS] test_perTxCap_doesNotBoundTheTotal() (gas: 387079)
+[PASS] test_perTxCap_isInclusiveAtTheCap() (gas: 296290)
+[PASS] test_perTxCap_oneUnitOver_reverts() (gas: 181659)
+[PASS] test_revoke_byPayer_stopsEverything() (gas: 309901)
+[PASS] test_revoke_bySpender_isAlsoPermitted() (gas: 149960)
+[PASS] test_revoke_byStranger_reverts() (gas: 150328)
+[PASS] test_revoke_doesNotTouchTheUnderlyingAllowance() (gas: 160146)
+[PASS] test_revoke_isIdempotent() (gas: 152762)
+[PASS] test_revoke_outranksAValidCosignature() (gas: 202036)
+[PASS] test_revoke_unknownMandate_reverts() (gas: 13174)
+[PASS] test_spend_movesMoneyAndRecordsIt() (gas: 296434)
+[PASS] test_spend_neverCustodiesFunds() (gas: 344602)
+[PASS] test_spend_unknownMandate_reverts() (gas: 38418)
+[PASS] test_totalCap_doesNotRecoverWithTime() (gas: 300819)
+[PASS] test_totalCap_exactFitThenRefusal() (gas: 395221)
+[PASS] test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping() (gas: 303697)
+[PASS] test_wrongSpender_reverts() (gas: 175010)
+[PASS] test_zeroAmount_reverts() (gas: 169260)
+[PASS] test_zeroRecipient_reverts_evenWithNoAllowlist() (gas: 167172)
+Suite result: ok. 25 passed; 0 failed; 0 skipped; finished in 926.58s (11.97ms CPU time)
+
+Ran 5 tests for test/WindowInvariant.t.sol:WindowInvariantTest
+[PASS] invariant_exactTrailingWindowNeverExceedsTheCap() (runs: 2000, calls: 512000, reverts: 0)
+
+╭---------------+-----------+--------+---------+----------╮
+| Contract      | Selector  | Calls  | Reverts | Discards |
++=========================================================+
+| WindowHandler | idle      | 170220 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendAll  | 171136 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendSome | 170644 | 0       | 0        |
+╰---------------+-----------+--------+---------+----------╯
+
+[PASS] invariant_theContractsBooksAgreeWithTheLedger() (runs: 2000, calls: 512000, reverts: 0)
+
+╭---------------+-----------+--------+---------+----------╮
+| Contract      | Selector  | Calls  | Reverts | Discards |
++=========================================================+
+| WindowHandler | idle      | 170220 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendAll  | 171136 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendSome | 170644 | 0       | 0        |
+╰---------------+-----------+--------+---------+----------╯
+
+[PASS] invariant_theWindowIsTheOnlyThingThatEverRefuses() (runs: 2000, calls: 512000, reverts: 0)
+
+╭---------------+-----------+--------+---------+----------╮
+| Contract      | Selector  | Calls  | Reverts | Discards |
++=========================================================+
+| WindowHandler | idle      | 170220 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendAll  | 171136 | 0       | 0        |
+|---------------+-----------+--------+---------+----------|
+| WindowHandler | spendSome | 170644 | 0       | 0        |
+╰---------------+-----------+--------+---------+----------╯
+
+[PASS] test_greedyHandlerReachesTheCap_soRefusalIsExercised() (gas: 449736)
+[PASS] test_handlerCanActuallySpend_soTheInvariantsAreNotVacuous() (gas: 1618690)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 948.66s (2086.05s CPU time)
+
+Ran 26 tests for test/Creation.t.sol:CreationTest
+[PASS] test_constructor_zeroUsdc_reverts() (gas: 43457)
+[PASS] test_createMandate_allowlistFlagMismatch_reverts() (gas: 20388)
+[PASS] test_createMandate_cosignFlagWithoutCosigner_reverts() (gas: 20044)
+[PASS] test_createMandate_cosignerWithoutFlag_reverts() (gas: 21952)
+[PASS] test_createMandate_credentialWithZeroMinResponse_reverts() (gas: 118085)
+[PASS] test_createMandate_emitsMandateCreated() (gas: 125689)
+[PASS] test_createMandate_expiryAloneIsEnoughOfABound() (gas: 117946)
+[PASS] test_createMandate_expiryNotAfterNotBefore_reverts() (gas: 20701)
+[PASS] test_createMandate_flagWithoutValue_reverts() (gas: 18142)
+[PASS] test_createMandate_fourWindows_isAccepted() (gas: 222567)
+[PASS] test_createMandate_gateWithoutRegistry_reverts() (gas: 2383250)
+[PASS] test_createMandate_sameSaltTwice_reverts() (gas: 124623)
+[PASS] test_createMandate_storesEveryField() (gas: 158182)
+[PASS] test_createMandate_tooManyBuckets_reverts() (gas: 90729)
+[PASS] test_createMandate_tooManyWindows_reverts() (gas: 23066)
+[PASS] test_createMandate_totalCapFlagMismatch_reverts() (gas: 19846)
+[PASS] test_createMandate_unbounded_reverts() (gas: 18004)
+[PASS] test_createMandate_valueWithoutFlag_reverts() (gas: 18305)
+[PASS] test_createMandate_windowLengthNotDivisibleByBuckets_reverts() (gas: 91032)
+[PASS] test_createMandate_zeroAddressInAllowlist_reverts() (gas: 141464)
+[PASS] test_createMandate_zeroLengthOrCapOrBuckets_reverts() (gas: 251457)
+[PASS] test_createMandate_zeroSpender_reverts() (gas: 19008)
+[PASS] test_domainSeparator_isRemitV1() (gas: 8808)
+[PASS] test_flagConstants_matchTheContract() (gas: 18273)
+[PASS] test_gasBounds_areWhatTheModelAssumes() (gas: 9629)
+[PASS] test_mandateId_isDerivedFromDomainChainContractPayerAndSalt() (gas: 231440)
+Suite result: ok. 26 passed; 0 failed; 0 skipped; finished in 948.68s (5.71ms CPU time)
+
+Ran 13 test suites in 948.73s (4124.55s CPU time): 140 tests passed, 0 failed, 0 skipped (140 total tests)
+
+real	15m51.857s
+user	81m27.476s
+sys	0m3.112s
+### EXIT=0 ###
+### END 2026-08-25T16:32:28Z ###

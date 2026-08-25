@@ -106,12 +106,39 @@ forge test -vvv                   # traces for failures only
 forge test --match-path 'test/Windows.t.sol'
 forge test --match-test 'test_ATTACK'
 forge test --gas-report           # run 2026-08-24; see DESIGN.md for the table
-forge test --profile deep         # 20k fuzz runs, 2000 invariant runs, depth 256
+FOUNDRY_PROFILE=deep forge test   # 20k fuzz runs, 2000 invariant runs, depth 256
 forge lint                        # run 2026-08-24; expect 0 — see the section below
 ```
 
-The default profile is tuned to finish while you watch it. `--profile deep` is the
+The default profile is tuned to finish while you watch it. The deep profile is the
 pre-audit setting and takes minutes.
+
+**The deep gate was run on 2026-08-25 and it passes: 140 passed, 0 failed, 0 skipped,
+exit 0, in 15m51.857s wall.** Full output including the config dump is
+`evidence/deep.log`. What that actually bought, stated in calls rather than in runs: each
+of the three `invariant_` functions in `WindowInvariant.t.sol` ran 2,000 sequences of 256
+handler calls, so 512,000 calls apiece and 1,536,000 in total, against 16,384 apiece under
+the default profile. Each of the four `testFuzz_` functions in `WindowFuzz.t.sol` ran
+20,000 cases instead of 512. Nothing new was found — no counterexample, no shrink, no
+revert that the policy did not intend. The only line in the log matching `panic` is the
+name of a test that asserts a panic.
+
+Note the invocation. It is written above as `FOUNDRY_PROFILE=deep forge test` rather than
+`forge test --profile deep`, and the reason is a failure mode this repo has already been
+bitten by twice: a flag or glob that Foundry does not accept can fail *quietly* and leave
+you reading a run that used the default settings while looking like success. The env-var
+form is the one guaranteed across versions. Whichever you use, put `forge config` in front
+of it and check that `runs = 20000` and `depth = 256` actually come back — that dump is the
+first thing in `evidence/deep.log` for exactly this reason. Do not infer that the deep
+profile was live from the fact that the run took a long time.
+
+Two timing figures for planning, and they disagree, so use the right one. `time` measured
+`user 81m27.476s, sys 0m3.112s` against `real 15m51.857s`, which is about 5.1× parallelism.
+Foundry's own self-reported aggregate is lower, 4124.55s (68m45s), because it sums per-test
+time and does not account for compilation or its own overhead. By Foundry's accounting the
+load is wildly lopsided: `WindowFuzz` 1,757s and `WindowInvariant` 2,086s, which is 93% of
+its total between two files, while every other suite finished in milliseconds. If the deep
+gate ever needs to be faster, those two files are the only ones worth looking at.
 
 Two commands are worth running before believing any of the rest:
 

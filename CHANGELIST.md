@@ -97,6 +97,25 @@ match the eventual Arc receipt to within a calldata byte. That covers
 needs Arc's measured `transferFrom` premium of 13,110 added. Cost the changes
 below before redeploying rather than after.
 
+*The pre-audit gate is also now green, which unblocks the "re-run" half of the plan
+above.* `FOUNDRY_PROFILE=deep forge test` was run on 2026-08-25: 140 passed, 0 failed,
+15m52s, no counterexample. Each of the three invariants ran 512,000 handler calls
+against 16,384 by default, and each of the four fuzz properties ran 20,000 cases
+against 512. Evidence in `evidence/deep.log`, including the config dump that proves the
+profile actually resolved.
+
+*And one number in the plan above moved, which is worth naming because it is a v2
+input.* Regenerating `evidence/gas.log` on the same day — it had never been rebuilt
+since the root commit and still claimed 136 tests across 9 suites — shifted two
+published figures. The `spend` median went from 110,380 to **105,935**, because the old
+log was unseeded and the median is not reproducible without a pinned seed. The
+deployment cost went from 2,557,693 to **2,557,681**, twelve gas, and that one is
+**unattributed**: the contract is frozen, and restricting the run to the old log's exact
+9 suites and 136 tests still gives 2,557,681, so it is not the four ArcParity suites
+added since. Both corrections are in `DESIGN.md`, `README.md`, `START-HERE.md` and
+`foundry.toml`. Neither disturbs a v2 decision below, but cost v2 off the regenerated
+file, not off the old one.
+
 ## The changelist
 
 **Certain, and free.** Update the file-header banner in `MandateManager.sol`. It was

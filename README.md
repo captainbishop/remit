@@ -262,7 +262,7 @@ baseline to the gas.
 The intrinsic-gas half of those predictions came out exact rather than approximate — 22,304
 predicted and 22,304 charged for the spend's 164 bytes of calldata, and 24,828 against the
 test's 24,816 for `createMandate`, a 12-gas gap caused by a single byte of the spender
-address. Deployment reconciled to **0.009%**: 2,557,693 predicted against 2,557,453 charged.
+address. Deployment reconciled to **0.009%**: 2,557,681 predicted against 2,557,453 charged.
 
 Two numbers here were wrong in earlier drafts of this file and are worth naming. The
 contract is **11,572 bytes** of runtime code, not the 11,964 published for weeks — the

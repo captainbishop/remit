@@ -51,7 +51,7 @@ Transaction hashes in these files remain independently checkable at
 
 | File | What it establishes |
 |---|---|
-| `gas.log` | The full gas report at `optimizer_runs = 200`. Also, read correctly, the file that overturned task #31: its five state-changing minima all sit just above 21,000 plus their own calldata while all ten view minima sit far below it, so the state-changing figures are transaction-equivalent and the view figures are not. `spendHash` at 1,003 gas proves that about views only. |
+| `gas.log` | The full gas report at `optimizer_runs = 200`, **regenerated 2026-08-25 with `--fuzz-seed 5042002`** — the committed version had never been rebuilt since the root commit and still ended "9 test suites, 136 tests", predating `ArcParity.t.sol`. Also, read correctly, the file that overturned task #31: its five state-changing minima all sit just above 21,000 plus their own calldata while all ten view minima sit far below it, so the state-changing figures are transaction-equivalent and the view figures are not. `spendHash` at 1,003 gas proves that about views only. The file's own header documents which of its columns survive a re-run and which do not — read that before comparing this file against anything. |
 | `gas-10000.log` | The same tree built at `optimizer_runs = 10000`. Six gas saved on a spend for 27% more bytecode — the measurement behind the decision to stay at 200, recorded in full in `foundry.toml`. |
 | `marginal-a.log` | The steady-state marginal spend, **177,429 gas**, measured inside one already-written window bucket. This replaced the published ~142,500, which had wrongly compared a first-ever spend against a bare transfer. |
 | `approve.log`, `approve-lo.log` | ERC-20 `approve` receipts: **55,438** onto a virgin allowance slot and **38,338** onto a live one. The 17,100 difference is the EIP-2200 storage-class gap, *not* an Arc premium — it appears identically on a plain mock, as `premium.log` shows. Both receipts were later reproduced to the gas with a different spender and amount. |
@@ -183,5 +183,12 @@ receipt to the gas for anything that does not touch USDC, which is how v2's `cre
 
 | File | What it establishes |
 |---|---|
-| `test140.log` | 140 tests passing across 13 suites. |
+| `test140.log` | 140 tests passing across 13 suites, under **plain `forge test`**. The qualifier matters: the same suite reported 139 passed / 1 failed under `--gas-report` until 2026-08-25, because tracing overhead lands inside a `gasleft()` window in `ArcParity.t.sol` and inverted an unsigned subtraction. `grep -c "| Function Name" test140.log` returns 0, which is how you can tell this run did not use the flag. |
+| `deep.log` | **The pre-audit deep gate: 140 passed, 0 failed, exit 0, 15m51.857s wall.** Each of the three `invariant_` functions ran 2,000 sequences of 256 calls — 512,000 handler calls apiece, 1,536,000 in total, against 16,384 apiece by default — and each of the four `testFuzz_` functions ran 20,000 cases instead of 512. No counterexample, no shrink. The `forge config` dump at the top is the point of the file as much as the result is: it is what proves the deep profile was actually resolved, with `runs = 20000`, `depth = 256`, `shrink_run_limit = 20000` and `optimizer_runs = 200` matching the default profile. A gate that silently compiles different bytecode from the one being audited is not a gate. |
 | `lint.log` | The 91 `forge lint` warnings, 5 in the contract and 86 in the tests, as they stood when the split documented in `foundry.toml` was decided. Regenerable in principle, kept because any change to the contract stops it reproducing — at which point this is the only record of the state that comment describes. |
+
+**Two of these three files are the reason this folder exists rather than a sentence in a
+README.** `test140.log` and `deep.log` both say "140 passed", and they are not
+interchangeable: one is a 12-second smoke test and the other is a 16-minute campaign, and
+only the second one is a claim you could put in front of an auditor. The distinction is
+invisible in the pass count and visible only in the config dump and the wall clock.
