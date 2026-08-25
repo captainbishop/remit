@@ -208,10 +208,16 @@ the duplicate rather than the mandate seizing up.
 **Not verified.** It has not been audited. Five mandate shapes have now been exercised
 live — ungated, cosigned, identity-gated, and credential-gated with and without a staleness
 bound — and both ERC-8004 gates fired against Arc's real registries with a passing ungated
-control beside them. **`revoke` is the one path with zero live transactions**, and the
-identity gate's *positive* path stays untestable until an identity NFT is minted to our
-delegate. Sub-second blocks sharing a timestamp and the CallFrom precompile remain asserted
-from documentation rather than observed.
+control beside them. `revoke` was exercised on 2026-08-25, once by a payer and once by a
+delegate revoking its own authority, and `withdrawCosign` the same day, so **all five
+state-changing functions now have live transactions across thirty-one of them, every one with
+`status 1`**. Both of those numbers were wrong in an earlier version of this paragraph, which
+said `revoke` was the only untried path and then said five of six functions rather than five of
+five; the surface is five, obtained by parsing every declaration in the contract for `external`
+or `public` without `view`. What stays untestable rather than merely untried is the identity
+gate's *positive* path, until an identity NFT is minted to our delegate.
+Sub-second blocks sharing a timestamp and the CallFrom precompile remain asserted from
+documentation rather than observed.
 
 **Measured against Arc's real USDC, as of 2026-08-24.** The steady-state marginal spend,
 measured inside an already-written window bucket, costs **177,429 gas ≈ 0.0037 USDC**. A

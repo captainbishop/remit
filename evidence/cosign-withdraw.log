@@ -1,0 +1,175 @@
+
+==============================================================
+0. Read M2's real configuration off the chain. No field is taken from notes.
+==============================================================
+   spender          0x88549f2128f16bda5aa0b6acbe5e70f8e876bbd0   (must be 0x88549F2128f16BdA5aA0b6aCBe5e70F8E876bbd0)
+   cosigner         0xb56a7008dcda0b7c603a2e1fa15fef58cff0dcc0   (must be 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0)
+   cosignThreshold  50000
+   perTxCap         500000
+   totalCap         1000000    totalSpent  200000
+   flags            79       revoked     0
+
+==============================================================
+1. Pick the amount from live headroom, not from a guess.
+==============================================================
+   The gate at line 492 is 'amount > m.cosignThreshold' — STRICT. That is
+   why the 50,000 spend in evidence/subthreshold.log did not trip it.
+   policyHeadroom loops every window, so it is the real ceiling. Expect
+   500,000 — the perTxCap. It binds ahead of the 800,000 left under the
+   total cap, and ahead of the window, which is a 1,000,000 cap over
+   86,400s in 24 hourly buckets and holds nothing from yesterday's spends:
+   policyHeadroom(M2) = 500000
+   chosen amount      = 60000   (over the gate, inside every cap)
+
+==============================================================
+2. Both nonces must be unused, or line 471 reverts before the gate at 492.
+==============================================================
+   isNonceUsed(M2, ..0cd0)  0x0000000000000000000000000000000000000000000000000000000000000000
+   isNonceUsed(M2, ..0cd1)  0x0000000000000000000000000000000000000000000000000000000000000000
+
+==============================================================
+3. Recipient must be allowlisted — M2 carries F_ALLOWLIST (bit 6).
+==============================================================
+   Three spends already landed at 0x..c0de, so expect true.
+0x0000000000000000000000000000000000000000000000000000000000000001
+
+==============================================================
+4. THE HASH, first derivation: the public spendHash view at line 747.
+==============================================================
+   hash  (nonce ..0cd0) = 0x47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6
+   ghost (nonce ..0cd1) = 0x93c75437db450fe5b59d883429a1312d17cd944c19ba7baddf85039b7299eef2
+
+==============================================================
+5. THE HASH, second derivation: out of the revert itself. Line 294 is
+==============================================================
+   'error CosignRequired(bytes32 spendHash)' and line 493 passes the hash
+   into it. Expect selector 0x6a39578f followed by the SAME 32 bytes as
+   check 4. Two independent derivations agreeing is the point.
+Error: server returned an error response: error code 3: execution reverted, data: "0x6a39578f47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6"
+
+==============================================================
+6. Not approved yet.
+==============================================================
+   isCosignApproved(M2, hash)   0x0000000000000000000000000000000000000000000000000000000000000000
+   isCosignApproved(M2, ghost)  0x0000000000000000000000000000000000000000000000000000000000000000
+
+==============================================================
+7. Free auth probes on withdrawCosign BEFORE spending anything on it.
+==============================================================
+   a) the AGENT is the spender, not the cosigner -> NotCosigner 0x1cf89d6f
+Error: server returned an error response: error code 3: execution reverted, data: "0x1cf89d6f"
+   b) an UNKNOWN mandate. approveCosign checks existence at line 728;
+      withdrawCosign at 736-741 does NOT. So on a mandate that does not
+      exist, m.cosigner is the zero address and the caller gets
+      NotCosigner 0x1cf89d6f rather than UnknownMandate 0x473251f4.
+      Safe, but it names the wrong problem. Documented, not fixed.
+Error: server returned an error response: error code 3: execution reverted, data: "0x1cf89d6f"
+
+==============================================================
+SEND 1 of 3 — approveCosign(M2, hash) as the COSIGNER.
+==============================================================
+   Prediction: within a few tens of gas of 53,114 (cosign-approve.log),
+   differing only by 12 gas per zero byte in the hash. password ...
+
+blockHash            0x7557b883fa3b001a8d87830f9a2043fc6ae40e8c225595f384c4b7d3c73c87db
+blockNumber          58766930
+contractAddress      
+cumulativeGasUsed    13892570
+effectiveGasPrice    21000000000
+from                 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0
+gasUsed              53102
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0x237a993f56f52f6e0716ac9bebbfe49539bb7cf87788f563120f6b27ecbd0a6f","0xee83f8e2d8d261f29299d173c42a2ef7f245996b3cb6aa0c49014bd8fb7c746b","0x47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6","0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0"],"data":"0x","blockHash":"0x7557b883fa3b001a8d87830f9a2043fc6ae40e8c225595f384c4b7d3c73c87db","blockNumber":"0x380b652","blockTimestamp":"0x6a8d6272","transactionHash":"0xd545ff0faaacfce8dbb082ce56b314fb673bbd186342a6301f147a4043ecaaa5","transactionIndex":"0x55","logIndex":"0x146","removed":false}]
+logsBloom            0x00000000000004000000000000000000000000000000000400000000000000200000000040000000000010000800000000000000000000000000000000000000000080800000000000000000000008000000000000000000000000000000400000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000020000000000000000000000000000000000040000000000000000000000000000000000
+root                 
+status               1 (success)
+transactionHash      0xd545ff0faaacfce8dbb082ce56b314fb673bbd186342a6301f147a4043ecaaa5
+transactionIndex     85
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+8. The approval is live, and the spend now PASSES the gate.
+==============================================================
+   isCosignApproved(M2, hash)  0x0000000000000000000000000000000000000000000000000000000000000001
+   Dry-run spend must now SUCCEED and return the hash it was approved
+   under — spend() returns 'bytes32 hash', so the return value is a third
+   sighting of the same 32 bytes:
+0x47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6
+
+==============================================================
+SEND 2 of 3 — withdrawCosign(M2, hash). FIRST EVER LIVE CALL, line 736.
+==============================================================
+   Clears a slot a previous transaction set, so an EIP-3529 refund of
+   4,800 applies, capped at gasUsed/5. Expect ~31,000 of work showing as
+   ~26,000 on the receipt. Watch for the CosignWithdrawn log. password ...
+
+blockHash            0x602a787947e59998925adc97152fa54e3223eb747846555d7a683877453ddbe0
+blockNumber          58766965
+contractAddress      
+cumulativeGasUsed    1043226
+effectiveGasPrice    21000000000
+from                 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0
+gasUsed              26889
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0x9c1eb928bb591a528a7015e72205402c7672cca208a96ddb70a79dbfd0194a92","0xee83f8e2d8d261f29299d173c42a2ef7f245996b3cb6aa0c49014bd8fb7c746b","0x47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6","0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0"],"data":"0x","blockHash":"0x602a787947e59998925adc97152fa54e3223eb747846555d7a683877453ddbe0","blockNumber":"0x380b675","blockTimestamp":"0x6a8d6289","transactionHash":"0x6515918e955058ddb595e176efa2859be0e884de70ff0d45fedb20cad550c38b","transactionIndex":"0xa","logIndex":"0x28","removed":false}]
+logsBloom            0x00000000000004000000000000000000000000000000000400000000000000200000000040000000000010000000000000000000000000000000000000000000000080800000000000000000000008000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000004000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000010000000000000010000020000000000000000000000000000000000000000000000000000000000000000000000
+root                 
+status               1 (success)
+transactionHash      0x6515918e955058ddb595e176efa2859be0e884de70ff0d45fedb20cad550c38b
+transactionIndex     10
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+9. THE SECURITY PROPERTY. The cosigner changed their mind, and the spend
+==============================================================
+   they had authorised is authorised no longer. Expect isCosignApproved
+   false and CosignRequired 0x6a39578f back again, same hash. Nothing
+   else about M2 moved: same caps, same nonce, same allowlist.
+   isCosignApproved(M2, hash)  0x0000000000000000000000000000000000000000000000000000000000000000
+Error: server returned an error response: error code 3: execution reverted, data: "0x6a39578f47c56daaec229c08b51736f1ba893bba56b0928c28250562c741005bda31cab6"
+
+==============================================================
+SEND 3 of 3 — withdrawCosign(M2, ghost), a hash NEVER approved.
+==============================================================
+   'delete' on an already-zero slot succeeds, so this emits
+   CosignWithdrawn announcing the removal of authority that was never
+   granted. An indexer that treats that event as a state transition will
+   record one that did not happen.
+   Prediction: 2,800 LESS work than send 2 (100 instead of SSTORE_RESET's
+   2,900) but no 4,800 refund to collect, so the receipt should come in
+   ABOUT 2,000 GAS HIGHER than send 2 for doing less. password ...
+
+blockHash            0x07dbcc746c41cdbb6b202bc2d2e9533b1a35428d170167da6a788e6843a5c94e
+blockNumber          58766997
+contractAddress      
+cumulativeGasUsed    1940333
+effectiveGasPrice    21000000000
+from                 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0
+gasUsed              28901
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0x9c1eb928bb591a528a7015e72205402c7672cca208a96ddb70a79dbfd0194a92","0xee83f8e2d8d261f29299d173c42a2ef7f245996b3cb6aa0c49014bd8fb7c746b","0x93c75437db450fe5b59d883429a1312d17cd944c19ba7baddf85039b7299eef2","0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0"],"data":"0x","blockHash":"0x07dbcc746c41cdbb6b202bc2d2e9533b1a35428d170167da6a788e6843a5c94e","blockNumber":"0x380b695","blockTimestamp":"0x6a8d62a1","transactionHash":"0x7e10b4bd3ce5d914851685654c11677f3c287c4ba2b4bea13b4b2a363d37aa3a","transactionIndex":"0xe","logIndex":"0x2f","removed":false}]
+logsBloom            0x00000000000004000000000000000000000000000000000400000000000000200000000040000000000010000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000010000000000000010000020000000000800000000000000000000000000004000000000000000000000000000000
+root                 
+status               1 (success)
+transactionHash      0x7e10b4bd3ce5d914851685654c11677f3c287c4ba2b4bea13b4b2a363d37aa3a
+transactionIndex     14
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+10. Nothing drifted. M2 is untouched apart from the approval that came and
+==============================================================
+    went: totalSpent still 200000, headroom still 500000, still live.
+    isLive(M2)          0x0000000000000000000000000000000000000000000000000000000000000001
+    policyHeadroom(M2)  0x000000000000000000000000000000000000000000000000000000000007a120
+    spendable(M2)       0x000000000000000000000000000000000000000000000000000000000007a120
+    getMandate(M2) tail — flags, windowCount, revoked:
+000010000000000000000000000000000000000000000000000000000000000000000
+
+done. withdrawCosign has run. All six state-changing functions in
+MandateManager now have live transactions.

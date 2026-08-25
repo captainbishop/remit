@@ -1,0 +1,67 @@
+
+==============================================================
+1. Which token is this deployment actually bound to? (line 151, immutable)
+==============================================================
+0x0000000000000000000000003600000000000000000000000000000000000000
+
+==============================================================
+2. THE ALLOWANCE THAT MATTERS. Line 868 reads allowance(payer, THIS
+==============================================================
+   CONTRACT), not allowance(payer, agent). My earlier check asked the
+   wrong pair. Expect >= 500,000 for spendable(M3)=500,000 to have been
+   correct before revocation.
+   usdc = 0x3600000000000000000000000000000000000000
+   allowance(payer -> MandateManager):
+0x0000000000000000000000000000000000000000000000000000000000192d50
+   allowance(payer -> agent)  [irrelevant to Remit; #42 leftover]:
+0x00000000000000000000000000000000000000000000000000000000000186a0
+   balanceOf(payer)  [the other clamp, line 870]:
+0x00000000000000000000000000000000000000000000000000000000011b0334
+
+==============================================================
+3. isLive — the predicate both views funnel through (line 782).
+==============================================================
+   M3 revoked -> false, M4 revoked -> false, M1 -> true, M5 -> true.
+   0xd97ac489  0x0000000000000000000000000000000000000000000000000000000000000000
+   0x196db6b1  0x0000000000000000000000000000000000000000000000000000000000000000
+   0x5095a776  0x0000000000000000000000000000000000000000000000000000000000000001
+   0xf1836df7  0x0000000000000000000000000000000000000000000000000000000000000001
+
+==============================================================
+4. M1 is still healthy — the real ceiling an agent would read.
+==============================================================
+   policyHeadroom / spendable:
+0x000000000000000000000000000000000000000000000000000000000007a120
+0x000000000000000000000000000000000000000000000000000000000007a120
+
+==============================================================
+THE SEND — redundant revoke of M3, already revoked. Estimate said 28,702.
+==============================================================
+   First revoke receipt was 30,808. Watch gasUsed, and watch whether a
+   MandateRevoked log appears anyway. password for remit-testnet ...
+
+blockHash            0x4a39b8a23d0fbebf950e3d0b18db3274c53221da75ebfe58dbafb735146d4d69
+blockNumber          58758822
+contractAddress      
+cumulativeGasUsed    716539
+effectiveGasPrice    21000000000
+from                 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0
+gasUsed              28008
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0xafd4f68366bac1811b7d8bd97a1a1091a281ec07d10126d72babb31ebc30f0cb","0xd97ac489ddcff3d515cbdf5b5a04d283f09c78b6bfd4c0e0211e82372ad4af61","0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0"],"data":"0x","blockHash":"0x4a39b8a23d0fbebf950e3d0b18db3274c53221da75ebfe58dbafb735146d4d69","blockNumber":"0x38096a6","blockTimestamp":"0x6a8d4b66","transactionHash":"0xe1d054e9221efb3a82ac2382f42562685448e76d02c03454cb47b24a0f26d958","transactionIndex":"0x3","logIndex":"0x14","removed":false}]
+logsBloom            0x00000000000004000000000000000210000000000000000400000000000000200000000040000000000000000000000000000020000000000000000000000000000000800000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000001000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000
+root                 
+status               1 (success)
+transactionHash      0xe1d054e9221efb3a82ac2382f42562685448e76d02c03454cb47b24a0f26d958
+transactionIndex     3
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+5. Nothing else moved: getMandate(M3) tail, and M1 still spendable.
+==============================================================
+000000000000000000000000000000000000000000000000000000000000000000001
+0x000000000000000000000000000000000000000000000000000000000007a120
+
+done. Three revoke transactions now exist: M3, M4, and M3 again.

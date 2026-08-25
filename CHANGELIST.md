@@ -20,9 +20,16 @@ written list — rather than piecemeal every time something turns up.
 
 ## Standing answer: has a bug been found since deployment?
 
-**No.** As of 2026-08-24, with ten live transactions and two live mandates
-exercised against `0x3744E93B9e796E05CB66311d897559B6F3860196`, nothing
-discovered on-chain has been a defect in the deployed bytecode.
+**No.** As of 2026-08-25, with seventeen live transactions sent to
+`0x3744E93B9e796E05CB66311d897559B6F3860196` and five live mandates exercised
+against it — **thirty-one live transactions in total**, every one with `status 1`,
+once the two contract deployments, Arc's own USDC and the stand-in token used for
+the premium measurement are counted — nothing discovered on-chain has been a
+defect in the deployed bytecode. All five state-changing functions have now run
+live. That total is derived by counting distinct transaction hashes in
+`evidence/` and pairing each with its target address, not by incrementing a
+remembered figure, which is how the previous count of twenty-seven came to omit
+`MandateManager`'s own deployment while including MockUSDC's.
 
 What has actually been found sorts into four piles, and the distinction matters:
 
@@ -85,11 +92,16 @@ became `NOT AUDITED. LIVE ON ARC TESTNET SINCE 2026-08-24`, because the first wa
 false the moment the contract landed and a banner that lies trains readers to ignore
 it. But its body has since gone stale: it says "one mandate has been granted and one
 spend executed live" and "cosignature, both ERC-8004 gates and revoke have 139 passing
-tests and zero live transactions." As of 2026-08-24 there are **five** live mandates,
-four spends, and fifteen live transactions all with status 1; cosignature has three of
-them, and both ERC-8004 gates have been exercised against Arc's live registries. Only
-`revoke` still has zero live transactions. The test count is now 140. The unaudited /
-no-real-money half of the warning stays exactly as it is.
+tests and zero live transactions." As of 2026-08-25 there are **five** live mandates,
+four spends, three revocations, and **thirty-one** live transactions all with status 1;
+cosignature now has four of them, both ERC-8004 gates have been exercised against Arc's live
+registries, and neither `revoke` nor `withdrawCosign` is an exception any longer. The
+replacement banner **may** say that every state-changing path has run live, which is newly
+true and was false in every earlier draft of this note — but it must say **five** such paths,
+not six. The list has always been `createMandate`, `spend`, `revoke`, `approveCosign`,
+`withdrawCosign`; the count beside it said six for weeks because nobody parsed the source.
+The test count is now 140. The unaudited / no-real-money half of the warning stays exactly
+as it is.
 
 Line 26 of that banner also carries two superseded gas figures — `~142,500` for the
 policy machinery and `~32,700` for Arc's native-USDC accounting. Both are corrected
@@ -143,7 +155,29 @@ widening to `uint16` fits in slot 3's three spare bytes but would invalidate the
 packing measurements. It needs grant-time validation beside the existing
 invariant at line 363, a new branch in `spend`, and its own tests.
 
-**Open questions that must be answered before the list is final.** Whether an
+**Certain, free, and confirmed live on 2026-08-25.** Rename `NotPayer()` to
+`NotAuthorised()`. The error is thrown by `revoke` at line 704, whose check is
+`msg.sender != m.payer && msg.sender != m.spender` — the **spender is authorised
+too**, deliberately, because renouncing your own authority cannot harm the payer
+and it lets a compromised agent shut itself off. So the error fires on a path the
+spender may legitimately take, and its name says otherwise. Confirmed on chain:
+the agent revoked mandate 4 from its own key, tx `0x12d905a4…`, and a third-party
+address still gets `NotPayer()` `0x1435e357`. Note this is an **ABI change, not a
+comment change** — the selector becomes `0x1648fd01` — so anything decoding
+reverts by selector must be updated with the redeploy. Purely cosmetic in
+behaviour; a misleading error name is nonetheless a real cost paid by whoever
+debugs against it.
+
+**Certain, free, comment-only.** Complete `policyHeadroom`'s doc comment at lines
+827-828. It says the view ignores "the allowlist and any co-signature
+requirement", which is true but incomplete: it also ignores the ERC-8004 identity
+and credential gates. Demonstrated live on 2026-08-25 — the identity-gated
+mandate 3 reported `policyHeadroom` and `spendable` of 500,000 while every spend
+attempt against it reverted `IdentityNotHeld()`. An agent pre-flighting against
+that number would build a transaction that cannot succeed. The behaviour is
+correct and should not change; the comment should name the gates. Rides with the
+redeploy for the metadata-hash reason above.
+
 EIP-7702-delegated EOA counts as an EOA for the Memo and Multicall3From paths —
 now load-bearing beyond its original scope, because stealth-address sweeps on Arc
 depend on gas sponsorship (PRIVACY.md, layer 2). Whether the credential gate's
@@ -155,6 +189,48 @@ refused by a correctly configured gate.
 no contract defect. All three gates fired with their predicted selectors against
 Arc's live registries with a passing control, and the grant-time guard at line 407
 already refuses `minResponse == 0`. Nothing to change.
+
+The revoke exercise (#44) likewise turned up no defect. Revocation short-circuits
+ahead of every gate — the revert selector on a gate-blocked mandate changes from
+the gate's error to `Revoked()` `0x44825a4b` — both views fall to zero through
+`isLive`, the whole mandate struct survives revocation for auditing, and a
+redundant revoke is harmless. Two consequences are for integrators rather than for
+the contract: `MandateRevoked` **is re-emitted** on a redundant revoke, since line
+705 has no already-revoked guard, so an indexer must tolerate duplicates; and the
+approval a payer must zero to cut off Remit entirely is
+`allowance(payer, MandateManager)`, never an approval held by the delegate, which
+holds none. Both belong in integration notes. Adding a guard to line 705 would
+cost gas on the common path to prevent a harmless duplicate, so it is explicitly
+*not* on this list.
+
+*Found while verifying that write-up, and worth more than the write-up:*
+`withdrawCosign` at line 736 had **never run on chain** and was named in no
+document in this repository. It is covered by the local suite and appears in the
+gas report, which is why it stayed invisible — a green suite is not an inventory
+of live coverage. Every earlier claim that `revoke` was "the only path with zero
+live transactions" was wrong for that reason, and the enumeration that caught it
+(parse every declaration for `external` or `public` without `view` or `pure`, then
+grep the evidence for each) should be run before any future claim of live
+coverage. It has since been exercised — `0x6515918e…` withdrew a real pending
+approval and `0x7e10b4bd…` withdrew one that never existed — and neither turned up
+a defect. Two properties are worth writing down. It checks only that the caller is
+the cosigner, where `approveCosign` additionally checks that the mandate exists and
+carries `F_COSIGN`; confirmed live, a call against a nonexistent mandate returns
+`NotCosigner()` `0x1cf89d6f` rather than `UnknownMandate()` `0x473251f4`, which is
+safe but names the wrong problem. And `delete _cosignApproved[...]` succeeds
+whether or not an approval existed, so `CosignWithdrawn` was in fact emitted for
+authority that was never granted, with nothing in the event to distinguish it from
+a real withdrawal. Both are integrator notes rather than contract changes — the
+guard asymmetry is defensible on the same reasoning that lets a spender revoke,
+since giving up authority cannot harm the payer — and neither justifies gas on the
+common path.
+
+The same run re-measured `approveCosign` and the result retires a question this
+file used to track. A second live approval cost **53,102** against the first one's
+**53,114**, and the twelve-gas gap is entirely calldata: the new hash carries one
+zero byte, which is priced at 4 rather than 16. Subtracting each transaction's
+intrinsic cost leaves **31,026 gas of execution in both**, a day apart, to the
+unit — so the 53,114 was representative and not an accident of one block.
 
 ## What does not go in
 

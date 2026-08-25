@@ -110,6 +110,45 @@ to re-derive, not a confirmation.
 | `gate-m5.log` | Mandate 5, credential gate with an 86,400-second staleness bound. `gasUsed` 151,072. |
 | `gates-test.log` | All three gates firing against Arc's live registries with their predicted selectors — `IdentityNotHeld()` `0x6eab756c`, `CredentialMissing()` `0x9e586322`, `CredentialStale()` `0xca36b069` — **and the ungated control on mandate 1 succeeding**. The control is what makes the three failures evidence rather than three unexplained reverts. |
 
+## Revoke, the last untouched path (2026-08-25)
+
+| File | What it establishes |
+|---|---|
+| `revoke-pre.log` | Eleven read-only checks before anything irreversible was sent. Establishes the pre-state (mandate 3 unrevoked, gate-blocked with `IdentityNotHeld()` `0x6eab756c`; mandate 4 with `CredentialMissing()` `0x9e586322`), the authorisation boundary (a third-party address gets `NotPayer()` `0x1435e357`; an ungranted id gets `UnknownMandate()` `0x473251f4`, so line 703 precedes 704 and existence is not leaked), and **that the agent may revoke its own mandate** — which corrected my reading of line 704 before the test was designed around the wrong claim. |
+| `revoke.log` | The two real revocations. Payer revokes mandate 3, `gasUsed` **30,808**, tx `0x8e92bed6…`. Agent revokes mandate 4, `gasUsed` **32,945**, tx `0x12d905a4…`. Then the proof, which is a *changed selector*: both mandates now revert `Revoked()` **`0x44825a4b`** where they previously returned their gate errors, so line 444 short-circuits ahead of the gates at 473-474. Mandate 5 still returns `CredentialStale()` `0xca36b069` and mandate 1 still simulates a successful spend, which is what confines the change to the two intended mandates. `getMandate` shows `revoked` = 1 with every other field intact. |
+| `revoke-post.log` | The redundant revoke, `gasUsed` **28,008**, tx `0xe1d054e9…` — exactly 2,800 below the first, which is `SSTORE_RESET` 2,900 less a no-op write of 100, and **`MandateRevoked` is re-emitted** because line 705 has no guard. Also the allowance pair that actually governs a spend: `allowance(payer, MandateManager)` = 1,650,000 per line 868, against an unrelated payer→agent approval of 100,000 that had made `spendable` look broken and did not. Plus `usdc()` = `0x3600…0000`, `balanceOf(payer)` = 18,547,508, and `isLive` false / false / true / true across mandates 3, 4, 1 and 5. |
+
+All three revoke receipts reconcile to the byte: identical intrinsic gas of 21,576, and a
+dispatch residual of **532 on both payer-path transactions** despite storage costs differing by
+2,800, with the agent path's 569 exceeding it by exactly the 37 gas of the second address
+comparison. The gap between the two signers is 2,137, of which 2,100 is one cold `SLOAD` the
+payer's path never performs — **Solidity's `&&` short-circuit, visible in a gas receipt.**
+
+## Cosignature closed, the gap it exposed (2026-08-25)
+
+| File | What it establishes |
+|---|---|
+| `cosign-withdraw.log` | The full cosign loop on mandate 2, whose cosigner is the payer: a 60,000 dry-run reverts `CosignRequired(0x47c56daa…)`, `approveCosign` of that hash costs **53,102** (tx `0xd545ff0f…`), the dry-run now succeeds and returns the same hash, `withdrawCosign` of it costs **26,889** (tx `0x6515918e…`), the dry-run reverts `CosignRequired` again, and a `withdrawCosign` of a hash never approved costs **28,901** (tx `0x7e10b4bd…`) — **2,012 more, for 2,800 less work**. Also `approveCosign`'s second-ever live run reproducing the first to the unit once calldata is subtracted (31,026 gas of execution, both), the guard asymmetry on the unknown-mandate probe (`NotCosigner()` instead of `UnknownMandate()`), and `totalSpent` / `policyHeadroom` / `isLive` / the nonce all unchanged after the loop. |
+
+That last pair is the receipt-level demonstration of a rule the gas chapter learned the hard
+way: the standing `SSTORE` to an already-zero slot at 100 gas, with **no refund to collect**,
+costs more net than clearing a real slot at 2,900 with 4,800 back from EIP-3529. The gap is
+2,000, which is 4,800 − 2,800 exactly; the extra 12 on the receipt is calldata, one zero byte
+in the real hash where the ghost has none. Two constant residuals also fall out — 929 under a
+two-cold-`SLOAD` decomposition, 3,029 under a one-`SLOAD` one, and an impossible −1,171 under
+a third — which is the point of the caveat in the design doc: two receipts differing in one
+term cannot discriminate between decompositions, so the difference, not the model, is what is
+claimed.
+
+Two corrections arrived with this run. The transaction total is **31**, not 27: counting
+distinct `transactionHash` values across this directory and pairing each with its target shows
+MockUSDC's deployment was included in the old figure while `MandateManager`'s own was omitted
+— both seen here, the second in `deploy-check.log` and the first in the deploy output of
+`premium.log`. And the state-changing surface is **five** functions, not six: parsing every
+declaration in the contract for `external` or `public` without `view` or `pure` gives
+`createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`, and the count beside
+that list had been wrong for weeks. All five now have live transactions.
+
 ## Toolchain
 
 | File | What it establishes |

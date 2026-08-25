@@ -1,0 +1,117 @@
+
+==============================================================
+0a. Current allowance payer -> agent. spendable() returned 500,000 in the
+==============================================================
+    pre-run, which only makes sense if this is >= 500,000.
+0x00000000000000000000000000000000000000000000000000000000000186a0
+
+==============================================================
+0b. Confirm M3 and M4 are still unrevoked before we touch them.
+==============================================================
+000000000000000000000000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000000000000000000000000
+
+==============================================================
+SEND 1 of 2 — revoke M3 as the PAYER.  Estimate was 31,160.
+==============================================================
+    password for remit-testnet ...
+
+blockHash            0x7dce75adda58c0a04b0ca2ccf382cbfdadb6b6b06cddb413676209e2feb4d192
+blockNumber          58756722
+contractAddress      
+cumulativeGasUsed    1031733
+effectiveGasPrice    21000000000
+from                 0xB56A7008dcDa0B7c603a2E1fA15fef58cff0Dcc0
+gasUsed              30808
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0xafd4f68366bac1811b7d8bd97a1a1091a281ec07d10126d72babb31ebc30f0cb","0xd97ac489ddcff3d515cbdf5b5a04d283f09c78b6bfd4c0e0211e82372ad4af61","0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0"],"data":"0x","blockHash":"0x7dce75adda58c0a04b0ca2ccf382cbfdadb6b6b06cddb413676209e2feb4d192","blockNumber":"0x3808e72","blockTimestamp":"0x6a8d4729","transactionHash":"0x8e92bed649b0674fa753cb6010b59027b7391b40200db2822bd54a1961f2b2bb","transactionIndex":"0x8","logIndex":"0xf","removed":false}]
+logsBloom            0x00000000000004000000000000000210000000000000000400000000000000200000000040000000000000000000000000000020000000000000000000000000000000800000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000001000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000
+root                 
+status               1 (success)
+transactionHash      0x8e92bed649b0674fa753cb6010b59027b7391b40200db2822bd54a1961f2b2bb
+transactionIndex     8
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+SEND 2 of 2 — revoke M4 as the AGENT.  Estimate was 33,301.
+==============================================================
+    The delegate renouncing its own authority. password for remit-agent ...
+
+blockHash            0xa57e0c61009a7b8d28292c36387a938c36e33258dc4f56a2ac1968bc32bd3824
+blockNumber          58756758
+contractAddress      
+cumulativeGasUsed    3451630
+effectiveGasPrice    21000000000
+from                 0x88549F2128f16BdA5aA0b6aCBe5e70F8E876bbd0
+gasUsed              32945
+logs                 [{"address":"0x3744e93b9e796e05cb66311d897559b6f3860196","topics":["0xafd4f68366bac1811b7d8bd97a1a1091a281ec07d10126d72babb31ebc30f0cb","0x196db6b1679927aa20e05db057939393741f22e8ea93a748c2706ea78b11312a","0x00000000000000000000000088549f2128f16bda5aa0b6acbe5e70f8e876bbd0"],"data":"0x","blockHash":"0xa57e0c61009a7b8d28292c36387a938c36e33258dc4f56a2ac1968bc32bd3824","blockNumber":"0x3808e96","blockTimestamp":"0x6a8d473c","transactionHash":"0x12d905a465caf8a1f3c9c21fbe0c5b19d9df522abcb242a6515e75e7f6860c5f","transactionIndex":"0x9","logIndex":"0x1f","removed":false}]
+logsBloom            0x00000000000000000000000000000010000000000000000000000000000000000000000040000000000000000000000000000020000000000000000000000000000000800000000000000000000000000000000000000000000000000008400000000000000000000000000000000000000000000000000000000000000000000800000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000001000000000020000000000000000000000000000000000000000000000000000000000000000000000000000002000000
+root                 
+status               1 (success)
+transactionHash      0x12d905a465caf8a1f3c9c21fbe0c5b19d9df522abcb242a6515e75e7f6860c5f
+transactionIndex     9
+type                 2
+blobGasPrice         
+blobGasUsed          
+to                   0x3744E93B9e796E05CB66311d897559B6F3860196
+
+==============================================================
+1. THE KEY CHECK — M3 spend must now revert Revoked 0x44825a4b,
+==============================================================
+   NOT the gate error 0x6eab756c it returned before. A changed selector
+   proves line 444 short-circuits ahead of the gates at 473-474.
+Error: server returned an error response: error code 3: execution reverted, data: "0x44825a4b"
+
+==============================================================
+2. Same for M4: was CredentialMissing 0x9e586322, expect 0x44825a4b.
+==============================================================
+Error: server returned an error response: error code 3: execution reverted, data: "0x44825a4b"
+
+==============================================================
+3. M5 is UNTOUCHED — must still revert CredentialStale 0xca36b069.
+==============================================================
+   Proves we revoked exactly what we meant to and nothing else.
+Error: server returned an error response: error code 3: execution reverted, data: "0xca36b069"
+
+==============================================================
+4. Control — M1 must STILL SUCCEED and return a spendHash.
+==============================================================
+0x99b9c732eefd3a79cb7456e92f06b9274b9846b038374b152c8a35601ef24e8b
+
+==============================================================
+5. getMandate(M3) — last word must now be 1 (revoked).
+==============================================================
+0x000000000000000000000000b56a7008dcda0b7c603a2e1fa15fef58cff0dcc0000000000000000000000000000000000000000000000000000000000007a12000000000000000000000000088549f2128f16bda5aa0b6acbe5e70f8e876bbd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006abc51000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+
+==============================================================
+6. IDEMPOTENCY — revoke M3 again. Line 705 has no already-revoked guard,
+==============================================================
+   so this should SUCCEED and re-emit MandateRevoked rather than revert.
+0x
+
+==============================================================
+7. Gas for a second revoke. Writing true over true is a no-op SSTORE (100),
+==============================================================
+   so this should come in ~2,800 BELOW the 31,160 first revoke.
+28702
+
+==============================================================
+8. Can the AGENT revoke an ALREADY-revoked mandate? Still authorised.
+==============================================================
+0x
+
+==============================================================
+9. Views after revocation — spendable / policyHeadroom on M3.
+==============================================================
+   Both returned 500,000 before. Does either notice the revocation?
+0x0000000000000000000000000000000000000000000000000000000000000000
+0x0000000000000000000000000000000000000000000000000000000000000000
+
+==============================================================
+10. Auth boundary still holds post-revocation: vendor -> NotPayer 0x1435e357.
+==============================================================
+Error: server returned an error response: error code 3: execution reverted, data: "0x1435e357"
+
+done. Two mandates revoked, permanently. M1, M2 and M5 remain live.

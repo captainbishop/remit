@@ -720,13 +720,14 @@ does not say the model is right about the world, and it says nothing about what 
 under an adversary with a budget. **Remit is intended to hold real money**, which makes the
 audit a scheduled requirement rather than a disclaimer.
 
-~~The live exercise covered exactly one mandate shape.~~ **Superseded 2026-08-24.** Five
-mandate shapes have now been exercised live: ungated, cosigned, identity-gated, and
-credential-gated both with and without a staleness bound. The cosignature path has three
-live transactions, and both ERC-8004 gates have fired against Arc's real registries with
-their predicted selectors and a passing ungated control beside them. **`revoke` is the only
-path left with zero live transactions** — it is terminal, so it goes last, and the three
-gate-blocked mandates are the ones to spend on it.
+~~The live exercise covered exactly one mandate shape.~~ **Superseded 2026-08-24, and closed
+2026-08-25.** Five mandate shapes have now been exercised live: ungated, cosigned,
+identity-gated, and credential-gated both with and without a staleness bound. The cosignature
+path has three live transactions, and both ERC-8004 gates have fired against Arc's real
+registries with their predicted selectors and a passing ungated control beside them.
+~~**`revoke` is the only path left with zero live transactions.**~~ **`revoke` has now run
+three times** — the two gate-blocked mandates were spent on it, one revoked by its payer and
+one by its own delegate, and every function this contract exposes has been exercised on Arc.
 
 What remains open is narrower than "untested paths", and worth naming precisely rather than
 letting the old sentence stand as a stale proxy for it. The ERC-8004 registries are
@@ -845,10 +846,13 @@ structurally guaranteed besides — the contract contains no `payable` function,
 The table above stops at the first live payment. Everything below came from continuing to
 transact against the same deployment: the cosignature flow end to end, both ERC-8004 gates
 against Arc's real registries, the allowance ceiling, and a spend carrying a commitment
-instead of a label. **Twenty-four live transactions now exist, and every one has `status 1`** —
-eleven to `MandateManager`, seven to Arc's own USDC, and six involving a stand-in ERC-20
-deployed alongside it to measure the token premium (one creation plus five calls). Five
-mandates, four spends. Only `revoke` has never run.
+instead of a label. **At the close of 2026-08-24, twenty-five live transactions existed and
+every one had `status 1`** — two contract deployments, eleven calls to `MandateManager`, seven
+to Arc's own USDC, and five to a stand-in ERC-20 deployed alongside it to measure the token
+premium. Five mandates, four spends. This paragraph said twenty-four until 2026-08-25, short by
+the one transaction that created `MandateManager` itself; the recount is described two sections
+below. Only `revoke` and `withdrawCosign` had never run; the next two sections close both,
+taking the total to thirty-one.
 
 The gate results below were obtained with `cast call` rather than `cast send`, which costs
 nothing and is the right instrument: a gate's whole output is which error selector comes back,
@@ -1018,3 +1022,303 @@ anyone holding the preimage can verify a payment against its paperwork exactly, 
 sees 32 bytes of noise. That is a real improvement available to every mandate that exists
 today, which is worth saying plainly, because every other layer in `PRIVACY.md` requires work
 that this one does not.
+
+### Revoke closes the live phase (2026-08-25)
+
+`revoke` was, on paper, the last function in the contract that had never run against a live
+chain. It has now run three times.
+
+**It was not actually the last one, and finding that out is the more useful result.** Checking
+the claim before publishing it — by listing every `external` and `public` function in the
+contract and grepping the evidence for each — turned up `withdrawCosign` at line 736, which had
+**never run on chain and was named in no document in this repository**. It is covered by the
+local suite and appears in the gas report, which is exactly why it stayed invisible: a green
+test suite is not an inventory of live coverage, and every prior claim in this project that
+`revoke` was "the only path with zero live transactions" was therefore wrong. Five functions
+change state — `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign` — and at
+the time of writing this paragraph four of them had live transactions. The next section closes
+the fifth, and corrects two counts while it is at it.
+
+Reading it turns up something worth documenting independently of the gap. `approveCosign` at
+726 checks three things: the mandate exists, it has `F_COSIGN` set, and the caller is the
+cosigner. `withdrawCosign` at 736 checks **only the last of those**. On an unknown mandate
+`m.cosigner` is the zero address, so a caller is refused with `NotCosigner()` rather than
+`UnknownMandate()` — safe, but misleading. And `delete _cosignApproved[mandateId][hash]`
+succeeds whether or not anything was there, so withdrawing an approval that never existed emits
+`CosignWithdrawn` describing the removal of authority that was never granted. The asymmetry is
+defensible on the same reasoning that lets a spender revoke — giving up authority cannot harm
+the payer, so it needs fewer guards than granting it — but the event is a trap for an indexer
+reconstructing who approved what, and neither the asymmetry nor its consequence was written
+down anywhere before now.
+
+| tx | signer | mandate | `gasUsed` | outcome |
+|---|---|---|---|---|
+| `0x8e92bed6…` | payer | M3 | **30,808** | revoked |
+| `0x12d905a4…` | **agent** | M4 | **32,945** | revoked by its own delegate |
+| `0xe1d054e9…` | payer | M3 again | **28,008** | succeeded, re-emitted the event |
+
+**The delegate can revoke, and that was a correction to my own reading rather than a design
+change.** I had planned this test to prove that only the payer may revoke, and line 704 says
+`msg.sender != m.payer && msg.sender != m.spender` — the spender is authorised too,
+deliberately, as the doc comment above it explains: giving up your own authority can never harm
+the payer, and it lets a compromised agent shut itself off without waiting for its payer to
+notice. That deserved a live transaction rather than a footnote, so M4 was revoked by the agent
+from the agent's own key. A third party is still refused: the vendor address gets `NotPayer()`
+**`0x1435e357`**, before and after revocation alike.
+
+Which makes the error's *name* wrong. `NotPayer()` is thrown on a path the spender may
+legitimately take, so it describes the check inaccurately to anyone reading a decoded revert.
+`NotAuthorised()` would be truthful. It is on the v2 changelist and it is cosmetic — but a
+misleading error name is a real cost paid by whoever debugs against it.
+
+#### The evidence is a changed selector, not a changed balance
+
+Revocation is invisible in balances, so it has to be proven some other way. Before revocation a
+dry-run spend on M3 reverted `IdentityNotHeld()` **`0x6eab756c`** and on M4
+`CredentialMissing()` **`0x9e586322`**, both from the ERC-8004 gates at lines 473-474.
+Afterwards both revert `Revoked()` **`0x44825a4b`**, from line 444. The selector *changing* is
+the finding: revocation is not merely one more failing check among many, it is the **first
+substantive one** — only the existence test at line 443 precedes it — and it short-circuits the
+expiry check, the spender check, the allowlist, the amount bounds, the idempotency nonce, both
+ERC-8004 gates and every cap and window behind it. A payer's remedy therefore costs one storage
+write and consults nothing else: no clock, no registry, no external call.
+
+Two controls make that reading legitimate rather than assumed. M5, untouched, still reverts
+`CredentialStale()` **`0xca36b069`**; M1, untouched, still returns a `spendHash` from a
+successful dry run. Exactly two mandates changed.
+
+`getMandate(M3)` confirms revocation is one bit and not a deletion: `perTxCap` 500,000,
+`expiresAt` 1790726400, `flags` 25, `totalSpent` 0 and `spendCount` 0 all survive verbatim,
+with `revoked` flipped to 1. The mandate remains fully readable after it stops being usable,
+which is what makes a revoked mandate auditable — a design that cleared the struct to reclaim
+gas would destroy the record of what had been authorised.
+
+Both views notice. `spendable(M3)` and `policyHeadroom(M3)` each fell from 500,000 to **0**,
+because `policyHeadroom` opens with `if (!isLive(mandateId)) return 0` at line 836 and `isLive`
+tests `m.revoked` at line 784. This is worth contrasting with the two silences documented
+above: the allowance race and the ERC-8004 gates are genuinely invisible to `spendable`, but
+revocation is not. `isLive` returns false for M3 and M4 and true for M1 and M5.
+
+#### Three receipts reconcile to a constant residual, and the second address comparison is visible
+
+All three transactions carry identical intrinsic gas — 21,000 plus 36 non-zero calldata bytes
+at 16 each = **21,576**, since the `revoke(bytes32)` selector `0xb75c7dc6` and both mandate IDs
+happen to contain no zero byte at all. So every difference between the three is execution.
+
+```
+                        gasUsed   execution   model    residual
+revoke M3, payer         30,808      9,232     8,700       532
+revoke M4, agent         32,945     11,369    10,800       569
+revoke M3 again, payer   28,008      6,432     5,900       532
+```
+
+The model is a cold `SLOAD` of slot 0 at line 703 (2,100), a warm re-read at 704 (100), a cold
+`SLOAD` of slot 3 to read-modify-write the packed bool (2,100), the `SSTORE` itself, and
+`LOG3` for `MandateRevoked` (375 + 3×375 = 1,500, no data). The agent path adds one cold
+`SLOAD` of slot 1 for `m.spender`.
+
+**The residual is 532 on both payer-path transactions**, despite their storage costs differing
+by 2,800 — which is the cross-check that makes the model credible rather than merely
+arithmetically satisfiable. Dispatch overhead does not vary with what the function then does.
+The agent path's 569 exceeds it by exactly **37**, and that 37 is the second address comparison
+itself: mask, `CALLER`, `EQ`, `ISZERO`, `JUMPI` and their stack traffic.
+
+So **Solidity's `&&` short-circuit is observable in a gas receipt.** The two revocations differ
+by 2,137, of which 2,100 is a single cold storage read that the payer's transaction never
+performs, because `msg.sender != m.payer` already evaluated false and the right-hand side was
+never reached. Revoking as the delegate costs 7% more than revoking as the payer, for that
+reason alone.
+
+**The redundant revoke costs exactly 2,800 less, which is `SSTORE_RESET` minus a no-op write.**
+Line 705 is a bare `m.revoked = true` with no already-revoked guard, so revoking twice
+succeeds. The second write sets a slot to the value it already holds, which EIP-2200 prices at
+100 rather than 2,900, and 30,808 − 28,008 = 2,800 with nothing left over. The cold `SLOAD` of
+slot 3 is still paid both times, which is why the saving is 2,800 and not 5,000.
+
+**The receipt also shows `MandateRevoked` emitted a second time**, with identical topics and
+empty data — its `mandateId` and `by` are both indexed, so the event body is `0x`. An indexer
+that treats revocation as a one-shot signal will double-count it. That is a consumer-side
+consequence of an intentionally guardless setter and belongs in the integration notes rather
+than in the contract: adding a guard would cost gas on the common path to protect against a
+harmless duplicate.
+
+#### A methodological correction: estimate deltas are not gas deltas
+
+Before these sends, `cast estimate` predicted 31,160, 33,301 and 28,702. The receipts came in
+at 30,808, 32,945 and 28,008 — overshooting by **352, 356 and 694**. The overshoot is
+conservative in every case, which is what a gas limit should be, but it is *not constant*, and
+the two transactions that performed a real storage write were padded by about half as much as
+the one that did not. Why the estimator behaves that way is unexplained here and is not worth
+guessing at.
+
+The consequence is concrete. Subtracting the two estimates gives 2,458 for the redundant-revoke
+saving; subtracting the two receipts gives 2,800, which is what the storage model predicts
+exactly. **The 342-gas discrepancy was entirely an artefact of comparing estimates.** This is
+the third time in this project that a number obtained by the wrong instrument nearly became a
+published one — after a predicted cosign cost quoted as measured, and a `ref` commitment called
+free. Estimates size a transaction. Receipts measure it. They are not interchangeable, and the
+rule now standing is that no gas figure enters this document unless a receipt produced it.
+
+#### The allowance that governs a spend is payer → contract, not payer → delegate
+
+A loose end from the reconnaissance run, recorded because the mistake was mine and the shape of
+it recurs. `spendable(M3)` reported 500,000 while a live allowance of 100,000 was on record,
+which looked like `spendable` failing to intersect the allowance — a bug in the one view an
+agent is told to trust. It was not. Line 868 reads
+`usdc.allowance(m.payer, address(this))`: the delegate never holds an allowance, because the
+delegate never calls `transferFrom`. `MandateManager` does, on the delegate's instruction, so
+the approval that matters flows payer → contract. The 100,000 was an unrelated payer → agent
+approval left over from the token-premium measurement, where the agent transferred directly.
+
+Read correctly, the live values are `allowance(payer, MandateManager)` = **1,650,000**,
+`balanceOf(payer)` = **18,547,508** (18.547508 USDC), and `usdc()` = `0x3600…0000`, confirming
+the deployment is bound to Arc's real token and not a stand-in. `spendable(M1)` = 500,000 is
+then `min(policyHeadroom 500,000, allowance 1,650,000, balance 18,547,508)`, exactly as the
+comment at 851-854 describes.
+
+The generalisable part: a three-argument allowance is easy to query with the wrong pair, and
+doing so produces a plausible number rather than an error. It also means a payer who revokes
+authority by zeroing an approval must zero the one held by `MandateManager` — revoking the
+delegate's own approval, if any exists, does nothing to Remit. Both remedies are worth
+documenting for payers, because they are not interchangeable and only one of them is
+per-mandate.
+
+One documentation gap follows from the same run. `policyHeadroom`'s comment at lines 827-828
+says it ignores "the allowlist and any co-signature requirement" — accurate as far as it goes,
+but it also ignores the ERC-8004 identity and credential gates, which M3 demonstrated by
+reporting 500,000 while being gate-blocked at every attempt. An agent trusting that view would
+build a transaction that cannot succeed. The behaviour is fine; the comment is incomplete, and
+naming the gates in it is on the changelist.
+
+### `withdrawCosign` actually closes it, and two counts were wrong (2026-08-25)
+
+The section above ends by admitting that four of five state-changing functions had live
+transactions. `withdrawCosign` now has three-quarters of an hour of history and the count is
+five of five. **Thirty-one live transactions exist, every one with `status 1`**: two contract
+deployments, seventeen calls to `MandateManager`, seven to Arc's native USDC and five to the
+stand-in token used for the premium measurement.
+
+**Two counts in this document were wrong, and both were wrong because they were carried
+forward in prose instead of derived.** The transaction total said twenty-seven an hour earlier;
+counting distinct `transactionHash` values across `evidence/` and pairing each with its target
+address gives thirty-one, and shows the old figure had counted MockUSDC's deployment while
+silently omitting `MandateManager`'s own. One creation was in the total and the other was not,
+which is also why the 2026-08-24 figure above was twenty-four rather than twenty-five: the same
+missing transaction, inherited. Separately, the paragraph above this section said "six functions
+change state" while listing five names — the arity was never checked against the source. Parsing
+every declaration in `MandateManager.sol` for `external` or `public` without `view` or `pure`
+returns exactly five: `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`.
+There is no `receive`, no `fallback`, and the constructor is not a function that can be called
+again. Ten public views make up the rest of the surface. Both errors survived several passes,
+which is the argument for deriving counts from the artefacts rather than restating them.
+
+#### An approval can be taken back, and the hash is discoverable rather than guessed
+
+The gap was awkward to close honestly, because `withdrawCosign` takes a `bytes32` that has to
+be a *real* pending approval for the test to mean anything. Passing an invented value would
+have exercised the function without exercising the property. Two features of the contract make
+the real one obtainable: `spendHash` at line 747 is a public view, and `CosignRequired` at line
+294 is declared `error CosignRequired(bytes32 spendHash)` — it carries the required hash in the
+revert payload. So the same 32 bytes were obtained three independent ways and agreed every
+time: from the view, from the revert data behind selector `0x6a39578f`, and from the return
+value of the dry-run spend once it succeeded.
+
+The loop, on M2, whose cosigner is the payer and whose threshold is 50,000, using 60,000 —
+`amount > m.cosignThreshold` at line 492 is **strict**, which is why the 50,000 spend recorded
+earlier never tripped the gate:
+
+| step | call | result |
+|---|---|---|
+| 1 | dry-run spend, 60,000 | `CosignRequired(0x47c56daa…)` |
+| 2 | `approveCosign(M2, 0x47c56daa…)` | tx `0xd545ff0f…`, **53,102** |
+| 3 | dry-run spend again | **succeeds**, returns `0x47c56daa…` |
+| 4 | `withdrawCosign(M2, 0x47c56daa…)` | tx `0x6515918e…`, **26,889** |
+| 5 | dry-run spend again | `CosignRequired(0x47c56daa…)` |
+| 6 | `withdrawCosign(M2, 0x93c75437…)` | tx `0x7e10b4bd…`, **28,901** |
+
+Step 5 is the security property, and it is worth stating plainly because it is the only place
+in Remit where authority is granted by someone other than the payer and can be taken back
+before it is used. A cosignature is consumed by the spend it authorises — line 494 deletes it —
+so the window in which it can be withdrawn is exactly the window between approving and
+spending. Inside that window the cosigner can change their mind, and nothing else about the
+mandate moves: `totalSpent` stayed at 200,000, `policyHeadroom` and `spendable` stayed at
+500,000, the nonce stayed unused, `isLive` stayed true.
+
+Both event signatures were confirmed against locally computed keccaks rather than read off the
+ABI: `CosignApproved(bytes32,bytes32,address)` is
+`0x237a993f56f52f6e0716ac9bebbfe49539bb7cf87788f563120f6b27ecbd0a6f` and
+`CosignWithdrawn(bytes32,bytes32,address)` is
+`0x9c1eb928bb591a528a7015e72205402c7672cca208a96ddb70a79dbfd0194a92`. Both carry `data: 0x`,
+all three arguments being indexed. `withdrawCosign(bytes32,bytes32)` is selector `0x3cb99427`.
+
+#### `approveCosign` reproduced to the gas, which re-validates the 53,114
+
+Step 2 cost **53,102**. The only previous live `approveCosign`, in `evidence/cosign-approve.log`
+and the subject of the question task #31 settled, cost **53,114**. The two differ by twelve gas
+and the explanation is complete: a zero calldata byte costs 4 where a non-zero byte costs 16, a
+difference of 12, and the newly approved hash `0x47c5…cab6` contains exactly one zero byte
+where `0x15e2…18cd` contained none. Everything else in the two transactions is identical —
+same selector, same mandate, same fresh mapping slot, since the earlier approval had been
+consumed by its spend and the slot was zero again.
+
+Subtracting the protocol's intrinsic cost, which is a pure function of the calldata bytes,
+leaves the on-chain work: **31,026 gas in both transactions, a day apart, to the unit.** That is
+worth more than the twelve-gas curiosity. It says the execution of this function is fully
+deterministic on Arc, and it retires any lingering doubt about whether the 53,114 was a
+representative figure or an accident of one block.
+
+#### The cheaper call cost 2,012 more, and that is the point
+
+Step 6 withdraws a hash that was never approved. It does strictly less work than step 4: the
+slot is already zero, so the `SSTORE` is a no-op at 100 gas rather than `SSTORE_RESET` at
+2,900. It cost **2,012 more**.
+
+Twelve of that is calldata again — the ghost hash happens to contain no zero bytes where the
+real one contained one. The remaining **2,000 is exact**, and it is EIP-3529: step 4 cleared a
+slot that a previous transaction had set, earning a 4,800 refund, capped at a fifth of the
+transaction's gas. The cap does not bind — 31,689 before refund allows 6,337 — so the whole
+4,800 lands. Against 2,800 of extra work, the net is 4,800 − 2,800 = **2,000 in favour of the
+call that did more**.
+
+This is the cleanest demonstration this project has produced of a rule it learned the hard way:
+**`gasUsed` is not a measure of work whenever a refund is in play**, and two receipts must not
+be subtracted unless both earn the same refund or neither does. The same trap invalidated an
+earlier comparison here, and it is now on record with a live example rather than a warning.
+
+A caveat about the arithmetic, since this document has published over-confident reconciliations
+before. Modelling both receipts from opcode prices leaves a **constant residual across the
+two** — 929 gas under the decomposition that charges two cold `SLOAD`s, two keccaks for the
+nested mapping key, the storage term and a `LOG3`. That constancy is worth stating and worth
+almost nothing as evidence. The two transactions differ in exactly one term, so *any* model
+that gets the storage term right reproduces the difference and absorbs its own errors into the
+residual: charging one cold `SLOAD` instead of two gives a constant 3,029, and adding a cold
+`SSTORE` access charge gives a constant **−1,171**, which is impossible and still constant. A
+model that cannot be wrong is not being tested. Two receipts differing in one term can pin that
+term down and nothing else, and pretending otherwise is how the earlier bad figures in this
+project got published.
+
+What *is* established without any model is the difference, which is arithmetic on receipts:
++2,012 observed, +12 explained by calldata bytes whose prices are protocol constants, +2,000
+explained by a refund whose size and cap are also protocol constants. The revoke section's
+constant-532 result is stronger than this one, because there the two payer-path transactions
+differed in storage while a third varied the *caller* — an independent axis. Here there is only
+one axis, and the honest claim is confined to it.
+
+#### The guardless delete, now with a receipt
+
+Step 6 also confirms by transaction what reading the source suggested. `delete
+_cosignApproved[mandateId][hash]` succeeds whether or not anything was there, so
+`CosignWithdrawn` was emitted — same topic0, same mandate, same cosigner — **announcing the
+removal of an authority that was never granted**. An indexer reconstructing who approved what
+from these events will record a state transition that did not happen, and there is nothing in
+the event to distinguish the real withdrawal in step 4 from the spurious one in step 6.
+
+Two free probes settle the guard asymmetry alongside it. Called by the agent, which is M2's
+spender and not its cosigner, `withdrawCosign` reverts `NotCosigner()` **`0x1cf89d6f`**. Called
+against a mandate that does not exist at all, it reverts `NotCosigner()` as well — because line
+738 checks only the cosigner, and on an absent mandate `m.cosigner` is the zero address, so the
+existence failure is reported as an authorisation failure. `approveCosign` at 728 would have
+said `UnknownMandate()`. Neither is unsafe and neither is worth gas on the common path to fix,
+on the same reasoning that lets a spender revoke: giving up authority cannot harm the payer, so
+it needs fewer guards than granting it. Both are integration notes, and both are now written
+down, which they were not before.
