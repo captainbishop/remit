@@ -86,7 +86,7 @@ to re-derive, not a confirmation.
 | `fund.log` | Funding the delegate so it could pay its own gas, which on Arc is USDC. |
 | `headroom.log` | `policyHeadroom` and `spendable` agreeing with the per-transaction cap. Confirms `spendable()` does traverse the rolling window rather than ignoring it. |
 | `ceiling.log`, `race.log`, `restore.log`, `restored.log` | The allowance-ceiling failure shape. With the allowance at 90,000, **two** mandates each reported `spendable` = 90,000 — summing to 180,000 — and 50,000 dry-runs succeeded on both. No funds are at risk, because the losing `transferFrom` reverts, but per-mandate policy layered over one global ERC-20 allowance is silent about the joint constraint. This is the measurement behind the proposed `spendableAcross` view. |
-| `ref-spend.log`, `ref-after.log` | Spend #4, carrying `ref` as a commitment rather than a plaintext label: `keccak256(abi.encode(invoiceId, poNumber, amountMinor, vendor, salt))`. Two independent implementations produced the same digest. This is layer L0 in `PRIVACY.md`, and it costs zero extra gas. |
+| `ref-spend.log`, `ref-after.log` | Spend #4, carrying `ref` as a commitment rather than a plaintext label: `keccak256(abi.encode(invoiceId, poNumber, amountMinor, vendor, salt))`. Two independent implementations produced the same digest. This is layer L0 in `PRIVACY.md`. It costs **240 gas**, not zero: the digest `0x4fa8c8c1…077a` has no zero bytes, so its calldata word costs 32×16 = 512 against 272 for `"invoice-0002"` zero-padded. Padding is what makes short plaintext cheap. |
 
 ## Cosignature
 

@@ -61,7 +61,7 @@ Not yet, and for a concrete reason beyond tidiness.
 
 Every gas figure measured this session is a property of *this exact bytecode*
 compiled at `optimizer_runs = 200`. The 177,429 marginal spend, the 38,338
-allowance reset, the 20,164 cosigner-slot delta, the 212-gas cosign gate, the
+allowance reset, the 20,164 cosigner-slot delta, the 388-gas cosign gate, the
 ~5,333 first-credit premium — change one line and every one of those moves, and
 the baseline that took a full session to establish is gone. The two live mandates
 and their spend history are also tied to this address; a new deployment orphans

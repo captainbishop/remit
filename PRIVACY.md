@@ -80,7 +80,7 @@ Every field below is public today, readable from the live deployment at
 
 | What | Where it leaks from | Hideable, and by which layer |
 |---|---|---|
-| `ref` (invoice metadata) | `Spend` | **Yes — L0, free, already live** |
+| `ref` (invoice metadata) | `Spend` | **Yes — L0, 240 gas, already live** |
 | Allowlisted vendors | `createMandate` calldata (`address[]`) | **Yes — L1, one flag bit** |
 | Recipient address | `Spend` (indexed), ERC-20 `Transfer` | **Identity yes — L2 stealth** |
 | Payer address | `MandateCreated`, `Transfer` `from` | **Yes — L3 vault** |
@@ -119,7 +119,7 @@ They stack. Each is independently useful and none blocks another.
 | **L2** stealth recipients | recipient *identity* | amount, payer, timing | non-custodial | spec |
 | **L3** shielded vault | which depositor authorised | amount, recipient | opt-in custodial | project |
 
-### L0 — `ref` as a commitment. Free, and already done.
+### L0 — `ref` as a commitment. 240 gas, and already done.
 
 `ref` is a caller-supplied `bytes32` on `spend`, emitted in `Spend` and bound
 into the `spendHash`. It is the only field Remit publishes that appears nowhere
@@ -140,8 +140,19 @@ preimage recomputes the hash and verifies it against an immutable on-chain
 record. An observer handed nothing learns nothing beyond the amount and
 recipient, which were public regardless.
 
-Costs the same 32 bytes as a plaintext label: zero gas delta, no contract
-change, no audit surface. Chosen per *spend*, by the caller.
+Occupies the same 32-byte word as a plaintext label, but **not** the same gas, and
+the earlier draft of this section claiming a zero delta was wrong. Calldata is
+priced per byte — 16 for a non-zero byte, 4 for a zero one — and a keccak digest
+has no zero bytes at all. So the commitment's word costs 32×16 = 512 gas, while
+`"invoice-0002"` zero-padded to 32 bytes costs 12×16 + 20×4 = 272. **The
+commitment costs 240 gas more**, about 0.13% of a spend. Padding is what makes
+short plaintext cheap, and any privacy measure that fills a field with
+high-entropy bytes gives that discount back.
+
+That is still the cheapest thing in this document by a wide margin — no contract
+change, no new storage, no audit surface, and chosen per *spend* by the caller —
+but it is a number, not a zero, and the distinction matters here for the same
+reason it mattered twice before in this file.
 
 Two boundaries. The salt is mandatory — without it a guessable preimage like
 `invoice-0002` is brute-forced in microseconds. And a vendor reconciling

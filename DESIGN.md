@@ -839,3 +839,182 @@ architectural claim of the project, and until this transaction it rested on read
 source. It is now visible in a block explorer to anyone who doubts it, and it is
 structurally guaranteed besides — the contract contains no `payable` function, no
 `receive`, no `fallback`, and no reference to `msg.value` anywhere.
+
+### What transacting has since established beyond the first spend (2026-08-24)
+
+The table above stops at the first live payment. Everything below came from continuing to
+transact against the same deployment: the cosignature flow end to end, both ERC-8004 gates
+against Arc's real registries, the allowance ceiling, and a spend carrying a commitment
+instead of a label. **Twenty-four live transactions now exist, and every one has `status 1`** —
+eleven to `MandateManager`, seven to Arc's own USDC, and six involving a stand-in ERC-20
+deployed alongside it to measure the token premium (one creation plus five calls). Five
+mandates, four spends. Only `revoke` has never run.
+
+The gate results below were obtained with `cast call` rather than `cast send`, which costs
+nothing and is the right instrument: a gate's whole output is which error selector comes back,
+and a dry run returns it without paying for a reverted transaction. Those are consequently not
+counted among the twenty-four.
+
+#### The cosignature flow, end to end on chain
+
+Mandate 2 (`0xee83f8e2…c746b`, flags 79) carries a cosigner and a 50,000 threshold. Six
+checks were run in order, and every one returned its predicted value.
+
+**The revert carries the hash the cosigner needs to approve.** The agent's over-threshold
+spend failed with `CosignRequired`, whose revert data was `0x6a39578f` followed by the exact
+`spendHash` computed off-chain beforehand. An agent learns what to send its human from the
+revert alone — no follow-up call, no indexer, no event subscription.
+
+**A delegate cannot approve its own spend.** `approveCosign` from the agent and from the
+vendor both reverted `NotCosigner()` (`0x1cf89d6f`). Only the named cosigner succeeded.
+
+**One signature authorises exactly one payment, locked twice over.** After the cosigned spend
+`isCosignApproved` reads false — the approval was consumed. And re-submitting the same
+payment with a *fresh nonce* produces a different hash and demands a fresh signature, because
+the hash binds the nonce. So a human's approval cannot be recycled onto a second payment even
+by a delegate that controls the amount and the recipient.
+
+**The threshold is strictly greater, pinned live from both sides.** 50,000 passes with no
+cosignature; 50,001 reverts `CosignRequired`. One millionth of a USDC decides it.
+
+The second, third and fourth of those are exactly the properties a local suite can fake by
+controlling `msg.sender` or by never thinking about nonce rebinding. They now have chain
+evidence instead.
+
+**A measurement trap worth publishing, because it inverted a conclusion.** The cosigned spend
+cost *less* than the first live payment — 194,225 against 216,458 — and on first reading I
+scored requiring a human signature as a net saving. It is not. EIP-3529 refunds are settled at
+the end of a transaction and are already deducted from `gasUsed`, so **a receipt is a
+post-refund number, and two receipts are not comparable unless both earn the same refund.**
+Clearing `_cosignApproved` earns a 4,800 refund that no other spend earns.
+
+The comparison that does work is mandate 2 against itself. Its first three spends were
+194,225 (cosigned), 193,837 (plain, sub-threshold) and 177,429 (plain, steady state), and the
+first two are comparable for a reason worth stating explicitly: **they landed in different but
+equally virgin window buckets** — 6 and 7, 1,567 seconds apart — so both paid `SSTORE_SET` for
+a fresh bucket and the window cost cancels exactly. The third spend re-entered bucket 7 and
+dropped 16,408, within 692 of the 17,100 storage-class gap and nothing to do with cosigning. A
+reader who assumed all three shared one bucket would compute a contradiction here.
+
+So: **the observed net cost of the cosignature gate is 388 gas** — 194,225 less 193,837 — which
+is what the payer actually paid, refund included. Adding the 4,800 back gives a gross delta of
+5,188 against 5,012 predicted: cold `SLOAD` of `_cosignApproved` 2,100, `SSTORE` non-zero→zero
+2,900, and 12 gas of calldata (100,000 carries one more non-zero byte than 50,000). The 176
+residual is branch evaluation plus the nested-mapping keccak.
+
+The model's *predicted* net is 5,012 − 4,800 = **212**, and the 176 residual is precisely what
+separates it from the observed 388. Both numbers are worth keeping, but only one of them is a
+measurement — and the project's working notes had been carrying the 212 as if it were the
+observed figure, which is how a predicted number quietly becomes a published one.
+**Requiring a human signature costs 388 gas: under two tenths of one percent of the
+transaction.** The refund is what makes it that cheap — the gate sets a slot and then clears it
+in the same transaction, and the EVM pays most of it back.
+
+#### Storage packing, proven by observation rather than asserted
+
+`MandateManager.sol:193-194` asserts in a comment that `cosigner` and `cosignThreshold` share
+slot 2, and `195-201` that all seven mutable accounting fields share slot 3. A comment is an
+assertion; these are now measurements. Granting mandate 2 cost 172,407 against mandate 1's
+152,243 — a delta of **20,164**, which decomposes with zero residual: 19,900 of storage (cold
+2,100 plus `SSTORE_SET` 20,000 for slot 2 going non-zero, less the 2,200 mandate 1 paid writing
+zero over zero) and 264 of calldata (240 for the cosigner address, 24 for the threshold). Two
+separate slots would have cost about 40,000.
+
+Confirmed a second way by reading `getMandate` across a spend: `totalSpent` and `spendCount`
+moved **together**, alongside `notBefore`, `expiresAt`, `flags`, `windowCount` and `revoked` —
+29 bytes in one 32-byte slot. All mutable accounting for a mandate is therefore a single
+already-non-zero slot, so a spend pays one `SSTORE_RESET` for it rather than two `SSTORE_SET`s.
+`getWindow` also returned `subLength = 3600` = 86400/24, confirming that bucket width is
+precomputed at grant time and `spend` never divides.
+
+#### Both ERC-8004 gates fire against Arc's live registries
+
+Three gated mandates were granted, then spends dry-run against each.
+
+| mandate | gate configuration | result |
+|---|---|---|
+| M3, flags 25 | identity, agent 16330 | `IdentityNotHeld()` **`0x6eab756c`** |
+| M4, flags 41 | credential, `minResponse` 100 | `CredentialMissing()` **`0x9e586322`** |
+| M5, flags 41 | credential, `minResponse` 1, `maxStaleness` 86400 | `CredentialStale()` **`0xca36b069`** |
+
+**The headline is M4.** A real attestation exists on Arc Testnet tagged `"verified"` whose
+numeric response is `1`, where Arc's own tutorial states four times that 100 = passed. The
+credential gate rejects it. Had the gate trusted the free-text tag instead of the number, it
+would have accepted a failing attestation as proof of a passing one. The comment at
+`MandateManager.sol:639` — that reading `response` alone makes this gate theater — is now
+backed by live data rather than by reasoning about a hypothetical.
+
+M3 is the **impersonation** case rather than a missing-token case, which is the stronger
+test: agent 16330 is real and registered, owned by `0x2F061aA5…`, and the gate refuses our
+delegate precisely because it does not hold that identity. M5 shows staleness working against
+a real timestamp — with `minResponse` relaxed to 1 the response check passes, and the
+attestation's 8,417,882-second age then fails it.
+
+**The control is what makes those three reverts evidence.** The same call shape against
+ungated mandate 1 *succeeded*, returning a spendHash. Without it, three reverts would have
+been indistinguishable from a malformed call.
+
+Two incidental findings, both worth keeping. Gate structs are written **conditionally**
+(lines 405-409), so an ungated mandate pays nothing at all for gate storage — visible in the
+grant costs of 127,834 for M3 against 151,036 and 151,072 for M4 and M5. And line 407
+*already* reverts `BadConfig` when `minResponse == 0`, commented that 0 would accept a failed
+attestation. The contract therefore already refuses one gate configuration that could never
+fire, which is the same principle the proposed `perTxCap < cosignThreshold` guard would
+apply — so v2 extends an existing pattern rather than inventing one.
+
+One further assumption confirmed rather than discovered: `ownerOf` on a nonexistent token
+reverts with `ERC721NonexistentToken(uint256)` (`0x7e273289`), so Arc's identity registry is
+OpenZeppelin v5 and the `try/catch` at line 628 has a real failure shape to catch. That was
+written from the documentation; it now has an observation behind it.
+
+#### The shared-allowance ceiling is a race between delegates, and `spendable()` is silent about it
+
+This is the one live finding that produces a **documented limitation** rather than a
+confirmation, and it belongs in the design rather than the changelist because it is not a
+defect.
+
+With the payer's allowance lowered to 90,000, mandates 1 and 2 *each* reported
+`spendable` = 90,000 — summing to 180,000 — and a 50,000 dry-run succeeded on *both*. Two
+delegates, each correctly told that 90,000 is available, each simulating a payment whose own
+policy is fully satisfied, against 90,000 that actually exists.
+
+`policyHeadroom` never consults the allowance at all; it returned 500,000 for both, unchanged.
+`spendable` does intersect the allowance, but **as a ceiling on one mandate, never as a budget
+shared across several** — which is honest per-mandate and silent about the joint constraint.
+No funds are at risk, because the losing `transferFrom` reverts. The cost is a failed payment
+plus the gas to discover it, on a spend whose own policy was fully satisfied.
+
+**State it as inherent rather than as a bug.** It follows from layering per-mandate policy
+over a single global ERC-20 allowance, and any design that does that has the same property.
+The failure is specifically *multi-delegate*: one agent on one mandate reading `spendable()`
+is safe. The moment a payer grants a second mandate against the same approval, `spendable()`
+stops being sufficient, and the payer's remedies are to hold the allowance at or above the sum
+of per-mandate caps, or to accept that concurrent delegates will occasionally revert. A
+`spendableAcross(bytes32[])` view intersecting several mandates' headroom with the one
+allowance would make the constraint visible, and is on the v2 changelist — but it would not
+fix the race, only expose it.
+
+#### `ref` carries a commitment for 240 gas, and needs no contract change
+
+Spend #4 passed `ref = keccak256(abi.encode(invoiceId, poNumber, amountMinor, vendor, salt))`
+in place of a plaintext label, and two independent implementations produced the same digest:
+`0x4fa8c8c1c61e17f007f3c9e485abc8e332bcdcad37f2552f0a8f0fac8b98077a`. It went on chain as
+mandate 1's second spend and the event carries it verbatim, where every earlier spend carries
+readable ASCII.
+
+**It is not free, and the reason is a nice illustration of how calldata is priced.** A digest
+has no zero bytes to discount — all 32 are non-zero, at 16 gas each, so the `ref` word costs
+512. `"invoice-0002"` is 12 ASCII bytes zero-padded to 32, so it costs 12×16 + 20×4 = 272.
+**Committing rather than labelling therefore costs 240 gas**, about 0.13% of a spend and about
+half a millionth of a cent at 21 gwei. Worth stating as a number rather than as "nothing":
+padding is what makes short plaintext cheap, and any privacy measure that fills a field with
+high-entropy bytes gives that discount up. It is the smallest privacy premium in this document
+by three orders of magnitude, and it is still not zero.
+
+Nothing else changes. The first privacy layer described in `PRIVACY.md` needs no contract
+change, no new flag, and no new storage. A payer who does not want invoice numbers, purchase
+orders and internal identifiers standing in public commits to them and keeps the preimage;
+anyone holding the preimage can verify a payment against its paperwork exactly, and anyone else
+sees 32 bytes of noise. That is a real improvement available to every mandate that exists
+today, which is worth saying plainly, because every other layer in `PRIVACY.md` requires work
+that this one does not.
