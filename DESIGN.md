@@ -1008,8 +1008,12 @@ Two incidental findings, both worth keeping. Gate structs are written **conditio
 grant costs of 127,834 for M3 against 151,036 and 151,072 for M4 and M5. And line 407
 *already* reverts `BadConfig` when `minResponse == 0`, commented that 0 would accept a failed
 attestation. The contract therefore already refuses one gate configuration that could never
-fire, which is the same principle the proposed `perTxCap < cosignThreshold` guard would
-apply — so v2 extends an existing pattern rather than inventing one.
+fire, which is the same principle the proposed unreachable-cosign-threshold guard would
+apply — so v2 extends an existing pattern rather than inventing one. (That guard was written
+here and in `CHANGELIST.md` as `perTxCap < cosignThreshold`, which is off by one: line 492 is
+strict, so equality is dead too, as this document goes on to demonstrate with a live receipt
+260 lines below. The correct form, and the case where `F_PER_TX` is unset, are stated in
+`CHANGELIST.md`.)
 
 One further assumption confirmed rather than discovered: `ownerOf` on a nonexistent token
 reverts with `ERC721NonexistentToken(uint256)` (`0x7e273289`), so Arc's identity registry is

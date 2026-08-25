@@ -53,7 +53,9 @@ local mock could not have established any of them.
 
 **Design warts that were known and documented before deploying.** The credential
 gate accepts an attestation with no agent binding, which has a test named after
-the fact. `perTxCap < cosignThreshold` is accepted at grant time. Whether an
+the fact. A cosign threshold at or above the mandate's own spend ceiling is accepted at
+grant time, producing a gate that can never fire — see the corrected statement of that
+condition below; the version of it recorded here for weeks was off by one. Whether an
 EIP-7702-delegated EOA counts as an EOA on the Memo and Multicall3From paths is
 unresolved. None of these are new information.
 
@@ -156,14 +158,27 @@ it, and until then the corrected figures live in `DESIGN.md` and `README.md`. An
 reading the header on-chain should treat its gas numbers as a snapshot of 2026-08-24 and
 the repository documents as current.
 
-**Near-certain.** Revert `BadConfig` at grant time when `F_COSIGN` is set and
-`perTxCap < cosignThreshold`. Today that combination is accepted and silently
-produces a mandate whose cosign gate can never fire, because no amount can be
-simultaneously under the per-transaction cap and over the cosign threshold. The
+**Near-certain.** Revert `BadConfig` at grant time when `F_COSIGN` is set and the
+mandate's own policy makes the cosign gate unreachable. Today that combination is
+accepted and silently produces a mandate whose gate can never fire, because no amount
+can be simultaneously under the per-transaction cap and over the cosign threshold. The
 payer believes a human approves large spends; no spend is ever large enough to
 ask. It is a footgun rather than an exploit — no funds are at risk and the caps
 still bind — but it defeats a control the payer deliberately configured, which is
 the worst kind of silent failure.
+
+**The condition was stated wrongly here until 2026-08-25, in two ways, and the
+correction is a v2 input rather than a note.** This file said `perTxCap <
+cosignThreshold`. Line 492 tests `amount > m.cosignThreshold` *strictly* while line 476
+caps `amount <= perTxCap`, so equality is dead too — and this repository already held
+the receipt proving it, at `DESIGN.md:1272`: a 50,000 spend against a 50,000 threshold
+did not trip the gate on Arc Testnet. The test is `perTxCap <= cosignThreshold`. It is
+also incomplete, because with `F_PER_TX` unset the ceiling on a single spend is
+`min(totalCap, window caps)` rather than `perTxCap`, so `totalCap = 100` with
+`cosignThreshold = 100` and no per-transaction cap is equally unreachable and passes
+both versions of the naive check. The guard must compare the threshold against the
+effective maximum spend implied by the whole policy. Found by the review of
+`L3-VAULT.md`, which had inherited the same error from this file.
 
 **Likely, additive, low risk.** A `spendableAcross(bytes32[] mandateIds)` view.
 Demonstrated live on 2026-08-24: with the allowance at 90,000, two mandates each
@@ -212,7 +227,15 @@ redeploy for the metadata-hash reason above.
 
 EIP-7702-delegated EOA counts as an EOA for the Memo and Multicall3From paths —
 now load-bearing beyond its original scope, because stealth-address sweeps on Arc
-depend on gas sponsorship (PRIVACY.md, layer 2). Whether the credential gate's
+depend on gas sponsorship (PRIVACY.md, layer 2). **Escalated again on 2026-08-25 by
+`L3-VAULT.md`:** the shielded vault needs sponsored submission of `createMandate`
+itself, because a depositor who sends their own grant transaction is recorded as its
+`from` beside the mandateId and the vault's payer privacy is worth nothing. So gas
+abstraction is now the single dependency standing in front of *both* remaining
+privacy layers, and it is a prerequisite rather than a refinement — an unsponsored
+L3 is strictly worse than no L3, since the depositor pays custody and receives no
+privacy. This is no longer a curiosity in a backlog; it is the next piece of work.
+Also unresolved: whether the credential gate's
 no-agent-binding shape should stay permitted, now that the attestation with
 response 1 and the tag `"verified"` has been confirmed live and shown to be
 refused by a correctly configured gate.

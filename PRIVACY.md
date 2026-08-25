@@ -117,7 +117,7 @@ They stack. Each is independently useful and none blocks another.
 | **L0** `ref` commitment | invoice, PO, line items | everything else | non-custodial | **live** |
 | **L1** merkle allowlist | authorised-but-unpaid vendors | paid recipients | non-custodial | committed to v2 |
 | **L2** stealth recipients | recipient *identity* | amount, payer, timing | non-custodial | spec |
-| **L3** shielded vault | which depositor authorised | amount, recipient | opt-in custodial | project |
+| **L3** shielded vault | which depositor authorised | amount, recipient | opt-in custodial | spec — `L3-VAULT.md` |
 
 ### L0 — `ref` as a commitment. 240 gas, and already done.
 
@@ -216,6 +216,13 @@ one.
 
 ### L3 — the shielded vault, as a payer.
 
+**Specced in full in `L3-VAULT.md` as of 2026-08-25.** That document resolves the
+three hazards below rather than restating them, and it overturns the first one's
+stated fix — read it before building anything here. Its headline conclusion is a
+sequencing constraint: L3 requires gas abstraction as a prerequisite, because a
+depositor who submits their own `createMandate` transaction appears as that
+transaction's `from` and has deanonymised the exact fact L3 exists to hide.
+
 A separate contract. Depositors put USDC in and receive a commitment in a merkle
 tree. To authorise spending, a depositor submits a proof that they own an unspent
 commitment worth at least the amount, and the vault — as payer — grants the
@@ -234,9 +241,17 @@ Three hazards, named now so they are designed against rather than discovered:
 1. **The two-layer cap hazard.** Remit's cap is per mandate; the vault's cap is
    per depositor balance. If those can disagree, one depositor's mandate drains
    another depositor's funds — the pool makes every depositor a creditor of every
-   mandate. The vault must debit the depositor's commitment atomically with the
-   spend, and a mandate's cap must never exceed the proven balance behind it.
-   This is the security-critical part of L3 and it has nothing to do with ZK.
+   mandate. This is the security-critical part of L3 and it has nothing to do with ZK.
+
+   This entry used to continue *"the vault must debit the depositor's commitment
+   atomically with the spend"*, and **that is unimplementable** — left on the page
+   per the habit of this file. A spend runs `agent → MandateManager.spend →
+   usdc.transferFrom(vault → recipient)` with no vault code executing: ERC-20
+   offers the token holder no hook, and `spend` requires `msg.sender == m.spender`
+   so the vault cannot interpose itself without becoming the agent. The second
+   half of the old sentence was the whole answer — escrow at grant time, size
+   `totalCap` to the nullified commitment, reclaim the remainder from the public
+   `totalSpent`. See `L3-VAULT.md`.
 
 2. **The delegate as pseudonym.** `MandateCreated` and `Spend` are both indexed
    on the spender. If each depositor brings their own agent, that agent address
@@ -252,10 +267,17 @@ Three hazards, named now so they are designed against rather than discovered:
 
 The honest costs. Funds enter a contract, so non-custody holds for the base layer
 but not for depositors who opt in — that is the trade they are choosing, and it
-should be presented as a choice rather than hidden. A ZK vault means a circuit, a
-verifier, nullifier handling, and either a trusted setup or a transparent proof
-system; this is a project with its own timeline, not a sprint. And an anonymity
-set of one is not an anonymity set: the earliest depositors get the least
+should be presented as a choice rather than hidden. **Revocation is part of that trade,
+and this paragraph used to omit it:** `revoke` admits the payer or the spender (line
+704), and under L3 the payer is the vault, so a depositor cannot revoke their own
+mandate and the operator can revoke anybody's. Remit's headline control is transferred
+to the pool unless the circuit is designed to give it back — see `L3-VAULT.md`. Circle's
+freeze authority compounds the same way: freezing the vault freezes every depositor at
+once, so pooling converts individual freeze risk into shared fate. A ZK vault also means
+a circuit, a verifier, nullifier handling, and either a trusted setup or a transparent
+proof system; this is a project with its own timeline, not a sprint. And an anonymity
+set of one is not an anonymity set — the set is the number of *unreleased mandates* the
+vault holds, not the number of depositors, so the earliest depositors get the least
 privacy, which is true of every shielded pool ever built and must be disclosed
 rather than discovered.
 
@@ -268,7 +290,12 @@ rather than discovered.
 - **Amount and timing correlation** defeats address privacy for any low-volume
   counterparty, at every layer.
 - **Whoever pays gas leaks**, and on Arc gas is USDC, so the gas payer is visible
-  in the same asset as the payment.
+  in the same asset as the payment. For L2 and L3 this is not a marginal
+  correlation risk but a load-bearing dependency: a depositor who submits their own
+  `createMandate` transaction is named as its `from` beside the mandate they just
+  created, which is a direct and sufficient deanonymisation of the one fact L3
+  hides. Gas abstraction is a prerequisite for both layers, not a refinement of
+  either. See `L3-VAULT.md`.
 - **Nothing is retroactive.** Every transaction already on chain — including our
   own four live spends and their plaintext `invoice-000N` refs — stays public
   forever.
@@ -300,6 +327,15 @@ answered at the top of this document.
 L0 is done and demonstrated. L1 lands with the v2 redeploy, alongside the rest of
 `CHANGELIST.md`, because bit 7 should be spent once and deliberately. L2 is the
 next spec, being the largest privacy gain that keeps non-custody intact. L3 is
-its own project.
+its own project and is now specced in `L3-VAULT.md`.
+
+**One thing the spec changed about this ordering.** L3 needs no change to
+`MandateManager`, so it is *not* blocked behind the v2 redeploy — but it is blocked
+behind gas abstraction, and so is L2's sweep. That single dependency now stands in
+front of both remaining layers, which makes the EIP-7702 question in
+`CHANGELIST.md` the actual next piece of work rather than either spec. L3's
+security-critical part is also not the cryptography: the escrow accounting, the
+release condition and the forced flags are where funds can be lost, and all three
+are testable against a placeholder verifier long before a circuit exists.
 
 Build the option. Name it accurately. Claim only what each layer supports.
