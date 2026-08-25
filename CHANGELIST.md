@@ -127,7 +127,7 @@ false the moment the contract landed and a banner that lies trains readers to ig
 it. But its body has since gone stale: it says "one mandate has been granted and one
 spend executed live" and "cosignature, both ERC-8004 gates and revoke have 139 passing
 tests and zero live transactions." As of 2026-08-25 there are **five** live mandates,
-four spends, three revocations, and **thirty-one** live transactions all with status 1;
+**five** spends, three revocations, and **thirty-one** live transactions all with status 1;
 cosignature now has four of them, both ERC-8004 gates have been exercised against Arc's live
 registries, and neither `revoke` nor `withdrawCosign` is an exception any longer. The
 replacement banner **may** say that every state-changing path has run live, which is newly
@@ -136,6 +136,16 @@ not six. The list has always been `createMandate`, `spend`, `revoke`, `approveCo
 `withdrawCosign`; the count beside it said six for weeks because nobody parsed the source.
 The test count is now 140. The unaudited / no-real-money half of the warning stays exactly
 as it is.
+
+The spend count in that paragraph said **four** until 2026-08-26, in the same sentence as
+the correct total of thirty-one, which is how it was caught: a figure that moves with the
+total and a figure that does not cannot both be current. Derived rather than remembered —
+`Spend`'s topic0 is `0x8d09fb84…28b7`, and five distinct `transactionHash` values in
+`evidence/` emit it, at blocks 58564785, 58593010, 58596088, 58599519 and 58667292. Only
+the last of those postdates 2026-08-24, which is why `DESIGN.md`'s "five mandates, four
+spends" is right where it stands — that sentence is explicitly scoped to the close of that
+day — and this one was not. **Anything copied into the v2 banner gets re-derived from
+`evidence/` first, not carried across from here.**
 
 Line 26 of that banner also carries two superseded gas figures — `~142,500` for the
 policy machinery and `~32,700` for Arc's native-USDC accounting. Both are corrected

@@ -19,11 +19,21 @@ they include the 21,000-gas intrinsic floor plus per-calldata-byte cost, so a ro
 directly comparable to a receipt's `gasUsed`, and three of them have now been
 reproduced against Arc to the gas. For **views** the figures are execution-only,
 which is why `gas.log` lists `spendHash` at 1,003 gas — no transaction can cost
-that, and a `staticcall` inside a test is not a transaction. Second, the fuzz seed
-is not pinned, so Median and Avg columns are not comparable between two runs;
-compare the Min column.
+that, and a `staticcall` inside a test is not a transaction. Second, `gas.log` **is**
+now generated at a pinned `--fuzz-seed 5042002`, and pinning it is necessary but not
+sufficient: three runs at the same seed against the same bytecode still produced three
+different tables. What the seed pins is `# Calls`, `Max` in every row, and `Min` in 48
+of 49; `Avg` and both `Median` columns never reproduce. So compare **Min, Max and
+`# Calls`** — never `Avg` or `Median` — and read `gas.log`'s own header before comparing
+it against anything.
 
-Everything below is against `MandateManager` at
+That caveat said "the fuzz seed is not pinned … compare the Min column" until
+2026-08-26, which had been false since the regeneration in `1f19221` and was
+contradicted by this file's own entry for `gas.log` two screens below. Same failure as
+`DESIGN.md` stating a guard at line 1011 and refuting it at 1272: the correction landed
+where the work happened and not in the summary at the top.
+
+Unless a row names a different contract, everything below is against `MandateManager` at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, Arc Testnet, chain 5042002.
 Transaction hashes in these files remain independently checkable at
 `https://testnet.arcscan.app` regardless of this repository.
@@ -46,6 +56,7 @@ Transaction hashes in these files remain independently checkable at
 | `arc-probe3.log` | The live attestation at `requestHash = 0`: validator `0xb152c3b6…`, agentId 16330, response **1**, tag **`"verified"`**, `lastUpdate` 1779177483. A real on-chain attestation tagged "verified" that is simultaneously a *failure* (Arc's own tutorial says 100 = passed) and 97 days stale. The contract reads the number and ignores the tag. |
 | `rounding.log` | Arc debits exact 18-decimal wei while `balanceOf` **truncates** to 6 decimals. Three competing rounding models were refuted here; the truncating one was already documented correctly at `MandateManager.sol:856-863`. |
 | `registry.log` | Our delegate's identity-registry `balanceOf` is **0**, and agent 16330 belongs to `0x2F061aA5…`, not to us. This is why the identity gate blocked the genuine impersonation case rather than a missing-token case — and why its positive path stays untestable without a mint. |
+| `entrypoint.log` | **ERC-4337 EntryPoint v0.7 is live on Arc Testnet at `0x0000000071727De22E5E9d8BAf0edAc6f37da032`**, established by prediction rather than by presence. Arc's docs say to verify the address before use, and `cast code` showing 16,035 bytes there proves only that *a* contract is deployed. So `userophash.py` derived what v0.7 must answer for `getUserOpHash` on an all-zero `PackedUserOperation` — `0x07f96d30…c930` — and the chain returned exactly that, all 32 bytes. The value commits to the EntryPoint address and the chain ID, so the same bytecode elsewhere could not produce it, and the selector `0x22cdde4c` is v0.7's `PackedUserOperation` rather than v0.6's `UserOperation` at `0xa6193531`. What it proves is that the hashing path is v0.7's, which is what signature compatibility depends on — not that all 16,035 bytes are byte-identical to the canonical release, which would need a reference codehash this tooling cannot fetch. |
 
 ## Gas, and the optimizer decision
 

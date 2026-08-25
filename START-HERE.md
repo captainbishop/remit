@@ -42,7 +42,8 @@ right now. Its 46 tests pass.
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
 Solidity, the language blockchains run. As of 2026-08-24 it compiles, the 140 tests written
 against it all pass, and it is **deployed and working on Arc's test network** — five real
-mandates, four real payments, all visible in the explorer.
+mandates, five real payments, and thirty-one transactions in all, every one visible in the
+explorer.
 
 The **Forge tests** (`test/`, 140 of them) check the contract against its real storage
 layout, including thousands of randomised runs. They all pass.
@@ -246,7 +247,9 @@ deliberately pinning behaviour that *looks* like a bug and isn't.
 
 Purpose: the thing exists in the world. Done on 2026-08-24. The contract is at
 [`0x3744E93B9e796E05CB66311d897559B6F3860196`](https://testnet.arcscan.app/address/0x3744e93b9e796e05cb66311d897559b6f3860196)
-with its source published, and four real transactions are on the chain:
+with its source published. Thirty-one real transactions have run against it since, and all
+five of its state-changing functions have been exercised live. These four are the ones that
+came first, on the day it went up:
 
 | what happened | gas |
 |---|---|

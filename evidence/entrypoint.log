@@ -1,0 +1,43 @@
+# ERC-4337 EntryPoint v0.7 on Arc Testnet — identity check by prediction
+#
+# Address:  0x0000000071727De22E5E9d8BAf0edAc6f37da032
+# Chain:    Arc Testnet, 5042002
+# Date:     2026-08-26
+# Command:  see userophash.py, which prints both the prediction and the cast call
+#
+# Arc's paymaster page says to verify the EntryPoint v0.7 address before use.
+# `cast code` had already shown 16,035 bytes deployed there, which proves a contract
+# is present and nothing about which one, and comparing a codehash needs a published
+# reference this project's tooling cannot fetch.
+#
+# So the identity was established the other way round: v0.7's getUserOpHash is fully
+# specified, so its answer for a chosen input is derivable off-chain. `userophash.py`
+# derives it from first principles with a standard-library keccak256 checked against
+# three published vectors, then hand-builds the calldata.
+#
+# PREDICTED, before the call:
+#   selector                          0x22cdde4c   (v0.7 PackedUserOperation; v0.6's
+#                                                   UserOperation is 0xa6193531 —
+#                                                   a different function entirely)
+#   UserOperationLib.hash(zeroed op)  0xdf7116b815dffbc9c574fdaaedb0c5745acd15415f5c500ea1a9d1b425c85449
+#   getUserOpHash(zeroed op)          0x07f96d30b0cc2f1c5f6381309cbc63d3c80eb361a777ff3b7d29ea473e06c930
+#
+# Raw output follows. balanceOf answering 0 rather than reverting shows the deposit
+# ABI is present; the payer has never deposited, so 0 is the correct answer.
+
+== balanceOf(payer) ==
+0
+== getUserOpHash(zeroed PackedUserOperation) ==
+0x07f96d30b0cc2f1c5f6381309cbc63d3c80eb361a777ff3b7d29ea473e06c930
+
+# MATCH, all 32 bytes. The deployed code implements v0.7's hashing algorithm over
+# v0.7's ABI, keyed to this EntryPoint address and this chain ID — the returned value
+# commits to both, so the same bytecode at a different address, or on a different
+# chain, could not produce this number.
+#
+# What this still does not prove: that the whole 16,035 bytes are byte-identical to
+# the canonical v0.7 release. It proves the hashing path is v0.7's. That is the part
+# a paymaster integration depends on for signature compatibility, and it is a
+# materially stronger claim than "code exists at the documented address".
+#
+# Same method as expected-id.txt: write the number down first, then ask the chain.

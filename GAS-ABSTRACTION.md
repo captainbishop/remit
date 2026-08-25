@@ -15,7 +15,7 @@ in this repository — see the last section, which is the most important part of
 | Path | What submits the transaction | `msg.sender` at the target | Status on Arc |
 |---|---|---|---|
 | **EIP-3009 relayer** | a funded relayer EOA | the **relayer**, not the user | live on testnet |
-| **ERC-4337 paymaster** | a bundler, through EntryPoint v0.7 | the **smart account** | live; Pimlico is the documented bundler |
+| **ERC-4337 paymaster** | a bundler, through EntryPoint v0.7 | the **smart account** | live; EntryPoint v0.7 verified on testnet, Pimlico is the documented bundler |
 | **EIP-7702 set-code** | the EOA itself, with delegated code | the **EOA** | *"behaves as on Ethereum"* |
 
 Sources: `/integrate/relayers-and-paymasters`, `/integrate/relayers-and-paymasters/eip-3009-relayer`,
@@ -60,15 +60,50 @@ $ cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --rpc-url https://rpc.tes
 32,073 output bytes, less the `0x` prefix and the trailing newline, halved: **16,035 bytes
 of runtime bytecode**, comfortably under EIP-170's 24,576 limit and about 1.4× the size of
 `MandateManager`'s own 11,572. So a substantial contract *is* deployed at the canonical
-address on Arc testnet, and the documentation's caveat is discharged to that extent.
+address on Arc testnet.
 
-**The honest limit on that check:** code at the expected address proves a contract is
-there, not that its bytecode is canonical EntryPoint v0.7. Confirming that would mean
-comparing the codehash against a published reference, and there is no web access in this
-environment to fetch one. The stronger available check is behavioural and costs nothing —
-call `balanceOf(address)` and `getDepositInfo(address)` and see whether they answer like an
-EntryPoint. Worth folding into the next batch of commands rather than spending a round trip
-on now.
+**That proves a contract is there, not that it is EntryPoint v0.7**, and the usual next
+step — comparing the codehash against a published reference — needs network access this
+environment does not have. So the identity was established the other way round, by
+prediction, which is the same method `evidence/expected-id.txt` used to prove the mandate-ID
+derivation before the first transaction was ever sent.
+
+v0.7's hash is fully specified, so its answer for a chosen input is derivable off-chain:
+
+```
+UserOperationLib.encode(op) = abi.encode(
+    op.sender, op.nonce,
+    keccak256(op.initCode), keccak256(op.callData),
+    op.accountGasLimits, op.preVerificationGas, op.gasFees,
+    keccak256(op.paymasterAndData))            // signature deliberately excluded
+
+hash(op)            = keccak256(encode(op))
+getUserOpHash(op)   = keccak256(abi.encode(hash(op), address(this), block.chainid))
+```
+
+`userophash.py` in this repository derives that for an all-zero `PackedUserOperation`,
+using a standard-library Keccak-256 checked against three published vectors first, and
+hand-builds the 452-byte calldata so no ABI encoder is trusted either. It predicted
+`0x07f96d30b0cc2f1c5f6381309cbc63d3c80eb361a777ff3b7d29ea473e06c930`. Arc returned:
+
+```
+$ cast call 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --data 0x22cdde4c… --rpc-url https://rpc.testnet.arc.io
+0x07f96d30b0cc2f1c5f6381309cbc63d3c80eb361a777ff3b7d29ea473e06c930
+```
+
+**Match, all 32 bytes** — `evidence/entrypoint.log`. Two things make that a version claim
+rather than a liveness one. The selector `0x22cdde4c` is `getUserOpHash(PackedUserOperation)`,
+v0.7's nine-field struct with its two packed `bytes32` gas words; v0.6's `UserOperation` is
+eleven fields and hashes under `0xa6193531`, a different function that this call would not
+have reached. And the returned value commits to `address(this)` and `block.chainid`, so the
+same bytecode at another address, or on another chain, could not produce this number.
+
+**The honest limit, still.** This proves the *hashing path* is v0.7's, which is precisely
+what signature compatibility between a wallet, a bundler and a paymaster depends on. It does
+not prove all 16,035 bytes are byte-identical to the canonical release — a modified
+EntryPoint that kept `getUserOpHash` intact would pass. `balanceOf(payer)` also answered `0`
+rather than reverting, so the deposit ABI is present and the payer has simply never
+deposited. Both reads are in the same log.
 
 Pimlico is the documented bundler. The one Arc-specific twist is decimals: the paymaster's
 EntryPoint deposit is **native USDC at 18 decimals**, so 10 USDC is `10 * 10^18`, not
@@ -156,9 +191,12 @@ Recorded so nobody later mistakes absence for confirmation.
   though both are part of standard EIP-3009. Whether Arc's USDC implements them is
   unestablished; the docs show only `transferWithAuthorization`.
 - **The EntryPoint address is explicitly flagged as needing verification** by Arc's own
-  page. **Done, 2026-08-25:** 16,035 bytes of code are deployed there on testnet, per the
-  `cast code` above. What remains unverified is whether that bytecode is *canonically*
-  EntryPoint v0.7, which needs a codehash reference this environment cannot fetch.
+  page. **Settled 2026-08-26:** 16,035 bytes are deployed there, and the contract reproduced
+  a locally predicted `getUserOpHash` exactly, over v0.7's `PackedUserOperation` ABI —
+  `evidence/entrypoint.log`, derivation in `userophash.py`. What remains formally open is
+  whether the *whole* bytecode is byte-identical to the canonical release, which needs a
+  reference codehash this environment cannot fetch; the hashing path, which is the part
+  signature compatibility rests on, is confirmed.
 - **No native, protocol-level fee-payer field.** Arc has no documented "sponsor" or
   "fee payer" transaction type of the kind some chains offer. Sponsorship is entirely
   application-level: 3009, 4337, or your own relayer.
@@ -224,9 +262,12 @@ gated today is environmental, not a law.
 
 Cheap, and each settles a question rather than adding surface:
 
-1. ~~`cast code` the EntryPoint.~~ **Done 2026-08-25 — 16,035 bytes present.** The
-   follow-on, if it matters: call `balanceOf` and `getDepositInfo` to confirm it behaves
-   like an EntryPoint, since code at an address is not proof of which code.
+1. ~~`cast code` the EntryPoint, then confirm it is really v0.7.~~ **Done 2026-08-26.**
+   16,035 bytes present, and a locally predicted `getUserOpHash` reproduced exactly over
+   v0.7's ABI. See `evidence/entrypoint.log` and `userophash.py`. Nothing further is worth
+   spending on this: the remaining gap is whole-bytecode canonicality, which needs a
+   reference this environment cannot fetch and which a paymaster integration does not
+   depend on.
 2. **Test whether a 7702-delegated EOA passes `Memo`.** Settles the `CHANGELIST.md`
    question with a receipt instead of an inference. Needs a delegation and one memo call.
 3. **Ask Circle about the APS timeline** before committing engineering to L3. "On the

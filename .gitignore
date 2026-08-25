@@ -22,6 +22,12 @@ broadcast/
 # Node
 node_modules/
 
+# Python bytecode cache. `userophash.py` is a standalone derivation script — it is meant to
+# be read and re-run, not imported — but importing it (to reuse its keccak256 for a one-off
+# check) leaves this behind.
+__pycache__/
+*.pyc
+
 # Scratch logs from build and test runs, tee'd at the project root for troubleshooting.
 # Ignored by default so the repo does not accumulate them. A log gets PROMOTED into
 # evidence/ once it proves a published number or records a live-chain observation, and
