@@ -102,11 +102,18 @@ transaction. An agent that cannot ask "how much is left?" discovers its limits b
 getting reverted, which is a materially worse system in exchange for
 confidentiality lasting until the first payment.
 
-**Storage is not secret.** Gating `getMandate` on `msg.sender` would hide
-nothing: contract storage is world-readable with `eth_getStorageAt`, and this
-repository documents the slot layout. An EVM contract on a public chain cannot
-keep a secret it has stored — only one it never stored. Which is why every layer
-below is a commitment or a proof, never an access-control check.
+**Storage is not secret — on the public EVM.** Gating `getMandate` on `msg.sender` would
+hide nothing there: contract storage is world-readable with `eth_getStorageAt`, and this
+repository documents the slot layout. An EVM contract on a public chain cannot keep a
+secret it has stored — only one it never stored. Which is why every layer below is a
+commitment or a proof, never an access-control check.
+
+**That is an environmental fact, not a law, and Arc intends to change it.** The
+qualification was added on 2026-08-25 after reading Arc's own privacy documentation:
+under the Arc Privacy Sector (see below) storage is encrypted and per-selector access
+policies are enforced at runtime, so access control *does* hide something there. The
+reasoning above holds for every layer this document specs, because all of them target
+today's public EVM. It does not generalise.
 
 ## The four layers
 
@@ -118,6 +125,11 @@ They stack. Each is independently useful and none blocks another.
 | **L1** merkle allowlist | authorised-but-unpaid vendors | paid recipients | non-custodial | committed to v2 |
 | **L2** stealth recipients | recipient *identity* | amount, payer, timing | non-custodial | spec |
 | **L3** shielded vault | which depositor authorised | amount, recipient | opt-in custodial | spec — `L3-VAULT.md` |
+
+There is a fifth architecture that is not ours and is not available yet: **Arc's own
+Privacy Sector.** It belongs in this table's conversation even though it cannot be in the
+table, and it is described after the four layers because it would change what they are
+for rather than stack with them.
 
 ### L0 — `ref` as a commitment. 240 gas, and already done.
 
@@ -281,6 +293,61 @@ vault holds, not the number of depositors, so the earliest depositors get the le
 privacy, which is true of every shielded pool ever built and must be disclosed
 rather than discovered.
 
+## The fifth architecture, which is Circle's and is not ready
+
+**Arc documents an opt-in confidential execution environment — the Arc Privacy Sector
+(APS) — and this document did not mention it until 2026-08-25.** That was an omission, not
+a judgement: two privacy layers were specced against this chain without reading the
+chain's own page on privacy, and the search that found it took one query. See
+`GAS-ABSTRACTION.md` for how it surfaced and the rule it earned.
+
+What Arc describes: ordinary Solidity contracts deployed into a confidential environment
+that runs alongside the public EVM, in hardware enclaves, with both state roots committed
+in the **same block by the same validator set** — so private and public contracts compose
+atomically, with no bridge and no asynchronous messaging. Isolation is **default-deny**:
+every function and storage slot is closed until opened through per-selector
+`Open`/`Restricted`/`Locked` policies and revocable `addTrustee` trust domains. Event
+logging is off unless a contract explicitly asks for it, revert reasons are sanitised,
+introspection opcodes return zero without trust, and gas reporting to external observers is
+constant-time. Encryption is hybrid post-quantum, keyed by a master secret Shamir-shared
+across validators and reconstructable only inside attested enclaves.
+
+**Arc's own status line: *"Privacy features are on the roadmap and not yet available on
+Arc."*** No date. So nothing here is buildable today, and everything below is about
+sequencing rather than switching.
+
+Three things it changes about this document.
+
+**It would hide what the leak inventory above marks as unhideable.** Caps, thresholds,
+cosigner, running `totalSpent` — the rows this file dismisses as "only at ruinous cost" —
+are encrypted state under APS, at no cost in Solidity. Amounts and recipients too, if a
+confidential USDC representation exists on the private side. That last point is an open
+question the documentation does not answer, and it is the crux: Remit's amount leak comes
+from USDC's own `Transfer` and Arc's EIP-7708 emitter, both public-side artefacts. Arc
+says assets bridge between public and private contracts through precompiles within a
+single block; it does not say what a private USDC balance looks like or whether one exists.
+Do not assume it.
+
+**It is a different trust model, and neither model dominates.** L3 as specced asks you to
+trust mathematics and a circuit nobody has audited yet. APS asks you to trust hardware
+enclaves, a validator-held master key, and an attestation policy. Enclave compromise and
+side channels are real; so are circuit bugs and trusted setups. The honest framing is that
+these are different failure modes for the same property, and a payer might reasonably
+prefer either — which is an argument for eventually offering both, and against pretending
+the choice is obvious.
+
+**It reorders the work.** `L3-VAULT.md` is 537 lines specifying escrow accounting,
+nullifiers and a circuit whose whole purpose is hiding which depositor authorised a
+payment. APS would deliver that as a deployment target. The spec's *contract* findings are
+permanent and were worth the session regardless — they are facts about `MandateManager`,
+not about cryptography. But committing months of circuit engineering without knowing APS's
+timeline would be a mistake, and the cheap move is to ask Circle before building.
+
+One detail worth keeping even if Remit never deploys into APS: **constant-time gas
+reporting is Circle acknowledging that gas is a side channel.** That directly supports
+`L3-VAULT.md`'s finding that depositor-controlled spend gas is an information leak rather
+than merely a cost.
+
 ## What no layer here can do
 
 - **Circle retains freeze and blacklist authority over USDC.** Shielding hides
@@ -296,6 +363,14 @@ rather than discovered.
   created, which is a direct and sufficient deanonymisation of the one fact L3
   hides. Gas abstraction is a prerequisite for both layers, not a refinement of
   either. See `L3-VAULT.md`.
+
+  **The mechanism for it already exists on Arc, which this file previously implied it did
+  not.** ERC-4337 with EntryPoint v0.7 and a USDC-funded paymaster is live on testnet and
+  documented, so the grant can originate from a smart account rather than the depositor's
+  own key. What that buys is real but bounded: **the leak moves to the sponsor.** A
+  depositor's privacy set becomes whoever shares their paymaster or relayer, and Arc names
+  a single third-party bundler as the documented path — so day-one L3 has one party who
+  sees every grant request. Say "relayed", never "trustless". See `GAS-ABSTRACTION.md`.
 - **Nothing is retroactive.** Every transaction already on chain — including our
   own four live spends and their plaintext `invoice-000N` refs — stays public
   forever.
@@ -329,13 +404,24 @@ L0 is done and demonstrated. L1 lands with the v2 redeploy, alongside the rest o
 next spec, being the largest privacy gain that keeps non-custody intact. L3 is
 its own project and is now specced in `L3-VAULT.md`.
 
-**One thing the spec changed about this ordering.** L3 needs no change to
-`MandateManager`, so it is *not* blocked behind the v2 redeploy — but it is blocked
-behind gas abstraction, and so is L2's sweep. That single dependency now stands in
-front of both remaining layers, which makes the EIP-7702 question in
-`CHANGELIST.md` the actual next piece of work rather than either spec. L3's
-security-critical part is also not the cryptography: the escrow accounting, the
-release condition and the forced flags are where funds can be lost, and all three
-are testable against a placeholder verifier long before a circuit exists.
+**One thing the spec changed about this ordering, and one thing the research changed
+back.** L3 needs no change to `MandateManager`, so it is *not* blocked behind the v2
+redeploy. It is bounded by gas abstraction, and so is L2's sweep — but that dependency is
+**not** a missing chain feature, which is what the previous version of this paragraph
+implied when it called the EIP-7702 question "the actual next piece of work". Arc already
+ships ERC-4337 with EntryPoint v0.7 and USDC-funded paymasters, and EIP-7702 set-code
+transactions behave as on Ethereum. What remains is an application-level sponsorship
+policy of our own: who sponsors, how recipients are screened before a blocklisted address
+burns the sponsor's gas, and what caps stop a depositor inflating a sponsored spend. See
+`GAS-ABSTRACTION.md`.
+
+L3's security-critical part is also not the cryptography: the escrow accounting, the
+release condition and the forced flags are where funds can be lost, and all three are
+testable against a placeholder verifier long before a circuit exists.
+
+**And the open question that now outranks all of it.** Arc's own confidential execution
+environment would deliver most of L3's purpose as a deployment target, and it is "on the
+roadmap" with no date. Ask Circle before committing to a circuit. That is a question, not a
+delay — L0 is live, L1 is a v2 flag bit, and neither waits on the answer.
 
 Build the option. Name it accurately. Claim only what each layer supports.

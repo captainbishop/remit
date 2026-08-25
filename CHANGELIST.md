@@ -230,11 +230,31 @@ now load-bearing beyond its original scope, because stealth-address sweeps on Ar
 depend on gas sponsorship (PRIVACY.md, layer 2). **Escalated again on 2026-08-25 by
 `L3-VAULT.md`:** the shielded vault needs sponsored submission of `createMandate`
 itself, because a depositor who sends their own grant transaction is recorded as its
-`from` beside the mandateId and the vault's payer privacy is worth nothing. So gas
-abstraction is now the single dependency standing in front of *both* remaining
-privacy layers, and it is a prerequisite rather than a refinement — an unsponsored
-L3 is strictly worse than no L3, since the depositor pays custody and receives no
-privacy. This is no longer a curiosity in a backlog; it is the next piece of work.
+`from` beside the mandateId and the vault's payer privacy is worth nothing.
+
+**Then half-answered the same day, from Arc's own documentation — and the two halves point
+opposite ways.** `/integrate/evm-differences` states that EIP-7702 set-code transactions
+"behave as on Ethereum", so a delegated EOA keeps its own address as `msg.sender` and
+satisfies Remit's spender check at line 454 and payer assignment at line 371 natively:
+**nothing in v2 needs to change for Remit's own paths.** But `/arc/concepts/transaction-memos`
+says the `Memo` contract "must be invoked directly by an externally owned account" and
+lists as unsupported "any other account-abstraction setup where the transaction originates
+from a bundler, entry point, or other intermediary contract", because "sender spoofing
+isn't allowed" — which **rules out ERC-4337 for the memo path outright**. 7702 is not named
+there, and a delegated EOA originates its own transaction rather than routing through an
+intermediary, so the documented reasoning suggests it passes. **That is an inference, not a
+documented fact, and it needs one `cast send` against Arc to settle.** Do not write it into
+a document as settled before that receipt exists.
+
+The escalation itself was also overstated and is corrected in `GAS-ABSTRACTION.md`: gas
+sponsorship on Arc is **not a missing chain feature**. ERC-4337 with EntryPoint v0.7 and
+USDC-funded paymasters is live on testnet, so the gate in front of L2 and L3 is an
+application-level sponsorship policy of ours, not something Arc has yet to ship. Two new
+requirements fall out of it and belong with whoever builds that policy rather than in this
+contract: a blocklisted `from` or `to` reverts at runtime and consumes the *submitter's*
+gas, so a sponsor must screen recipients; and depositor-inflatable spend gas is charged to
+the sponsor.
+
 Also unresolved: whether the credential gate's
 no-agent-binding shape should stay permitted, now that the attestation with
 response 1 and the tag `"verified"` has been confirmed live and shown to be

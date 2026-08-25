@@ -392,14 +392,27 @@ vault at all.** The depositor surrenders non-custody and receives no privacy in
 exchange. Gas abstraction — relayer, paymaster, or 7702-delegated submission — is a
 *prerequisite* for L3, not a follow-on refinement.
 
-That is the same prerequisite L2 needs for sweeps. One dependency now gates both
-privacy layers, which promotes the EIP-7702 question in `CHANGELIST.md` from an open
-curiosity to the thing standing in front of half of PRIVACY.md.
+That is the same prerequisite L2 needs for sweeps. One dependency bounds both privacy
+layers.
 
-And the honest caveat on the fix: a relayer sees who asked. L3's payer privacy is
-*shifted to the relayer*, not eliminated, unless relaying is permissionless and the
-depositor can choose or self-host. Disclose that; do not let "relayed" be heard as
-"trustless".
+**But it is not a missing chain feature, and the first draft of this section assumed it
+was.** Researched against Arc's own documentation on 2026-08-25: ERC-4337 with EntryPoint
+v0.7 and USDC-funded paymasters is live on Arc testnet, and EIP-7702 set-code transactions
+behave as on Ethereum. Under 4337 the grant originates from a smart account rather than the
+depositor's EOA, which is exactly the property this section demands. So the gate is open;
+what is missing is a sponsorship *policy* of ours, not a capability of Arc's. I inferred a
+chain limitation from the fact that Arc's tutorials use a plain EOA, which is not evidence
+of anything. Details, including the EntryPoint address and the caveat that Arc's own page
+flags it as needing verification, are in `GAS-ABSTRACTION.md`.
+
+Two costs come with the fix, and neither was in the first draft. **A sponsor sees who
+asked** — L3's payer privacy is *shifted to the sponsor*, not eliminated, and a depositor's
+privacy set is whoever shares their paymaster; Arc documents a single third-party bundler
+as the standard path, so disclose it and never let "relayed" be heard as "trustless". And
+**a blocklisted `from` or `to` reverts at runtime while consuming the submitter's gas**,
+which is documented Arc behaviour — so a sponsor that does not screen recipients before
+submitting is a free denial-of-wallet target, and the depositor-controlled gas inflation
+described above is charged to the sponsor rather than to the depositor.
 
 ## Hazard 3: amounts, and four leaks the first draft missed
 
@@ -481,8 +494,17 @@ among three is in a set of three, and the first depositor is in a set of one.
 
 ## Sequencing
 
-1. Solve gas abstraction for grant *and* spend submission. Until this exists, L3
-   delivers nothing and costs custody. This is the gate.
+0. **Ask Circle about the Arc Privacy Sector timeline.** Added 2026-08-25, and it precedes
+   everything else: Arc documents a confidential execution environment that would deliver
+   most of this document's purpose as a deployment target, marked "on the roadmap and not
+   yet available" with no date. Committing to a circuit without asking would be
+   negligent. See `PRIVACY.md` and `GAS-ABSTRACTION.md`. Everything below stays true
+   whatever the answer — the contract findings are facts about `MandateManager` — but the
+   order changes.
+1. Decide the sponsorship policy for grant *and* spend submission. This is no longer
+   "solve gas abstraction": Arc already has 4337 and 7702. It is choosing a sponsor,
+   screening recipients so a blocklisted address cannot burn the sponsor's gas, and
+   capping depositor-inflatable spend gas so the sponsor is not the victim of it.
 2. Then build the escrow accounting, the invariant, the release predicate, the forced
    flags, the parameter caps and the allowance recomputation, with a full test suite
    under the deep profile. All of it is testable against a placeholder verifier: the
