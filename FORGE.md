@@ -14,12 +14,23 @@ the four property tests and 49,152 calls across the three stateful invariants. W
 first compile and the first run each cost is recorded below, because a suite's first green
 is the only time you learn whether it was testing anything.
 
-The tenth suite, `ArcParity.t.sol`, is not a correctness test. Its three tests reproduce
-the exact three transactions that were sent to Arc Testnet — same caps, same window, same
-recipient, same amounts — so that real receipts have something honest to be compared
-against. It also carries the most useful lesson in this file, in its own header: it silently
-measured the wrong thing on its first version, passed every assertion while doing so, and
-reported an `approve` costing 3,185 gas when the SSTORE alone is 20,000.
+`ArcParity.t.sol` is not a correctness test, and it is not one suite — it declares four
+contracts holding one test each, because every measurement needs its own cold storage.
+Those four reproduce the exact four transactions that were sent to Arc Testnet — same
+caps, same window, same recipient, same amounts — so that real receipts have something
+honest to be compared against.
+
+It also carries the two most useful lessons in this file, both in comments. The header
+records that it silently measured the wrong thing on its first version, passed every
+assertion while doing so, and reported an `approve` costing 3,185 gas when the SSTORE
+alone is 20,000. The comment above `ArcParityApproveCosignTest` records something more
+uncomfortable, added on 2026-08-25: **this harness was less accurate than the tool it was
+built to check.** Its `gasleft()` figure for `approveCosign` overstates real execution by
+about 5,205 gas, while `forge test --gas-report` — which includes intrinsic gas for
+state-changing functions, the fact the whole episode turned on — reproduces four Arc
+receipts to the gas with no adjustment at all. The superseded reasoning is kept inside
+delimiters in that comment rather than deleted, because the reasoning failure is worth
+more than the number. The closing section of `DESIGN.md` has the full argument.
 
 This document used to open by warning that none of it had ever been compiled. That is no
 longer true, and the sections that were written as predictions are now labelled as such
@@ -112,7 +123,7 @@ test/Idempotency.t.sol     13  nonce replay, and that a denial consumes nothing
 test/Views.t.sol           14  the pre-flight views an agent decides on
 test/WindowFuzz.t.sol       4  exact-ledger property tests, bounded loops
 test/WindowInvariant.t.sol  5  the same property, with the fuzzer choosing the sequence
-test/ArcParity.t.sol        3  matched local control for the real Arc Testnet transactions
+test/ArcParity.t.sol        4  matched local control for the real Arc Testnet transactions
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 

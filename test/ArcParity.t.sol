@@ -20,7 +20,7 @@ import {console} from "forge-std/console.sol";
  * comparison is void — which is why they are named ARC_* and gathered in one block
  * rather than inlined.
  *
- * WHY THREE CONTRACTS FOR THREE MEASUREMENTS — and this is the whole reason this
+ * WHY A SEPARATE CONTRACT PER MEASUREMENT — and this is the whole reason this
  * file was rewritten. Storage is not priced against a slot's current value but
  * against the value it held when the TRANSACTION began: a first write to a slot that
  * started at zero costs 20,000 gas, while every later write to that same slot in the
@@ -240,15 +240,44 @@ contract ArcParitySpendTest is ArcParityBase {
  * `approveCosign max = 53,114` in a table of MOCK gas-report figures, and the real Arc
  * receipt for `approveCosign` came in at exactly 53,114 too — tx 0x29eb5c24…, block
  * 58591691, `evidence/cosign-approve.log`. An exact match between mock and chain reads
- * like the
- * harness working perfectly. It is an accident, and taking it at face value would mean
- * misreading every other figure in that table by the same 22,088 gas.
+ * like the harness working perfectly.
+ *
+ * READ THIS BEFORE THE REST OF THE COMMENT. Everything below the next paragraph was
+ * written on 2026-08-24 and its central claim was REVERSED on 2026-08-25. The match is
+ * real. `forge test --gas-report` INCLUDES intrinsic gas for state-changing functions
+ * and excludes it only for views, so the mock column and a receipt's `gasUsed` are on
+ * the same basis for every function this file measures. Four live receipts now confirm
+ * it: `revoke` at 30,808 and 32,945, `approveCosign` at 53,102 and `withdrawCosign` at
+ * 26,889 each reduce to exactly the execution the report implies. The full argument,
+ * including why a reverting `revoke` cannot execute the 23,773 gas the report lists for
+ * it, is the closing section of DESIGN.md.
+ *
+ * The consequence for THIS FILE is uncomfortable and worth stating plainly: the harness
+ * below was less accurate than the tool it was built to check. Its `gasleft()` figure of
+ * 36,231 for `approveCosign` overstates the true execution of 31,026 by about 5,205, of
+ * which only 2,700 is accounted for by COLD_ACCOUNT_ADJ. Foundry's own gas report needed
+ * no adjustment at all. So the residuals this file reports are mostly measurements of
+ * the harness, and the `createMandate` deviation of −6,337 that was once used to
+ * calibrate an Arc "premium" was harness error, not a property of Arc. The tests are
+ * kept because they document that, and because the intrinsic-gas arithmetic in
+ * `_report` is still correct and still useful.
+ *
+ * ---- superseded reasoning, retained deliberately ----
+ * It is an accident, and taking it at face value would mean misreading every other
+ * figure in that table by the same 22,088 gas.
  *
  * The proof that it is an accident sits four rows above it in the same gas report:
  * `spendHash` is listed at 1,003 gas. No transaction can cost 1,003 gas, because the
  * intrinsic floor is 21,000. So forge's gas report measures EXECUTION inside the call
  * frame and excludes intrinsic cost entirely, while a receipt's `gasUsed` includes it.
  * The two columns were never comparable; they simply printed the same digits.
+ *
+ * That last paragraph is the error. `spendHash` is a `view`; every figure the argument
+ * was applied to belongs to a state-changing function. A true observation about one
+ * kind of call was generalised to a kind it does not describe, and the generalisation
+ * was never checked against a second method — which is exactly the failure mode this
+ * repository keeps rediscovering.
+ * ---- end superseded reasoning ----
  *
  * `approveCosign` is also the best control in this whole file, for a reason that has
  * nothing to do with co-signing: it is the only live Remit transaction that never
@@ -257,7 +286,8 @@ contract ArcParitySpendTest is ArcParityBase {
  * one is pure Remit storage — three SLOADs, one SSTORE, one log. If the premium is a
  * property of the token contract rather than of the chain, the prediction here should
  * land on the receipt with a residual near zero, and any failure to do so is the
- * harness, not Arc.
+ * harness, not Arc. That last sentence turned out to be the useful one: the residual
+ * was 2,705 and it was indeed the harness.
  */
 contract ArcParityApproveCosignTest is ArcParityBase {
     /// The live co-signed mandate: salt 2, cosigner == payer, threshold 0.05 USDC.

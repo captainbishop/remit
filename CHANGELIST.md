@@ -79,10 +79,23 @@ ERC-8004 gate work (#32) is done, the 53,114 question (#31) is settled, and the
 docs are corrected (#33) — then make every change below in one pass, re-run the
 140 tests plus `forge test --profile deep`, redeploy, and re-measure.
 
-*Status, 2026-08-24:* #32 is done and #31 is settled — the 53,114 match was a
-coincidence between two figures measured on different bases, and settling it
-exposed a larger problem with the published USDC premium numbers that #42 now
-tracks. #33 is the remaining blocker.
+*Status, 2026-08-25:* #32, #33, #44 and #45 are all done, so the live
+investigation against this deployment is complete — all five state-changing
+functions have receipts. #31 was answered on 2026-08-24 and **that answer was
+wrong**: the 53,114 match is real, because `forge test --gas-report` includes
+intrinsic gas for state-changing functions and the two figures were on the same
+basis all along. See the closing section of `DESIGN.md`. Settling #31 the first
+time did expose a real problem with the published USDC premium numbers, which #42
+fixed by receipt-vs-receipt measurement that never used the harness — that fix
+stands and is strengthened, since the harness deviations it distrusted are now
+known to be harness error outright.
+
+**One consequence for this changelist.** Every v2 gas estimate for a function that
+does not touch USDC can be read straight off `forge test --gas-report` and will
+match the eventual Arc receipt to within a calldata byte. That covers
+`createMandate`, `revoke`, `approveCosign` and `withdrawCosign`; only `spend`
+needs Arc's measured `transferFrom` premium of 13,110 added. Cost the changes
+below before redeploying rather than after.
 
 ## The changelist
 
@@ -231,6 +244,13 @@ file used to track. A second live approval cost **53,102** against the first one
 zero byte, which is priced at 4 rather than 16. Subtracting each transaction's
 intrinsic cost leaves **31,026 gas of execution in both**, a day apart, to the
 unit — so the 53,114 was representative and not an accident of one block.
+
+And 31,026 is also what the mock gas report's 53,114 reduces to under the same
+subtraction, which is how the "coincidence" verdict came apart the next day. Same
+story for `revoke` and `withdrawCosign`: four functions, four exact agreements
+between report and receipt. The consequence recorded above — that v2 costs are
+predictable before deploying for everything except `spend` — comes directly from
+this run's own receipts.
 
 ## What does not go in
 

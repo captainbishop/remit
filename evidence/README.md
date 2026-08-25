@@ -12,12 +12,16 @@ observation: `build.log`, `create-help.log`, `test.log`, `testcount.log`,
 `pre-deploy.log`. Everything kept here is either a receipt from Arc Testnet, a
 state read against the live deployment, or a measurement that a document quotes.
 
-Two caveats on reading them. First, `forge --gas-report` figures are
-**execution-only** and exclude the 21,000-gas intrinsic floor plus calldata cost,
-so a gas-report column and a receipt's `gasUsed` are never directly comparable —
-`gas.log` proves this on its own face by listing `spendHash` at 1,003 gas, which
-no transaction can cost. Second, the fuzz seed is not pinned, so Median and Avg
-columns are not comparable between two runs; compare the Min column.
+Two caveats on reading them. First, `forge --gas-report` treats the two kinds of
+call differently, and getting this backwards cost this project a published
+conclusion. For **state-changing** functions the figures are transaction-equivalent:
+they include the 21,000-gas intrinsic floor plus per-calldata-byte cost, so a row is
+directly comparable to a receipt's `gasUsed`, and three of them have now been
+reproduced against Arc to the gas. For **views** the figures are execution-only,
+which is why `gas.log` lists `spendHash` at 1,003 gas — no transaction can cost
+that, and a `staticcall` inside a test is not a transaction. Second, the fuzz seed
+is not pinned, so Median and Avg columns are not comparable between two runs;
+compare the Min column.
 
 Everything below is against `MandateManager` at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, Arc Testnet, chain 5042002.
@@ -47,7 +51,7 @@ Transaction hashes in these files remain independently checkable at
 
 | File | What it establishes |
 |---|---|
-| `gas.log` | The full gas report at `optimizer_runs = 200`. Also the incidental proof that gas reports are execution-only: `spendHash` at 1,003 gas. |
+| `gas.log` | The full gas report at `optimizer_runs = 200`. Also, read correctly, the file that overturned task #31: its five state-changing minima all sit just above 21,000 plus their own calldata while all ten view minima sit far below it, so the state-changing figures are transaction-equivalent and the view figures are not. `spendHash` at 1,003 gas proves that about views only. |
 | `gas-10000.log` | The same tree built at `optimizer_runs = 10000`. Six gas saved on a spend for 27% more bytecode — the measurement behind the decision to stay at 200, recorded in full in `foundry.toml`. |
 | `marginal-a.log` | The steady-state marginal spend, **177,429 gas**, measured inside one already-written window bucket. This replaced the published ~142,500, which had wrongly compared a first-ever spend against a bare transfer. |
 | `approve.log`, `approve-lo.log` | ERC-20 `approve` receipts: **55,438** onto a virgin allowance slot and **38,338** onto a live one. The 17,100 difference is the EIP-2200 storage-class gap, *not* an Arc premium — it appears identically on a plain mock, as `premium.log` shows. Both receipts were later reproduced to the gas with a different spender and amount. |
@@ -64,6 +68,13 @@ far more state. It is not constant: both USDC-free operations overshoot the real
 receipt and both USDC-touching ones undershoot it, and the two overshoots differ from
 each other in proportion to how much state each touches — 6,337 for `createMandate`
 against 2,505 for `approveCosign`.
+
+Since 2026-08-25 there is a stronger statement available: **both of those deviations are
+the harness being wrong, not Arc being expensive.** `gas.log`'s own `approveCosign` figure
+matches the Arc receipt exactly, so there was never a 2,505-gas discrepancy needing an
+explanation, and the 2,097 "unattributed cold-slot delta" left open in the
+`cosign-parity.log` row above is harness error too. The bespoke harness was the least
+accurate instrument used in this project and the accurate one was in the same folder.
 
 Two things the replacement measurement established that the original method could not
 have caught. The premium is **very nearly per-call, not per-slot**: `approve` costs the
@@ -94,7 +105,7 @@ to re-derive, not a confirmation.
 |---|---|
 | `cosign-create.log` | Mandate 2, with a cosigner set and a 50,000 threshold, flags 79. |
 | `cosign-dry.log` | Mandate 2 as actually stored, read back from storage rather than from the event. |
-| `cosign-approve.log` | The `approveCosign` receipt: **53,114 gas**. `DESIGN.md` had published `approveCosign max = 53,114` from a mock gas report, and the identical digits looked like the harness working perfectly. It is a coincidence between two figures measured 22,088 gas apart in basis. |
+| `cosign-approve.log` | The `approveCosign` receipt: **53,114 gas**. `DESIGN.md` had published `approveCosign max = 53,114` from a mock gas report, and the identical digits looked like the harness working perfectly. Task #31 concluded it was a coincidence between figures measured 22,088 gas apart in basis; **that conclusion was wrong and was reversed on 2026-08-25.** The gas report includes intrinsic gas for state-changing functions, so the two figures are on the same basis and the match is real — both reduce to 31,026 gas of execution. |
 | `cosign-pre.log`, `cosign-post.log` | The approval live before the spend and consumed after it — single-use, as designed. |
 | `cosign-spend.log` | The cosigned spend receipt. |
 | `subthreshold.log` | A spend below the threshold succeeding without any cosignature, which is what makes the gate meaningful rather than merely present. |
@@ -148,6 +159,25 @@ MockUSDC's deployment was included in the old figure while `MandateManager`'s ow
 declaration in the contract for `external` or `public` without `view` or `pure` gives
 `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`, and the count beside
 that list had been wrong for weeks. All five now have live transactions.
+
+A third correction came out of these logs a day later, and it reverses a published finding.
+Compare each receipt above against the corresponding row of `gas.log`, subtracting each
+transaction's own intrinsic cost from both:
+
+| | `gas.log` | Arc receipt | execution, both |
+|---|---|---|---|
+| `revoke`, payer path | 30,808 | 30,808 | 9,232 |
+| `revoke`, spender path | 32,945 | 32,945 | 11,369 |
+| `approveCosign` | 53,114 | 53,102 | 31,026 |
+| `withdrawCosign` | 26,901 | 26,889 | 4,813 |
+
+Four exact agreements, with the twelve-gas receipt gaps accounted for by one zero calldata
+byte. **A mock gas report and an Arc receipt for a function that touches no token are the same
+number**, which is only possible if the report includes intrinsic gas — so the caveat at the
+top of this file was wrong for state-changing functions, and task #31's "coincidence" was
+never a coincidence. The practical upside: `forge test --gas-report` now predicts an Arc
+receipt to the gas for anything that does not touch USDC, which is how v2's `createMandate`,
+`revoke`, `approveCosign` and `withdrawCosign` costs can be known before deploying.
 
 ## Toolchain
 

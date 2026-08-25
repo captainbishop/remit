@@ -528,14 +528,32 @@ supersede them.** Contract size is 11,572 bytes of runtime code against the EIP-
 of 24,576, so a little over half the budget is still free. (This document previously said
 11,964, which was wrong; see the size note in `foundry.toml`.)
 
+**A note on what these rows are, since it was got wrong once.** For the state-changing
+functions these are transaction-equivalent figures: `forge test --gas-report` includes the
+21,000-gas intrinsic floor plus per-calldata-byte cost, so a row here is directly comparable
+to a receipt's `gasUsed`. The last three rows have since been confirmed against Arc on
+exactly that basis — `revoke max` 32,945 and `approveCosign max` 53,114 were reproduced to
+the gas, and `withdrawCosign max` 26,901 to within one calldata byte. It is only the *view*
+rows of the full report that read below the intrinsic floor, because a `staticcall` in a test
+is not a transaction. See "The 53,114 was never a coincidence" at the end of this document.
+
 ### What it costs on Arc, measured against the live chain
 
 `test/ArcParity.t.sol` exists because comparing one real receipt against the median above
 would measure almost nothing — that median aggregates mandates with four windows, with
 none, with credential gates, and spends denied before they touch the token. The parity
-suite runs the *same three transactions* with the same constants, in three separate test
-contracts so that storage is cold in each, and computes intrinsic gas from the real encoded
-calldata so its predictions are directly comparable to a receipt.
+suite runs the *same transactions* with the same constants, each in its own test contract so
+that storage is cold in each, and computes intrinsic gas from the real encoded
+calldata so its predictions are directly comparable to a receipt. Three contracts were
+written for the table below; a fourth, `ArcParityApproveCosignTest`, was added later for
+`approveCosign`, so the file holds four one-test suites.
+
+**Read the table below knowing that the harness has since been shown to be the least accurate
+instrument used in this project.** It measures with `gasleft()` around an inner call and then
+adds intrinsic gas back by hand, and it overshot `approveCosign`'s true execution cost by
+about 5,205 gas. Foundry's own `--gas-report`, which needs no hand-adjustment at all,
+predicted the same transaction exactly. The deltas in this table are therefore mostly
+measurements of the harness. Details at the end of this document.
 
 | | predicted | charged on Arc | delta |
 |---|---|---|---|
@@ -547,7 +565,9 @@ calldata so its predictions are directly comparable to a receipt.
 `createMandate` touches no USDC, so its deviation is the harness, not Arc. Part of it is
 that a real transaction gets its `to` address pre-warmed under EIP-2929 while the test pays
 ~2,600 for a cold `CALL` into the contract; the remainder is undecomposed and is recorded
-as undecomposed.
+as undecomposed. **That remainder is now known to be harness error rather than anything about
+Arc**, because the gas report reproduces three token-free receipts to the gas with no
+adjustment whatsoever.
 
 ~~Using it as a calibration constant, Arc's `NativeFiatToken` costs roughly 17,100 gas more
 than a minimal ERC-20 for an `approve` and 32,700 more for a `transferFrom`.~~
@@ -555,7 +575,11 @@ than a minimal ERC-20 for an `approve` and 32,700 more for a `transferFrom`.~~
 They were produced by taking `createMandate`'s −6,337 as a flat additive constant and
 applying it to two operations that touch far more state. `evidence/cosign-parity.log` had
 already shown that deviation is not constant — 6,337 for `createMandate` against 2,505 for
-`approveCosign` — so the premise had failed before the arithmetic began.
+`approveCosign` — so the premise had failed before the arithmetic began. **There is now a
+second, independent reason: both deviations are artefacts of the harness rather than
+measurements of Arc.** The gas report's `approveCosign` figure matches the Arc receipt
+exactly, so there was never a 2,505-gas discrepancy for Arc to explain. A calibration
+constant taken from an instrument's own error cannot calibrate anything.
 
 #### The premium, measured without a harness
 
@@ -1254,7 +1278,7 @@ all three arguments being indexed. `withdrawCosign(bytes32,bytes32)` is selector
 #### `approveCosign` reproduced to the gas, which re-validates the 53,114
 
 Step 2 cost **53,102**. The only previous live `approveCosign`, in `evidence/cosign-approve.log`
-and the subject of the question task #31 settled, cost **53,114**. The two differ by twelve gas
+and the subject of task #31, cost **53,114**. The two differ by twelve gas
 and the explanation is complete: a zero calldata byte costs 4 where a non-zero byte costs 16, a
 difference of 12, and the newly approved hash `0x47c5…cab6` contains exactly one zero byte
 where `0x15e2…18cd` contained none. Everything else in the two transactions is identical —
@@ -1266,6 +1290,11 @@ leaves the on-chain work: **31,026 gas in both transactions, a day apart, to the
 worth more than the twelve-gas curiosity. It says the execution of this function is fully
 deterministic on Arc, and it retires any lingering doubt about whether the 53,114 was a
 representative figure or an accident of one block.
+
+It also, unnoticed at the time, contains the number that overturned task #31's answer. The
+31,026 computed here is exactly what the mock gas report's 53,114 yields under the same
+subtraction, which is only possible if the report is on the same basis as a receipt. The
+argument is at the end of this document.
 
 #### The cheaper call cost 2,012 more, and that is the point
 
@@ -1322,3 +1351,99 @@ said `UnknownMandate()`. Neither is unsafe and neither is worth gas on the commo
 on the same reasoning that lets a spender revoke: giving up authority cannot harm the payer, so
 it needs fewer guards than granting it. Both are integration notes, and both are now written
 down, which they were not before.
+
+### The 53,114 was never a coincidence, and the harness was the thing that was wrong (2026-08-25)
+
+This section reverses a conclusion this document and three others published, and the reversal
+came out of the revoke and `withdrawCosign` receipts above rather than out of a new experiment.
+
+The story so far. The mock table earlier in this chapter lists `approveCosign max = 53,114` from
+`forge test --gas-report`. The first live `approveCosign` on Arc cost **exactly 53,114**. That
+looked too good, and it was investigated as task #31, which concluded the match was an accident
+— that a gas report measures execution inside the call frame while a receipt includes the
+21,000-gas intrinsic floor plus calldata, so the two are 22,088 gas apart in basis and merely
+happened to print the same digits. The argument offered for that was `spendHash` appearing in
+the same table at **1,003 gas**, which no transaction can cost.
+
+**That argument is about views, and it was generalised to functions it does not describe.** Every
+figure it was applied to belongs to a state-changing function.
+
+#### What the revoke and withdrawCosign receipts showed
+
+Four live receipts now exist for functions that touch no token. Subtract each transaction's own
+intrinsic cost — a pure function of its calldata bytes, 21,000 plus 16 per non-zero byte and 4
+per zero byte — from both the mock figure and the receipt:
+
+| | mock report | its intrinsic | mock execution | live receipt | its intrinsic | live execution |
+|---|---|---|---|---|---|---|
+| `revoke`, payer path | 30,808 | 21,576 | **9,232** | 30,808 | 21,576 | **9,232** |
+| `revoke`, spender path | 32,945 | 21,576 | **11,369** | 32,945 | 21,576 | **11,369** |
+| `approveCosign` | 53,114 | 22,088 | **31,026** | 53,102 | 22,076 | **31,026** |
+| `withdrawCosign` | 26,901 | 22,088 | **4,813** | 26,889 | 22,076 | **4,813** |
+
+Four functions, four exact agreements on execution, and the twelve-gas gaps in the receipts are
+one zero calldata byte where the live hash differs from the test's. A local EVM and Arc Testnet
+execute these four call paths for identical gas, which is what should be true of code that never
+reaches the token — and the mock figure is therefore not on a different basis from the receipt.
+**It is the same basis. `forge test --gas-report` includes intrinsic gas for state-changing
+functions.**
+
+#### Why views read below the floor, and why that misled
+
+The report treats the two kinds of call differently, and the whole table shows it. Sort the
+fifteen reported functions by whether they change state:
+
+The five state-changing functions have **minima** of 23,773 (`revoke`), 23,979
+(`approveCosign`), 24,677 (`withdrawCosign`), 24,898 (`spend`) and 28,630 (`createMandate`) —
+every one just above 21,000 plus its own calldata. The ten views have minima from 238 to 10,425,
+every one far below it. There is no overlap.
+
+The decisive case is a revert. `revoke`'s cheapest recorded call is
+`test_revoke_unknownMandate_reverts`, which loads one cold slot, fails the existence check and
+stops. Its execution cannot plausibly exceed about 2,300 gas. The report says **23,773**, and
+23,773 − 21,576 = 2,197 — one cold `SLOAD` at 2,100 plus dispatch. A function that does one
+storage read cannot cost 23,773 to execute; it can cost 23,773 to *transact*.
+
+`gas-10000.log` confirms the split is structural rather than an artefact of one run. Rebuilt at
+`optimizer_runs = 10000`, `spendHash` moves 1,003 → 991 and `getMandate` 10,425 → 10,329, while
+`revoke` moves 23,773 → 23,767, `approveCosign` 53,114 → 53,111 and `withdrawCosign` 26,901 →
+26,898. **The state-changing figures barely move, by three to fifteen gas, because most of what
+they report is a constant the optimizer cannot touch.** That constant is the intrinsic cost.
+
+And the alternative explanation fails on arithmetic. For the report to be execution-only, a local
+EVM would have to cost exactly 21,576 more than Arc on a 36-byte call and exactly 22,088 more on
+a 68-byte call. Those differ by 512, which is 32 bytes at 16 gas each. Nothing inside a call
+frame is priced per calldata byte of the enclosing transaction. Intrinsic gas is, by definition.
+
+#### The consequence, which is larger than the correction
+
+`test/ArcParity.t.sol` was built to do by hand what the gas report was already doing correctly.
+It measures with `gasleft()` around an inner call, which really is execution-only, and then adds
+intrinsic gas and subtracts 2,700 for the `EXTCODESIZE` and `CALL` that a top-level transaction
+never pays. For `approveCosign` it measured 36,231 and predicted 55,819 against a live 53,114 —
+**out by 2,705, where the gas report was out by nothing.** Its `createMandate` deviation of
+−6,337 and its `approveCosign` deviation of −2,505 are therefore measurements of the harness,
+not of Arc.
+
+That matters because those two deviations are exactly what the withdrawn 17,100 and 32,700
+premium figures were built from. Their retraction earlier in this chapter rested on the
+deviations being non-constant; it now also rests on their being artefacts. The replacement
+figures — 9,300 on an `approve` and 13,110 on a `transferFrom` — are untouched, because
+`premium.log` compared two receipts against two tokens on the same chain and never used a
+harness at all. The lesson generalises: **the harness was the least trustworthy instrument in the
+room, and the trustworthy one was in the same file, dismissed on a bad argument.**
+
+There is also something useful here rather than merely corrective. For any function that does not
+touch USDC, `forge test --gas-report` predicts an Arc receipt to the gas, adjusting only for the
+zero-byte count of the real calldata. Three functions confirm it. That makes v2's cost knowable
+before it is deployed for `createMandate`, `revoke`, `approveCosign` and `withdrawCosign`;
+`spend` still needs Arc's 13,110 `transferFrom` premium added on top.
+
+#### How this was found, since the method is the reusable part
+
+Not by re-opening #31. By noticing, while filing a memory note, that a line quoting the mock
+`revoke` figure of 32,945 was the same number as a live receipt written down three sections
+earlier — the second such collision in one project. The first was investigated and explained
+away. Two unrelated exact collisions is not a coincidence, it is a signal that the model is
+wrong, and the check took one subtraction each. **A near-miss on a famous constant is a prompt to
+re-derive; an exact hit on your own earlier measurement is a stronger one.**
