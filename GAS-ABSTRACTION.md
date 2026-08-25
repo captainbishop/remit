@@ -48,13 +48,33 @@ both addresses before submitting.
 
 ### ERC-4337 paymaster — real, live, and it breaks Remit's spender check
 
-EntryPoint **v0.7**, documented at `0x0000000071727De22E5E9d8BAf0edAc6f37da032` with the
-caveat *"verify the EntryPoint v0.7 address for Arc testnet before use"* — so treat that
-as unconfirmed until we read it with `cast code`. Pimlico is the documented bundler. The
-one Arc-specific twist is decimals: the paymaster's EntryPoint deposit is **native USDC at
-18 decimals**, so 10 USDC is `10 * 10^18`, not `10 * 10^6`. This is the same 6-vs-18
-split already documented in `DESIGN.md` for `balanceOf` versus the EIP-7708 emitter, and
-it is the single easiest way to over-fund a paymaster by a factor of 10^12.
+EntryPoint **v0.7**, documented at `0x0000000071727De22E5E9d8BAf0edAc6f37da032`. Arc's own
+page hedges this with *"verify the EntryPoint v0.7 address for Arc testnet before use"* —
+so it was verified, on 2026-08-25, against Arc testnet:
+
+```
+$ cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --rpc-url https://rpc.testnet.arc.io | wc -c
+32073
+```
+
+32,073 output bytes, less the `0x` prefix and the trailing newline, halved: **16,035 bytes
+of runtime bytecode**, comfortably under EIP-170's 24,576 limit and about 1.4× the size of
+`MandateManager`'s own 11,572. So a substantial contract *is* deployed at the canonical
+address on Arc testnet, and the documentation's caveat is discharged to that extent.
+
+**The honest limit on that check:** code at the expected address proves a contract is
+there, not that its bytecode is canonical EntryPoint v0.7. Confirming that would mean
+comparing the codehash against a published reference, and there is no web access in this
+environment to fetch one. The stronger available check is behavioural and costs nothing —
+call `balanceOf(address)` and `getDepositInfo(address)` and see whether they answer like an
+EntryPoint. Worth folding into the next batch of commands rather than spending a round trip
+on now.
+
+Pimlico is the documented bundler. The one Arc-specific twist is decimals: the paymaster's
+EntryPoint deposit is **native USDC at 18 decimals**, so 10 USDC is `10 * 10^18`, not
+`10 * 10^6`. This is the same 6-vs-18 split already documented in `DESIGN.md` for
+`balanceOf` versus the EIP-7708 emitter, and it is the single easiest way to over-fund a
+paymaster by a factor of 10^12.
 
 **The problem is `msg.sender`.** Under 4337 the transaction originates from the bundler,
 passes through EntryPoint, and executes from the **smart account**. So:
@@ -136,7 +156,9 @@ Recorded so nobody later mistakes absence for confirmation.
   though both are part of standard EIP-3009. Whether Arc's USDC implements them is
   unestablished; the docs show only `transferWithAuthorization`.
 - **The EntryPoint address is explicitly flagged as needing verification** by Arc's own
-  page. Do not hardcode it from this note.
+  page. **Done, 2026-08-25:** 16,035 bytes of code are deployed there on testnet, per the
+  `cast code` above. What remains unverified is whether that bytecode is *canonically*
+  EntryPoint v0.7, which needs a codehash reference this environment cannot fetch.
 - **No native, protocol-level fee-payer field.** Arc has no documented "sponsor" or
   "fee payer" transaction type of the kind some chains offer. Sponsorship is entirely
   application-level: 3009, 4337, or your own relayer.
@@ -202,8 +224,9 @@ gated today is environmental, not a law.
 
 Cheap, and each settles a question rather than adding surface:
 
-1. **`cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032`** on Arc testnet. Confirms or
-   refutes the EntryPoint v0.7 address the docs flag as unverified. One command, no gas.
+1. ~~`cast code` the EntryPoint.~~ **Done 2026-08-25 — 16,035 bytes present.** The
+   follow-on, if it matters: call `balanceOf` and `getDepositInfo` to confirm it behaves
+   like an EntryPoint, since code at an address is not proof of which code.
 2. **Test whether a 7702-delegated EOA passes `Memo`.** Settles the `CHANGELIST.md`
    question with a receipt instead of an inference. Needs a delegation and one memo call.
 3. **Ask Circle about the APS timeline** before committing engineering to L3. "On the
