@@ -334,6 +334,94 @@ at the moment somebody notices something, and is never re-derived from the contr
 The practice that caught it was asking the general question the specific item was an instance
 of, which is now the first step for every remaining entry here.
 
+**Not on this list at all until 2026-08-26, in either half. DONE in v2 as #22, and UNCOMPILED.**
+Two grant-time refusals in the same block as the cosign guards above, both of them findings of
+`THREAT-MODEL.md` rather than of this file — F5 and F1 there. They are the direct sequel to the
+paragraph immediately above: the list was short by a third when it was checked against the tree,
+and it was short by two more once a document written specifically to enumerate what the contract
+fails to enforce was written. Neither could have been found by re-reading this file, because
+neither was ever in it.
+
+**F5 — `Unbounded()` was satisfied by things that bound nothing over a lifetime.** v1's
+`hasBound` local (v1 lines 402–404) accepted `F_PER_TX` **or** `F_TOTAL` **or** `F_EXPIRY`
+**or** any window, and the first and last of those are not lifetime bounds at all: a
+per-transaction cap bounds one spend and permits unlimited spends, and a window bounds a
+*rate* and permits unlimited cumulative spending given enough time. A mandate carrying
+`perTxCap = 100` and nothing else is a standing instruction to spend 100 USDC forever, and v1
+accepts it and still calls it bounded — while the contract's own comment beside the check
+claimed the opposite. v2 narrows it, at `v2:424`:
+
+```solidity
+if ((flags & F_TOTAL == 0) && (flags & F_EXPIRY == 0)) revert Unbounded();
+```
+
+The alternative was to accept these configurations and document them, which is what v1 did by
+default rather than by decision. Refused: the payer who writes a per-transaction cap and no
+horizon has almost certainly not decided to grant authority in perpetuity, and the cost of
+being wrong in that direction is unbounded while the cost of refusing is one extra field.
+
+**F1 — `expiresAt` was the last field in the struct that could be displayed and unread.** With
+`F_EXPIRY` unset, `spend` never reads `expiresAt`, so a payer could set it, see it returned by
+`getMandate`, and have it enforce nothing. v2 refuses that at `v2:446`, immediately after the
+existing `expiresAt <= notBefore` check at `v2:433`:
+
+```solidity
+if (flags & F_EXPIRY == 0 && p.expiresAt != 0) revert BadConfig();
+```
+
+One-directional on purpose, not the biconditional the other four flag/value pairs get. A zero
+`expiresAt` with the flag unset is the ordinary encoding for "no expiry" and stays legal; an
+iff would force every non-expiring mandate to set `F_EXPIRY` and thereby claim it expired at
+the Unix epoch, which is worse than the defect. The order also matters: `Unbounded()` at
+`v2:424` fires *first*, so the Solidity test for this has to set `totalCap` before it can reach
+the check at all, and does.
+
+**The expensive part was not either guard.** `v2:424` precedes every `BadConfig` check
+(`429`–`448`, `465`, `482`) and `BadWindow` (`484`), so every revert-asserting test whose
+params carried no lifetime bound had begun reverting for the *wrong reason* — and a bare
+`vm.expectRevert()` in any of them would have passed while proving nothing. Seven such tests
+were repaired by naming a reason explicitly. The shared builders in `Base.t.sol` now end with
+`p = withExpiry(p)`, and every one of the thirty call sites that builds from `emptyParams()`
+was accounted for individually rather than swept: a function-scoped `awk` pass over `test/`
+found twenty-three functions that build from `emptyParams()` and grant, twenty-two carrying a
+lifetime bound and exactly one — `test_createMandate_withNoLifetimeBound_reverts` — expecting
+`Unbounded` four times. **Those four sites must never be "fixed".** An earlier fixed-window
+version of the same sweep reported two false positives, because a 28-line window bleeds past a
+function's closing brace into the next test's setup; the invariant had to be scoped to the
+enclosing function before its output was worth anything.
+
+**The convenience that was available and declined, for the third time in v2.** Making `grant()`
+inject a lifetime bound would have fixed all of it in one edit. Refused: a helper that quietly
+satisfies a security rule also hides it, and the next person to add a test would inherit
+compliance without ever learning the rule exists. Both suites name their horizon out loud
+instead. In Solidity that horizon is `type(uint40).max`, which is safe because `expiresAt` is
+only ever *compared*, never used in arithmetic — its two readers are `v2:608` in `spend` and
+`v2:1012` in `isLive`, and the only grant-time rule on the value is `v2:433`. There is no
+requirement anywhere that it be in the future.
+
+**The model mirrors F5 and deliberately does not mirror F1.** `reference/policy.js` renames
+`hasBound` to `hasLifetimeBound` at lines 217–218 and the suite goes from 56 tests to **57**,
+derived by running it rather than counted by hand: `node --test policy.test.js` reports
+`# tests 57 / # pass 57 / # fail 0`. F1 gets no mirror because the model has no `getMandate`
+and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
+would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
+asymmetry reads as a decision rather than an omission. The Solidity suite is now **157** test
+functions by static count across eleven files, up two net — a static count, not a `forge test`
+count, and therefore **unverified**, because forge does not run in the environment these edits
+were made in.
+
+**What it broke, honestly.** `DESIGN.md`'s flagship worked example and the narrative
+`THREAT-MODEL.md` F2 is built on are now un-creatable for a *second and independent* reason:
+they carry a per-transaction cap and a window and no lifetime bound at all, so `v2:424` refuses
+them before the co-signature defect F2 describes can even be reached. That one is not
+pre-existing — v1 accepted those examples and #22 made them invalid — and it is the expected
+price of F5's decision rather than a surprise. Both are owned by #26, which already had to
+revisit them for #11's reachability guard; #22 has recorded the new reason and extended the fix
+recipe rather than half-fixing the prose, so the two edits cannot collide. The general lesson is
+worth more than either guard: **every new grant-time refusal re-audits every configuration this
+repository has ever printed**, including the ones in its own documentation, and that sweep is
+the real cost line — not the two lines of Solidity.
+
 **~~Likely, additive, low risk.~~ DONE in v2, and "low risk" was the wrong read.** A
 `spendableAcross(bytes32[] mandateIds)` view.
 Demonstrated live on 2026-08-24: with the allowance at 90,000, two mandates each

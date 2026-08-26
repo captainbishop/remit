@@ -212,6 +212,7 @@ contract ViewsTest is Base {
         MandateManager.MandateParams memory p = emptyParams();
         p.perTxCap = 90_000;
         p.flags = F_PER_TX;
+        p = withExpiry(p); // v2: a perTxCap is not a lifetime bound
         bytes32 a = grant(p);
         p.spender = other; // a second delegate, same payer, same allowance
         bytes32 b = grant(p);

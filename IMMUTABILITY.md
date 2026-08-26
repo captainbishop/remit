@@ -176,7 +176,9 @@ Every cost in §4 is real, and I would still not add one.
 
 Remit's entire proposition is that a payer's limits are properties of code rather than
 promises from an operator. When you grant a mandate with a 5,000 per-transaction cap, a
-three-address allowlist and a 24-hour ceiling, the reason those hold is that the bytecode
+three-address allowlist, a 24-hour ceiling and an expiry ninety days out — v2 requires that
+last one, or a lifetime cap in its place, because the first three bound how fast money leaves
+and never how much — the reason those hold is that the bytecode
 enforcing them cannot be replaced. A contract that can be upgraded can be upgraded to remove
 the cap check — so on an upgradeable Remit, the accurate description of a mandate is *capped,
 unless whoever holds the key decides otherwise*, and the payer's real counterparty is the
@@ -376,7 +378,7 @@ live transactions". Both were true on 2026-08-24 and are badly understated today
 surface is five mandates, five spends, three revocations, four cosignature transactions, 31
 in total, every one status 1, with both ERC-8004 gates having fired against Arc's real
 registries. All five state-changing functions have now run live — nothing has zero. Line 13
-likewise credits the reference model with 46 tests, which was right then and is 56 now.
+likewise credits the reference model with 46 tests, which was right then and is 57 now.
 
 The one part of that banner which is correct and which the v2 replacement keeps verbatim is
 the `NOT AUDITED` / no-real-money half. `CHANGELIST.md:87` quotes the stale banner
@@ -391,9 +393,10 @@ missing number invites a measurement and an inherited one invites trust.
 
 **`THREAT-MODEL.md`'s findings describe the deployed bytecode too.** They are being fixed in
 v2, in the working tree, at a future address. Nothing in that document is fixed in v1 and
-nothing in it can be. The ones that change which grants are legal — requiring a total bound,
-refusing an `expiresAt` that nothing reads, refusing an unreachable cosign gate — are exactly
-the class of defect that costs one edit before a freeze and a migration after one.
+nothing in it can be. The ones that change which grants are legal — requiring a lifetime
+bound, meaning a total cap or an expiry and not merely a rate; refusing an `expiresAt` that
+nothing reads; refusing an unreachable cosign gate — are exactly the class of defect that
+costs one edit before a freeze and a migration after one.
 
 ## 10. What this document claims, and what it does not
 

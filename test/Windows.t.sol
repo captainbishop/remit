@@ -234,6 +234,7 @@ contract WindowsTest is Base {
         p.windows = new MandateManager.WindowParams[](2);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(500), buckets: 12});
         p.windows[1] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(1000), buckets: 7});
+        p = withExpiry(p); // v2: two windows are still not a lifetime bound
         bytes32 id = grant(p);
 
         uint64 t0 = uint64(((block.timestamp / DAY) + 1) * DAY);
@@ -267,6 +268,7 @@ contract WindowsTest is Base {
         p.windows = new MandateManager.WindowParams[](2);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(500), buckets: 12});
         p.windows[1] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(100), buckets: 7});
+        p = withExpiry(p); // v2: two windows are still not a lifetime bound
         bytes32 id = grant(p);
         alignToBucket();
 

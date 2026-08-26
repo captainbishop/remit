@@ -397,11 +397,31 @@ contract MandateManager {
 
         uint8 flags = p.flags;
 
+        // ---------------------------------------------------------------------
         // Refusing to mint an unbounded authority is the entire point of the
         // primitive, so it is enforced rather than documented.
-        bool hasBound = (flags & F_PER_TX != 0) || (flags & F_TOTAL != 0) || (flags & F_EXPIRY != 0)
-            || p.windows.length > 0;
-        if (!hasBound) revert Unbounded();
+        //
+        // What counts as a bound is deliberately narrow, and narrower than it was:
+        // only `totalCap` and `expiresAt` bound LIFETIME exposure. A
+        // per-transaction cap alone does not — the delegate spends it again, and
+        // again, until the payer's allowance is dry — and neither does a window
+        // alone, which is bounded per period and unbounded over a lifetime. v1 and
+        // the first draft of v2 accepted `F_PER_TX`-only and window-only grants, so
+        // the sentence above promised more than the code delivered. It is now true.
+        //
+        // The accepted cost, written here so it is not rediscovered later as a
+        // surprise: an open-ended arrangement — a subscription with a monthly
+        // window and no end date — is no longer creatable as written. It is served
+        // by naming a distant `expiresAt`, which costs the payer nothing and makes
+        // the horizon explicit rather than absent. An opt-in strictness flag was
+        // considered and is not available: `flags` is a uint8 and bit 7, the last
+        // free bit, is committed to the merkle allowlist.
+        //
+        // The reasoning is the one that retires the dead co-signature gate below:
+        // "merely useless" is not a reason to allow a configuration whose display
+        // and whose enforcement disagree.
+        // ---------------------------------------------------------------------
+        if ((flags & F_TOTAL == 0) && (flags & F_EXPIRY == 0)) revert Unbounded();
 
         // Every flag must agree with the value it describes, so a malformed
         // grant is rejected at creation instead of behaving surprisingly later.
@@ -411,6 +431,19 @@ contract MandateManager {
         if ((flags & F_CREDENTIAL != 0) != (p.credential.validator != address(0))) revert BadConfig();
         if ((flags & F_ALLOWLIST != 0) != (p.allowlist.length > 0)) revert BadConfig();
         if (flags & F_EXPIRY != 0 && p.expiresAt <= p.notBefore) revert BadConfig();
+        // The mirror of the line above, and the last field in the struct that could
+        // lie. With F_EXPIRY unset, v1 accepted any `expiresAt`, wrote it to storage
+        // and emitted it in `MandateCreated`, while nothing ever read it — both
+        // `spend` and `isLive` gate the comparison on the flag. So `getMandate` could
+        // show a payer a mandate that expired last Tuesday and that spends forever.
+        // One-directional rather than an iff for the same reason the threshold rule
+        // below is: with the flag SET, the paired guard above already constrains the
+        // value, so only the flag-unset direction is left to close.
+        //
+        // `notBefore` needs no such rule and that asymmetry is deliberate: it is
+        // enforced unconditionally, in both `spend` and `isLive`, with no flag at
+        // all, so it cannot be displayed-but-dead.
+        if (flags & F_EXPIRY == 0 && p.expiresAt != 0) revert BadConfig();
         if (flags & F_CREDENTIAL != 0 && address(validationRegistry) == address(0)) revert BadConfig();
         if (flags & F_IDENTITY != 0 && address(identityRegistry) == address(0)) revert BadConfig();
 

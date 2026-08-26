@@ -199,12 +199,27 @@ function createMandate(spec) {
   if (!payer) throw new Error('createMandate(): payer required');
   if (!spender) throw new Error('createMandate(): spender required');
 
-  const hasBound =
-    perTxCap !== null || windows.length > 0 || totalCap !== null || expiresAt !== null;
-  if (!hasBound) {
+  // Only `totalCap` and `expiresAt` bound LIFETIME exposure. A per-transaction cap alone
+  // does not — the delegate spends it again, and again, until the payer's allowance is dry
+  // — and neither does a window alone, which is bounded per period and unbounded over a
+  // lifetime. This model and the contract both accepted perTxCap-only and window-only
+  // grants until v2; both now refuse, because refusing to mint an unbounded authority is
+  // the entire point of the primitive and the weaker check did not deliver it.
+  //
+  // The accepted cost: an open-ended arrangement (a monthly window, no end date) is no
+  // longer creatable as written. Name a distant `expiresAt` instead — it costs nothing and
+  // makes the horizon explicit rather than absent.
+  //
+  // Note there is no mirror here for the contract's companion rule refusing a nonzero
+  // `expiresAt` with F_EXPIRY unset. That configuration cannot be expressed in this model
+  // at all: `expiresAt: null` is the only way to say "no expiry", so the flag and the value
+  // cannot disagree. The contract needs the rule because it stores them separately.
+  const hasLifetimeBound = totalCap !== null || expiresAt !== null;
+  if (!hasLifetimeBound) {
     throw new Error(
-      'createMandate(): refusing to create an unbounded mandate — set at least one of ' +
-        'perTxCap, windows, totalCap, expiresAt',
+      'createMandate(): refusing to create a mandate with no lifetime bound — set ' +
+        'totalCap or expiresAt. A perTxCap or a window bounds each spend or each ' +
+        'period, not the total, so neither is sufficient on its own.',
     );
   }
   if (cosignThreshold !== null && !cosigner) {

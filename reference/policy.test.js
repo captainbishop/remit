@@ -21,7 +21,40 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const P = require('./policy.js');
-const { usdc, window: win, createMandate, evaluate, spend, revoke, approveCosign, headroom, headroomAcross, MAX_AMOUNT, Denial, DAY, WEEK } = P;
+const { usdc, window: win, createMandate, revoke, approveCosign, MAX_AMOUNT, Denial, DAY, WEEK } = P;
+
+// `evaluate`, `spend` and the two headroom views are wrapped rather than destructured, to
+// close two vacuity traps that the introduction of FAR (below) created. Every mandate that
+// names FAR as its horizon starts denying EXPIRED once the clock passes it — and a fuzzer
+// whose every spend is denied satisfies "accepted spends never exceed the cap" trivially,
+// so the suite would go green while measuring nothing. The recorders feed the meta test at
+// the bottom of this file, which fails if either trap is live.
+let maxTimeSeen = 0;
+let allowedSeen = 0;
+const noteTime = (t) => {
+  const v = Number(t);
+  if (Number.isFinite(v) && v > maxTimeSeen) maxTimeSeen = v;
+};
+const evaluate = (m, r, ctx, ...rest) => {
+  if (ctx) noteTime(ctx.now);
+  const out = P.evaluate(m, r, ctx, ...rest);
+  if (out && out.allowed) allowedSeen++;
+  return out;
+};
+const spend = (m, r, ctx, ...rest) => {
+  if (ctx) noteTime(ctx.now);
+  const out = P.spend(m, r, ctx, ...rest);
+  if (out && out.allowed) allowedSeen++;
+  return out;
+};
+const headroom = (m, t, ...rest) => {
+  noteTime(t);
+  return P.headroom(m, t, ...rest);
+};
+const headroomAcross = (l, t, ...rest) => {
+  noteTime(t);
+  return P.headroomAcross(l, t, ...rest);
+};
 
 const PAYER = '0xPAYER000000000000000000000000000000000001';
 const AGENT = '0xAGENT000000000000000000000000000000000002';
@@ -32,7 +65,23 @@ const BOSS = '0xBOSS0000000000000000000000000000000000005';
 let nonceCounter = 0;
 const n = () => `n${++nonceCounter}`;
 
-/** A simple mandate: 100 USDC per tx, 500/day, agent may pay anyone. */
+// Every mandate needs a LIFETIME bound as of v2: `totalCap` or `expiresAt`. A per-transaction
+// cap bounds each spend and a window bounds each period; neither bounds the total, so neither
+// is accepted on its own any more. See policy.js's `hasLifetimeBound`.
+//
+// Most tests here are about caps, windows, gates, nonces or clocks and are indifferent to the
+// horizon, so they name FAR — past every timestamp this suite uses and inside the uint40 the
+// contract stores `expiresAt` in, whose maximum is 1_099_511_627_775. The largest timestamp
+// the suite actually reaches is 103_676_400, measured by the recorders above rather than
+// estimated, which leaves FAR roughly 38x of headroom. Tests that are ABOUT the horizon name
+// their own, and the ones asserting the refusal deliberately name none.
+//
+// It is written out at each call site rather than injected by a wrapper around
+// `createMandate`, because a wrapper that quietly satisfies the rule would also hide it: the
+// suite would stop demonstrating that a real caller has to supply a bound.
+const FAR = 4_000_000_000; // year 2096
+
+/** A simple mandate: 100 USDC per tx, 500/day, agent may pay anyone, distant horizon. */
 function simpleMandate(overrides = {}) {
   return createMandate({
     id: 'm1',
@@ -40,6 +89,7 @@ function simpleMandate(overrides = {}) {
     spender: AGENT,
     perTxCap: usdc('100'),
     windows: [win(DAY, usdc('500'), 12)],
+    expiresAt: FAR,
     ...overrides,
   });
 }
@@ -66,16 +116,54 @@ test('units: usdc() parses exactly and rejects junk', () => {
   assert.equal(P.formatUsdc(1_000_000n), '1');
 });
 
-test('construction: an unbounded mandate is refused', () => {
+test('construction: a mandate with no LIFETIME bound is refused, and a perTxCap is not one', () => {
+  // Nothing at all: refused before v2 and still refused.
   assert.throws(
     () => createMandate({ id: 'x', payer: PAYER, spender: AGENT }),
-    /refusing to create an unbounded mandate/,
+    /no lifetime bound/,
   );
+
+  // The two shapes v1 and the first draft of v2 both ACCEPTED, which is the finding. A
+  // per-transaction cap of 100 lets the delegate spend 100 again, and again, until the
+  // payer's allowance is dry; a window is bounded per period and unbounded over a lifetime.
+  // Neither is a lifetime bound and neither is accepted now.
+  assert.throws(
+    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('100') }),
+    /no lifetime bound/,
+  );
+  assert.throws(
+    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, windows: [win(DAY, usdc('500'), 12)] }),
+    /no lifetime bound/,
+  );
+  // Combining the two non-bounds does not produce one.
+  assert.throws(
+    () =>
+      createMandate({
+        id: 'x', payer: PAYER, spender: AGENT,
+        perTxCap: usdc('100'), windows: [win(DAY, usdc('500'), 12)],
+      }),
+    /no lifetime bound/,
+  );
+
+  // Either lifetime bound alone suffices, and each is enough on its own.
+  assert.doesNotThrow(() =>
+    createMandate({ id: 'a', payer: PAYER, spender: AGENT, totalCap: usdc('500') }));
+  assert.doesNotThrow(() =>
+    createMandate({ id: 'b', payer: PAYER, spender: AGENT, expiresAt: FAR }));
+
+  // And this is the documented migration for an open-ended arrangement: keep the window,
+  // name a horizon. The point of refusing the shape above is that the horizon becomes
+  // explicit rather than absent, not that recurring mandates stop being expressible.
+  assert.doesNotThrow(() =>
+    createMandate({
+      id: 'c', payer: PAYER, spender: AGENT,
+      windows: [win(DAY, usdc('500'), 12)], expiresAt: FAR,
+    }));
 });
 
 test('construction: cosignThreshold without a cosigner is refused', () => {
   assert.throws(
-    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), cosignThreshold: usdc('1') }),
+    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), expiresAt: FAR, cosignThreshold: usdc('1') }),
     /requires a cosigner/,
   );
 });
@@ -88,12 +176,12 @@ test('construction: a cosigner without a threshold is refused, because the contr
   // it specifies — the same failure class as the uint96 counter, found the same way, by
   // asking what the contract can represent rather than what JavaScript can.
   assert.throws(
-    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), cosigner: BOSS }),
+    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), expiresAt: FAR, cosigner: BOSS }),
     /requires a cosignThreshold/,
   );
   // Zero is the spelling that gates everything, and it must be accepted.
   const all = createMandate({
-    id: 'all', payer: PAYER, spender: AGENT, perTxCap: usdc('10'), cosigner: BOSS, cosignThreshold: 0n,
+    id: 'all', payer: PAYER, spender: AGENT, perTxCap: usdc('10'), expiresAt: FAR, cosigner: BOSS, cosignThreshold: 0n,
   });
   assert.equal(evaluate(all, req(1n), { now: 1 }).reason, Denial.COSIGN_REQUIRED);
 });
@@ -106,7 +194,7 @@ test('construction: the spender cannot be its own cosigner', () => {
   assert.throws(
     () =>
       createMandate({
-        id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+        id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR,
         cosigner: AGENT, cosignThreshold: usdc('10'),
       }),
     /cannot be its own cosigner/,
@@ -115,7 +203,7 @@ test('construction: the spender cannot be its own cosigner', () => {
   // mandate 2 does on Arc today.
   assert.doesNotThrow(() =>
     createMandate({
-      id: 'ok', payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+      id: 'ok', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR,
       cosigner: PAYER, cosignThreshold: usdc('10'),
     }),
   );
@@ -124,7 +212,7 @@ test('construction: the spender cannot be its own cosigner', () => {
 test('construction: a cosign gate that can never fire is refused, measured against the whole policy', () => {
   const MAX = (1n << 96n) - 1n;
   const gate = (over) =>
-    createMandate({ id: 'g', payer: PAYER, spender: AGENT, cosigner: BOSS, ...over });
+    createMandate({ id: 'g', payer: PAYER, spender: AGENT, cosigner: BOSS, expiresAt: FAR, ...over });
 
   // The gate tests `amount > threshold` STRICTLY, so equality is dead: an amount both
   // above the threshold and within a per-transaction cap of the same value cannot exist.
@@ -176,7 +264,7 @@ test('construction: every grant-time refusal the contract makes, the model makes
   // Found by auditing zero-means-unset fields, not by a failing test — which is why it
   // is worth having. The contract refuses these at createMandate; the model used to
   // accept all five and fail later, or in one case not fail at all.
-  const base = { id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1') };
+  const base = { id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), expiresAt: FAR };
 
   // A cap of zero makes a window that can never permit anything. The contract calls
   // this BadWindow rather than minting a mandate that is dead on arrival.
@@ -234,6 +322,7 @@ test('construction: the stored credential is encodable — no undefined where a 
     payer: PAYER,
     spender: AGENT,
     perTxCap: usdc('1'),
+    expiresAt: FAR,
     credential: { validator: BOSS, requestHash: '0xk' },
   });
 
@@ -250,6 +339,7 @@ test('construction: the stored credential is encodable — no undefined where a 
     payer: PAYER,
     spender: AGENT,
     perTxCap: usdc('1'),
+    expiresAt: FAR,
     credential: { validator: BOSS, requestHash: '0xk', minResponse: 200n, maxStaleness: 0n, agentId: 42n },
   });
   assert.equal(explicit.credential.minResponse, 200n);
@@ -263,6 +353,7 @@ test('construction: the stored credential is encodable — no undefined where a 
     payer: PAYER,
     spender: AGENT,
     perTxCap: usdc('1'),
+    expiresAt: FAR,
     credential: { validator: BOSS, requestHash: '0xk', maxStaleness: null },
   });
   assert.equal(nulled.credential.maxStaleness, 0n);
@@ -319,7 +410,7 @@ test('the uint96 audit counter denies by name rather than overflowing, and only 
   // totalCap — the only shape that can reach the ceiling, because a lifetime cap is
   // itself a uint96 and is consulted above it. Mirrors Bounds.t.sol.
   const m = createMandate({
-    id: 'ceiling', payer: PAYER, spender: AGENT, windows: [win(DAY, MAX, 12)],
+    id: 'ceiling', payer: PAYER, spender: AGENT, windows: [win(DAY, MAX, 12)], expiresAt: FAR,
   });
   assert.equal(spend(m, req(1n), { now: 1 }).allowed, true);
   assert.equal(m.totalSpent, 1n);
@@ -494,6 +585,7 @@ test('multiple windows compose: the tightest one binds', () => {
   const m = createMandate({
     id: 'm', payer: PAYER, spender: AGENT,
     perTxCap: usdc('200'),
+    expiresAt: FAR,
     windows: [win(DAY, usdc('200'), dailyBuckets), win(WEEK, usdc('300'), 7)],
   });
   const base = 100 * WEEK;
@@ -766,6 +858,7 @@ test('joint ceiling: one mandate agrees exactly with the single-mandate view', (
   const m = createMandate({
     id: 'j1', payer: PAYER, spender: AGENT,
     perTxCap: usdc('100'),
+    expiresAt: FAR,
     windows: [win(DAY, usdc('500'), 12)],
   });
   // The property that makes the joint view trustworthy: it is not a separate
@@ -784,8 +877,8 @@ test('joint ceiling: the overlap the per-mandate views cannot show', () => {
   // 90,000 is the contract's clamp against allowance and balance, which this file
   // has no token to perform. Both halves matter: the sum is what a caller would
   // naively add up, and the clamp is what makes it a lie.
-  const a = createMandate({ id: 'j2a', payer: PAYER, spender: AGENT, perTxCap: 90_000n });
-  const b = createMandate({ id: 'j2b', payer: PAYER, spender: OTHER, perTxCap: 90_000n });
+  const a = createMandate({ id: 'j2a', payer: PAYER, spender: AGENT, perTxCap: 90_000n, expiresAt: FAR });
+  const b = createMandate({ id: 'j2b', payer: PAYER, spender: OTHER, perTxCap: 90_000n, expiresAt: FAR });
   assert.equal(headroom(a, 1).maxSpendNow, 90_000n);
   assert.equal(headroom(b, 1).maxSpendNow, 90_000n);
   assert.equal(headroomAcross([a, b], 1).maxJointSpendNow, 180_000n);
@@ -807,7 +900,7 @@ test('joint ceiling: an unbounded term clamps at MAX_AMOUNT instead of overflowi
   // this at grant time — perTxCap is not checked against MAX_AMOUNT — so the cap is
   // stored and `headroom` reports it faithfully. It is still not the largest single
   // spend, because AmountTooLarge refuses anything above MAX_AMOUNT first.
-  const huge = createMandate({ id: 'j3c', payer: PAYER, spender: AGENT, perTxCap: 1n << 200n });
+  const huge = createMandate({ id: 'j3c', payer: PAYER, spender: AGENT, perTxCap: 1n << 200n, expiresAt: FAR });
   assert.equal(headroom(huge, 1).maxSpendNow, 1n << 200n, 'the view repeats the stored cap');
   assert.equal(headroomAcross([huge], 1).maxJointSpendNow, MAX_AMOUNT, 'the joint view corrects it');
 
@@ -822,8 +915,8 @@ test('joint ceiling: an unbounded term clamps at MAX_AMOUNT instead of overflowi
 });
 
 test('joint ceiling: mandates held against different payers are refused, not summed', () => {
-  const a = createMandate({ id: 'j4a', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
-  const b = createMandate({ id: 'j4b', payer: OTHER, spender: AGENT, perTxCap: usdc('100') });
+  const a = createMandate({ id: 'j4a', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
+  const b = createMandate({ id: 'j4b', payer: OTHER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
   assert.throws(() => headroomAcross([a, b], 1), /must share one payer/);
   // Order does not matter — the payer is taken from the first element, so the
   // reversed array must be refused for the same reason and not silently accept
@@ -835,13 +928,13 @@ test('joint ceiling: mandates held against different payers are refused, not sum
 });
 
 test('joint ceiling: naming the same mandate twice is refused', () => {
-  const a = createMandate({ id: 'j5', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const a = createMandate({ id: 'j5', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
   assert.throws(() => headroomAcross([a, a], 1), /named more than once/);
   // The reason this is refused rather than deduplicated: the caller asked a
   // question about a set they got wrong, and 200 is a more convincing answer than
   // 100 to somebody who believes they hold two mandates. Deduplicating would
   // return the right number to a caller still holding the wrong belief.
-  const b = createMandate({ id: 'j5b', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const b = createMandate({ id: 'j5b', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
   assert.throws(() => headroomAcross([a, b, a], 1), /named more than once/);
   assert.equal(headroomAcross([a, b], 1).maxJointSpendNow, usdc('200'));
 });
@@ -852,8 +945,8 @@ test('joint ceiling: an empty set is answered, and dead mandates contribute zero
   // Revoked and expired mandates must NOT throw — they are the ordinary contents of
   // any real caller's list, and a view that refused them would be unusable exactly
   // when a payer most wants to check what is still live.
-  const live = createMandate({ id: 'j6a', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
-  const dead = createMandate({ id: 'j6b', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const live = createMandate({ id: 'j6a', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
+  const dead = createMandate({ id: 'j6b', payer: PAYER, spender: AGENT, perTxCap: usdc('100'), expiresAt: FAR });
   const gone = createMandate({ id: 'j6c', payer: PAYER, spender: AGENT, expiresAt: 500n });
   revoke(dead, PAYER);
   assert.equal(headroomAcross([live, dead, gone], 1000).maxJointSpendNow, usdc('100'));
@@ -872,6 +965,7 @@ test('REGRESSION: a spend late in a sub-bucket is still counted K buckets later'
   const S = DAY / K; // 21600
   const m = createMandate({
     id: 'leak', payer: PAYER, spender: AGENT,
+    expiresAt: FAR,
     windows: [win(DAY, usdc('1000'), K)],
   });
 
@@ -905,6 +999,7 @@ test('PROPERTY (fuzz): accepted spends never exceed the cap in any true trailing
 
       const m = createMandate({
         id: `fuzz-${bucketCount}-${seed}`, payer: PAYER, spender: AGENT,
+        expiresAt: FAR,
         windows: [win(L, CAP, bucketCount)],
       });
 
@@ -958,6 +1053,7 @@ test('PROPERTY (fuzz): a GREEDY adversary aiming at bucket boundaries cannot exc
 
       const m = createMandate({
         id: `greedy-${K}-${seed}`, payer: PAYER, spender: AGENT,
+        expiresAt: FAR,
         windows: [win(L, CAP, K)],
       });
 
@@ -1001,6 +1097,7 @@ test('PROPERTY (fuzz): two windows enforced together, neither leaks', () => {
 
     const m = createMandate({
       id: `two-${seed}`, payer: PAYER, spender: AGENT,
+      expiresAt: FAR,
       windows: [win(DAY, DAILY, 12), win(WEEK, WEEKLY, 7)],
     });
 
@@ -1033,6 +1130,7 @@ test('DOCUMENTED COST: sustained throughput settles at K/(K+1) of the nominal ca
     const S = DAY / K;
     const m = createMandate({
       id: `rate-${K}`, payer: PAYER, spender: AGENT,
+      expiresAt: FAR,
       windows: [win(DAY, CAP, K)],
     });
 
@@ -1068,6 +1166,7 @@ test('PROPERTY: the engine is conservative but not uselessly strict', () => {
   // over-counting of the trailing sub-bucket.
   const m = createMandate({
     id: 'live', payer: PAYER, spender: AGENT,
+    expiresAt: FAR,
     windows: [win(DAY, usdc('240'), 24)],
   });
   let through = 0n;
@@ -1087,4 +1186,33 @@ test('PROPERTY: cap is enforced per mandate, not shared or leaked between them',
   assert.equal(headroom(a, 1).windows[0].remaining, 0n);
   assert.equal(headroom(b, 1).windows[0].remaining, usdc('500'));
   assert.equal(evaluate(b, req(usdc('100')), { now: 1 }).allowed, true);
+});
+
+// ---------------------------------------------------------------------------
+// This one guards the suite rather than the engine, and it exists because of FAR.
+test('meta: no test runs past FAR, and the run is not vacuously green', () => {
+  assert.ok(maxTimeSeen > 0, 'the recorders saw no timestamps at all, so they are not wired up');
+
+  // If any test's clock reached FAR, every mandate carrying FAR would deny EXPIRED from that
+  // point on. The window fuzzers would then still pass — "accepted spends never exceed the
+  // cap" is satisfied by accepting nothing — so this is not a failure the property tests can
+  // report themselves.
+  assert.ok(
+    maxTimeSeen < FAR,
+    `a test used t=${maxTimeSeen}, which is at or past FAR=${FAR}. Every mandate carrying ` +
+      'FAR would deny EXPIRED from there on, and the window fuzzers would stay green while ' +
+      'measuring nothing. Raise FAR — it must stay under the uint40 max of 1099511627775 — ' +
+      'or give that test its own horizon.',
+  );
+
+  // And the direct check on vacuity: a large number of spends must actually have been
+  // allowed across the run. The run allows 45,058 as of this commit; the threshold sits an
+  // order of magnitude below that on purpose, so it catches a collapse without pinning a
+  // count that every new test would have to update.
+  assert.ok(
+    allowedSeen > 5_000,
+    `only ${allowedSeen} spends were allowed across the whole run, which is too few for the ` +
+      'fuzzers to have exercised anything — suspect a grant-time refusal or a gate denying ' +
+      'everything rather than a genuine property.',
+  );
 });

@@ -105,6 +105,7 @@ contract CosignTest is Base {
         p.windows = new MandateManager.WindowParams[](1);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(100), buckets: 12});
         p = withCosign(p, boss, usd(25));
+        p = withExpiry(p); // v2: a perTxCap and a window are not a lifetime bound
         bytes32 id = grant(p);
 
         uint64 t0 = uint64(((block.timestamp / (DAY / 12)) + 1) * (DAY / 12));
@@ -292,6 +293,7 @@ contract CosignTest is Base {
         p.windows = new MandateManager.WindowParams[](1);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(50), buckets: 12});
         p = withCosign(p, boss, usd(10));
+        p = withExpiry(p); // v2: a perTxCap and a window are not a lifetime bound
         bytes32 id = grant(p);
 
         // 90 is over the window cap AND over the cosign threshold. The window wins.
@@ -327,6 +329,11 @@ contract CosignTest is Base {
         p.perTxCap = usd(10);
         p.flags = F_PER_TX;
         p = withCosign(p, boss, usd(100)); // threshold above the per-tx cap
+        // The horizon is load-bearing for the ASSERTION, not just for the second grant
+        // below. `Unbounded()` is checked before every `BadConfig()` in `createMandate`,
+        // so without it this test would still revert and would still pass a bare
+        // `vm.expectRevert()` — while proving nothing about the cosign gate.
+        p = withExpiry(p);
 
         vm.prank(payer);
         vm.expectRevert(MandateManager.BadConfig.selector);

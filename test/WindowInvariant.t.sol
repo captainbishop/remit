@@ -201,6 +201,14 @@ contract WindowInvariantTest is Base {
         p.spender = address(handler); // the handler spends in its own name
         p.windows = new MandateManager.WindowParams[](1);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: L, cap: CAP, buckets: BUCKETS});
+        // v2 requires a lifetime bound and a window is not one. `FAR` is uint40 max, and
+        // the arithmetic that matters here is the campaign's reachable clock: the start
+        // is 1,000,000 and `_advance` adds at most `L + S + 1` = 93,601 seconds per call,
+        // so even the deep profile's depth of 256 lands near 25,000,000 — five orders of
+        // magnitude short of the horizon. If that ever stopped being true,
+        // `invariant_theWindowIsTheOnlyThingThatEverRefuses` below would report the
+        // `Expired` selector rather than let the run go quietly green.
+        p = withExpiry(p);
         id = grant(p);
         handler.setMandate(id);
 

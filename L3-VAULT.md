@@ -171,14 +171,28 @@ prevents.
 
 ## Two flags the vault must force, and why each
 
-**`F_TOTAL` is mandatory, and `MandateManager` will not enforce it.** The `hasBound`
-check at line 353 is satisfied by `F_PER_TX` *or* `F_EXPIRY` *or* any window —
-`F_TOTAL` is not required for a valid grant. A vault-granted mandate carrying only
-`F_PER_TX` would let the agent spend `perTxCap` repeatedly until the pool was empty,
+**`F_TOTAL` is mandatory, and `MandateManager` will not enforce it — in either version.**
+The `hasBound` check at line 353 is satisfied by `F_PER_TX` *or* `F_EXPIRY` *or* any
+window, so `F_TOTAL` is not required for a valid grant. A vault-granted mandate carrying
+only `F_PER_TX` would let the agent spend `perTxCap` repeatedly until the pool was empty,
 and `Unbounded()` would never fire. The vault must require it in its own code. One
 convenience: line 360 couples flag to value as a biconditional
 (`(flags & F_TOTAL != 0) != (p.totalCap > 0)` reverts `BadConfig`), so requiring
 `totalCap > 0` is sufficient to force the flag.
+
+**v2 narrows that check and it still does not help the vault, which is worth being
+explicit about rather than leaving as an inference.** v2 accepts `F_TOTAL` *or*
+`F_EXPIRY` only — a per-transaction cap and a window are no longer bounds, which is
+finding F5 in `THREAT-MODEL.md`. But the next section requires the vault to force
+`F_EXPIRY` for escrow liveness, so a vault mandate satisfies v2's guard on the expiry
+alone and `F_TOTAL` remains unrequired by the contract. The narrowing removes the
+specific `F_PER_TX`-only shape described above and leaves the hole the vault actually
+cares about wide open: an expiry-only mandate against a *shared* pool lets the agent
+spend the whole pool before the deadline arrives, which is the entire failure the
+`F_TOTAL` requirement exists to prevent. This is a general property worth carrying into
+any other contract built on Remit — **a grant-time bound the platform enforces for its
+own reasons is not a substitute for the bound your own design needs**, and the two
+being spelled with the same error name makes that easy to miss.
 
 **`F_EXPIRY` is mandatory for escrow liveness.** Escrow can only be released when no
 further spend is possible. Without the flag, `expiresAt` is ignored entirely — both
@@ -221,6 +235,15 @@ The first draft relied on `F_EXPIRY` being forced two sections earlier, which is
 but leaves a code block that is unsafe if anyone copies it alone. That is the same
 class of error as the trap this section exists to describe, made in the act of
 describing it.
+
+**v2 makes this worse rather than better, which is the opposite of what a reader would
+expect from a validation being added.** v2 refuses a grant that sets `expiresAt` with
+`F_EXPIRY` unset (finding F1), so zero stops being one possible value of an unvalidated
+field and becomes the *only* legal value. The bare predicate is therefore no longer
+merely capable of being true from birth — under v2 it is true from birth for **every**
+mandate without the flag, without exception. A validation that removes a variant can
+tighten a bad assumption into a certainty, and the flag test is what makes the predicate
+correct in both versions.
 
 With the predicate written completely, `totalSpent` is provably final at release.
 `revoked` is written only at 383 (`false`, at creation) and 705 (`true`), there is no

@@ -38,6 +38,42 @@ abstract contract Base is Test {
     uint32 internal constant DAY = 1 days;
     uint32 internal constant WEEK = 7 days;
 
+    /**
+     * The lifetime horizon nearly every mandate in this suite carries, and the reason it
+     * is the largest representable value rather than a plausible far-future date.
+     *
+     * NEW IN v2. `createMandate` now refuses a mandate with no LIFETIME bound. A
+     * per-transaction cap is not one — the delegate spends it again, and again — and
+     * neither is a rolling window, which is bounded per period and unbounded over a
+     * lifetime. Only `totalCap` and `expiresAt` are. Almost every test here is about
+     * something other than expiry, so each one needs a bound that cannot interfere with
+     * whatever it is actually measuring.
+     *
+     * `expiresAt` is the right one of the two, and not merely the more convenient one.
+     * `totalCap` enters the amount arithmetic everywhere — `spendable`,
+     * `policyHeadroom`, the min-of across bounds, the totalSpent ceiling — so handing
+     * every mandate one would quietly make it a term in tests that are measuring a
+     * window or a per-transaction cap, and some of those assert exact numbers. An expiry
+     * is inert with respect to every amount in the system. It is either passed or it is
+     * not.
+     *
+     * uint40 max, rather than a plausible date, because "far enough" has to hold
+     * unconditionally. The model's `FAR` is 4e9 — year 2096, against a measured maximum
+     * clock of 103,676,400 — and that is sound there because the JS suite's timestamps
+     * are a fixed set of literals anyone can enumerate. This suite's are not:
+     * `WindowInvariant` accumulates up to `depth * (windowLength + subLength + 1)`
+     * seconds, and `depth` is a number in foundry.toml which the deep profile already
+     * raises from 64 to 256. A horizon that is safe under one profile and not another is
+     * a trap, so this is the one value no run can pass without first overflowing the
+     * field it is stored in. Year 36812.
+     *
+     * The contract permits it. `expiresAt` is only ever compared, never used in
+     * arithmetic — MandateManager.sol:608 in `spend` and :1012 in `isLive` are its only
+     * two readers — and the only grant-time rule on the value is that it exceed
+     * `notBefore`.
+     */
+    uint40 internal constant FAR = type(uint40).max;
+
     uint256 internal constant AGENT_ID = 42;
     bytes32 internal constant KYC_HASH = keccak256("kyc-request-1");
     bytes32 internal constant REF = bytes32("invoice-0001");
@@ -109,7 +145,14 @@ abstract contract Base is Test {
     // -- parameter builders ------------------------------------------------
 
     /// Nothing set except the spender and the two empty arrays that every params
-    /// struct needs. On its own this is an unbounded mandate and will be refused.
+    /// struct needs. On its own this is an unbounded mandate and `createMandate` refuses
+    /// it with `Unbounded()`.
+    ///
+    /// v2 widened what "unbounded" means, so read this before building on it: adding a
+    /// `perTxCap`, or a window, or both, does NOT make the result creatable. Only
+    /// `totalCap` or `expiresAt` does. Any test that builds from here and expects the
+    /// grant to succeed — or to fail for some more specific reason than `Unbounded` —
+    /// has to add one, and `withExpiry` is the cheapest way.
     function emptyParams() internal view returns (MandateManager.MandateParams memory p) {
         p.spender = agent;
         p.windows = new MandateManager.WindowParams[](0);
@@ -117,17 +160,29 @@ abstract contract Base is Test {
     }
 
     /// The JS suite's `simpleMandate`: 100 per transaction, 500 per rolling day,
-    /// twelve buckets, any recipient.
+    /// twelve buckets, any recipient — and since v2 a `FAR` expiry, because not one of
+    /// those three is a lifetime bound. The model's helper carries the same horizon for
+    /// the same reason.
     function simpleParams() internal view returns (MandateManager.MandateParams memory p) {
         p = emptyParams();
         p.perTxCap = usd(100);
         p.flags = F_PER_TX;
         p.windows = new MandateManager.WindowParams[](1);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(500), buckets: 12});
+        p = withExpiry(p);
     }
 
-    /// A single rolling window and no other bound — the shape the window tests want,
-    /// so that a denial can only ever be OverWindowCap.
+    /// A single rolling window and no other AMOUNT bound — the shape the window tests
+    /// want, so that a denial can only ever be OverWindowCap.
+    ///
+    /// Since v2 it also carries a `FAR` expiry, because a window alone is no longer a
+    /// creatable mandate. That does not weaken the sentence above, and the reason is
+    /// worth writing down rather than assuming: an expiry can produce only `Expired`,
+    /// and `FAR` is uint40 max, so no run in this suite reaches it. If one ever did, the
+    /// failure would be loud rather than silent in both places it could hide —
+    /// `WindowFuzz` asserts that every refusal is `OverWindowCap` specifically, and
+    /// `WindowInvariant`'s handler records the first refusal that is not, which
+    /// `invariant_theWindowIsTheOnlyThingThatEverRefuses` then reads.
     function windowOnlyParams(uint32 lengthSeconds, uint96 cap, uint8 buckets)
         internal
         view
@@ -136,6 +191,27 @@ abstract contract Base is Test {
         p = emptyParams();
         p.windows = new MandateManager.WindowParams[](1);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: lengthSeconds, cap: cap, buckets: buckets});
+        p = withExpiry(p);
+    }
+
+    /// Give `p` the lifetime bound v2 requires, at the horizon that cannot interfere
+    /// with anything — see `FAR` above for why it is uint40 max and why it is an expiry
+    /// rather than a total.
+    ///
+    /// This is a `with*` helper rather than something `grant()` does silently, and that
+    /// is deliberate. Making `grant` supply a bound would have repaired every failing
+    /// test in this suite in one edit, and in the same edit stopped the suite from
+    /// demonstrating that a real caller has to supply one. Every mandate here names its
+    /// own horizon, either by calling this or by setting `expiresAt` and `F_EXPIRY` by
+    /// hand. The model made the same call for the same reason.
+    function withExpiry(MandateManager.MandateParams memory p)
+        internal
+        pure
+        returns (MandateManager.MandateParams memory)
+    {
+        p.expiresAt = FAR;
+        p.flags |= F_EXPIRY;
+        return p;
     }
 
     function withAllowlist(MandateManager.MandateParams memory p, address one)

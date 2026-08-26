@@ -37,7 +37,7 @@ one of which lives in USDC rather than in this codebase.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   56 tests, including boundary-aiming fuzzers
+reference/policy.test.js   57 tests, including boundary-aiming fuzzers
 contracts/MandateManager.sol   on-chain implementation (140 tests pass; live on Arc Testnet)
 test/                      140 Forge tests against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
@@ -57,7 +57,7 @@ Node 18+, no dependencies, no network.
 node --test reference/policy.test.js
 ```
 
-Expected: `# tests 56 / # pass 56 / # fail 0`.
+Expected: `# tests 57 / # pass 57 / # fail 0`.
 
 The tests are the actual correctness evidence for this project. They include named
 attack cases (tumbling-window boundary burst, backwards clock, co-signature
@@ -157,7 +157,7 @@ by `createMandate(salt, params)`, and then the delegate can `spend`.
 
 ## Status, honestly
 
-**Verified.** The reference model runs and passes 56 tests. It found six real
+**Verified.** The reference model runs and passes 57 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
 collision at low timestamps) and two in the credential gate (unchecked validator,
@@ -328,9 +328,9 @@ the model returns encodes directly into the contract's struct with no second lay
 defaults to disagree with. A specification that needs a translator has moved the bug
 rather than fixed it.
 
-The model now matches on all ten, which took its suite from 41 tests to 46 — and to 56 over
-the course of v2, which added the counter-ceiling denial, three cosign-gate refusals and six
-joint-ceiling tests. One Forge
+The model now matches on all ten, which took its suite from 41 tests to 46 — and to 57 over
+the course of v2, which added the counter-ceiling denial, three cosign-gate refusals, six
+joint-ceiling tests and the lifetime-bound narrowing. One Forge
 test was also rewritten for proving nothing — it tripped two `BadWindow` conditions at
 once, so it would have passed with either check removed.
 
@@ -376,7 +376,9 @@ than `<`, because `spend` tests `amount > cosignThreshold` strictly, so a thresh
 equal to the ceiling is dead too — and `perTxCap` is not the only ceiling, since with
 `F_PER_TX` unset the effective one is the smaller of the lifetime cap and the window caps.
 v2 refuses the grant, comparing the threshold against `min(2^96 - 1, perTxCap, totalCap,
-every window cap)`, which still accepts a mandate that bounds no amount at all.
+every window cap)`, which still accepts a mandate that bounds no amount at all — an
+expiry-only mandate is legal in v2 and the `2^96 - 1` term is what keeps the guard
+meaningful there, since `AmountTooLarge` is then the only ceiling on a single spend.
 
 Fixing it properly meant asking the general question — *in how many ways can a mandate
 display a co-signature requirement and not have one?* — and the answer was five, not one.
@@ -390,6 +392,27 @@ transactions and no second party. Neither is a divergence between the contract a
 two implementations would have surfaced them. v2 refuses all three. `cosigner == payer`
 remains legal and is the ordinary case; it is what live mandate 2 does on Arc today, and a
 rule that condemned it would have contradicted a receipt.
+
+**And two more that were on no list at all, found by writing the threat model.** Neither
+belongs to the three above; both came out of a sweep asking which fields a mandate can
+display without anything measuring against them, and both are grant-time refusals in v2.
+The first is the bigger change. v1 called a mandate "bounded" if it carried a
+per-transaction cap **or** a lifetime cap **or** an expiry **or** any window — but a
+per-transaction cap bounds one spend and permits unlimited spends, and a window bounds a
+*rate* and permits unlimited cumulative spending given enough time. So `perTxCap = 100`
+and nothing else is a standing instruction to spend 100 USDC forever, and v1 accepts it
+while its own comment beside the check claims otherwise. v2 requires a lifetime cap or an
+expiry specifically, and refuses everything else with `Unbounded()`. The second: with
+`F_EXPIRY` unset, `spend` never reads `expiresAt`, so a payer could set a deadline, see it
+returned by `getMandate`, and have it enforce nothing — v2 refuses that pairing at grant
+time, which closes the last field in the struct that could be shown and unread.
+
+The cost of the first one is real and is worth stating plainly: it invalidates worked
+examples in this repository's own documentation, including the flagship one in `DESIGN.md`,
+which bounds a rate and a blast radius but never a lifetime. Those are being corrected
+rather than grandfathered. Every new grant-time refusal re-audits every configuration the
+project has ever printed, and that sweep is the expensive part, not the two lines of
+Solidity.
 
 **Not audited.** No third party has looked at this. Do not put money behind it.
 

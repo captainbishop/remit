@@ -3,7 +3,7 @@
 140 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
-is the port of `reference/policy.test.js`, which has 56 tests and verifies the *policy*.
+is the port of `reference/policy.test.js`, which has 57 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 

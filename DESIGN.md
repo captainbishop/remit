@@ -96,6 +96,21 @@ And on Monday there is an on-chain record of what was authorized, what was attem
 what was refused, and for which reason. Not a vendor's log. Something the company, the
 broker, their auditor, and their insurer can each read independently.
 
+> **Do not copy this configuration. As written it cannot be created by v2, for two
+> independent reasons, and the second of them also makes the co-signature step above
+> untrue.** It carries a €5,000 per-transaction cap, a rolling 24-hour cap of €15,000
+> and a €10,000 co-signature threshold, and no lifetime bound at all — so v2's
+> `Unbounded()` check refuses it before anything else is looked at, because a
+> per-transaction cap and a window bound a *rate* and a blast radius but never a
+> total. And a threshold of €10,000 sits above the €5,000 ceiling those caps imply, so
+> the gate could never have fired: the €12,000 spend two paragraphs up is refused by
+> the per-transaction cap, not escalated to Ada. Both are recorded as finding F2 in
+> `THREAT-MODEL.md`, which carries the corrected numbers, and rewriting this section
+> is task #26. It is left standing rather than quietly patched because the two defects
+> are the clearest illustration in the repository of a real cost: every grant-time
+> refusal added to the contract re-audits every configuration the project has ever
+> printed, including its own flagship example.
+
 ### The urgency
 
 The agent in this story is competent, well-intentioned, and behaving exactly as
@@ -158,6 +173,18 @@ persisting by default. An **identity gate** requires the spender to hold a speci
 ERC-8004 agent identity. A **credential gate** requires a live attestation from a
 named validator about that specific agent. And above a configurable threshold, a
 **co-signature** from a second party is required per spend.
+
+The seven axes are independent but they are not all optional. **v2 requires that at
+least one of the total cap or an `expiresAt` be set**, and refuses the grant with
+`Unbounded()` otherwise. Those two are the only axes that bound a mandate's *lifetime*
+exposure: a per-transaction cap limits one spend and permits unlimited spends, and a
+rolling window limits a rate and permits unlimited cumulative spending given enough
+time, so a mandate carrying either of those and nothing else is a standing instruction
+to keep paying forever. This is the sense in which authority expires by default rather
+than persisting by default — under v2 it is a rule the contract enforces, not a habit
+the documentation recommends. v1, deployed and immutable at
+`0x3744E93B9e796E05CB66311d897559B6F3860196`, accepted a per-transaction cap or a
+window as sufficient; that is finding F5 in `THREAT-MODEL.md`.
 
 Every spend carries an **idempotency nonce**, so a retrying worker cannot double-pay.
 Every spend emits a **reconcilable event** carrying a business reference. The payer
@@ -434,7 +461,7 @@ mandate or the ERC-20 allowance independently stops all spending.
 executable model of every decision the contract makes. It is the source of truth
 because it is the artifact that has actually been executed.
 
-`reference/policy.test.js` is 56 tests over that model: construction guards, each
+`reference/policy.test.js` is 57 tests over that model: construction guards, each
 cap and gate, named attack tests, and property-based fuzzers. It includes a greedy
 adversary that aims spends at bucket boundaries across `K ∈ {2,3,4,6,12,24}` × 25
 seeds × 200 steps, checked against a brute-force exact ledger. This is the primary
@@ -451,7 +478,7 @@ FORGE.md. As of 2026-08-24 it compiles and all 140 pass.
 ## Honest status
 
 The reference model is real, executed, and passing: `node --test
-reference/policy.test.js` reports 56 tests, 56 pass, 0 fail. It found six genuine
+reference/policy.test.js` reports 57 tests, 57 pass, 0 fail. It found six genuine
 cap-bypass bugs during development, four in the window algorithm and two in the
 credential gate, each of which is now a named regression test.
 

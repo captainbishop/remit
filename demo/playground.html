@@ -396,7 +396,30 @@
 
   function grant(quiet) {
     S.t0 = 0; S.now = 0;
-    S.m = makeMandate(readCfg());
+    var cfg = readCfg();
+
+    // v2's `Unbounded()` guard, mirrored here because the page's whole purpose is to
+    // behave like the contract. `createMandate` requires a bound on LIFETIME exposure,
+    // which means a lifetime cap or an expiry specifically — a per-transaction cap
+    // limits one spend and permits unlimited spends, and a rolling window limits a
+    // rate and permits unlimited cumulative spending given enough time. Neither
+    // counts. Before this guard existed the page would happily grant a mandate with
+    // both fields zeroed and then simulate spends against it forever, which is the
+    // one thing a simulator must never do: teach a policy the real contract refuses.
+    // The two inputs map exactly onto the rule, so the refusal can name them.
+    if (cfg.totalCap === 0 && cfg.expiresAt === 0) {
+      S.m = null;
+      S.tumb = { cap: n("dayCap"), day: -1, used: 0, moved: 0 };
+      S.ledger = []; S.nonceSeq = 1;
+      log(null, "UNBOUNDED", "Refused, exactly as the contract would: set a lifetime cap, " +
+        "or an expiry in days, or both. A per-transaction cap and a rolling window bound " +
+        "how fast money leaves, never how much leaves in total — a mandate with only those " +
+        "is a standing instruction to keep paying forever.");
+      render();
+      return;
+    }
+
+    S.m = makeMandate(cfg);
     S.tumb = { cap: n("dayCap"), day: -1, used: 0, moved: 0 };
     S.ledger = []; S.nonceSeq = 1;
     $("nonce").value = "n1";
@@ -406,6 +429,7 @@
 
   function attempt(amount, to, nonce, note) {
     if (!S.m) { grant(true); }
+    if (!S.m) { render(); return; } // the grant was refused as unbounded; nothing to spend against
     var r = { amount: amount, to: to, nonce: nonce };
     var d = evaluate(S.m, r, S.now);
     var tOk = tumblingTry(S.tumb, amount, S.now);
@@ -490,12 +514,21 @@
   }
 
   // ---------------------------------------------------------------- attacks
+
+  // Every scripted attack starts by re-granting from whatever is currently in the form,
+  // so any of them can now land on the unbounded refusal in `grant`. This reports that,
+  // so an attack stops with the refusal sitting in the ledger instead of dereferencing a
+  // null mandate three lines later — `rewind`, `redirect` and `revoked` all touch `S.m`
+  // directly, and a thrown exception teaches the reader nothing while the refusal message
+  // is the entire lesson.
+  function granted() { grant(true); return !!S.m; }
+
   var attacks = {
     // Spend the whole daily cap just before midnight, then again just after.
     // A calendar-day cap resets and lets both through: 2x the stated limit in
     // four minutes. The rolling window is unimpressed.
     burst: function () {
-      grant(true);
+      if (!granted()) return;
       var cap = n("dayCap"), tx = n("perTx");
       var chunk = Math.min(cap, tx > 0 ? tx : cap);
       var slices = Math.max(1, Math.ceil(cap / chunk));
@@ -507,13 +540,13 @@
     },
     // Many small spends, well under every per-tx bound, aimed at the cap.
     drip: function () {
-      grant(true);
+      if (!granted()) return;
       log(null, "ATTACK", "Slow drip: repeated small spends, each individually legal, aimed at the rolling cap.");
       var step = Math.max(1, Math.floor(n("dayCap") / 9));
       for (var i = 0; i < 14; i++) { attempt(step, "0xVENDOR", "drip" + i); S.now += 1800; }
     },
     replay: function () {
-      grant(true);
+      if (!granted()) return;
       log(null, "ATTACK", "Nonce replay: submit an identical spend twice, as a crashed-and-retrying worker would.");
       attempt(100, "0xVENDOR", "invoice-8841");
       S.now += 30;
@@ -524,7 +557,7 @@
     // Wind the clock back by exactly K+1 sub-periods to force a ring-slot
     // collision, then try to spend the "freed" headroom.
     rewind: function () {
-      grant(true);
+      if (!granted()) return;
       var w = S.m.windows[0];
       if (!w) { log(null, "SKIPPED", "Needs a rolling window."); render(); return; }
       log(null, "ATTACK", "Backwards clock: spend, then rewind time by exactly K+1 sub-periods so the spend lands on the same ring slot, and try to reuse the cap.");
@@ -535,7 +568,7 @@
       attempt(half, "0xVENDOR", "rw-2", "Refused: the engine never filters out a bucket for being 'in the future', and a commit accumulates into a live slot rather than overwriting it.");
     },
     redirect: function () {
-      grant(true);
+      if (!granted()) return;
       var thr = n("cosign"), amt = Math.min(n("perTx") || thr + 50, thr + 50);
       log(null, "ATTACK", "Co-signature redirect: get an approval for a legitimate vendor payment, then try to reuse it.");
       S.m.cosignApproved[spendKey({ to: "0xVENDOR", amount: amt, nonce: "cs-1" })] = true;
@@ -549,7 +582,7 @@
       attempt(amt, "0xVENDOR", "cs-2", "The same approval cannot authorise a second spend.");
     },
     unlisted: function () {
-      grant(true);
+      if (!granted()) return;
       log(null, "ATTACK", "Recipient substitution: same amount, attacker's address.");
       attempt(120, "0xATTACKER", "u1");
       S.now += 10;
@@ -558,7 +591,7 @@
       attempt(120, "0xVENDOR", "u3", "The allowlisted vendor is fine.");
     },
     revoked: function () {
-      grant(true);
+      if (!granted()) return;
       log(null, "ATTACK", "Race the revocation: keep spending after the payer pulls authority.");
       attempt(100, "0xVENDOR", "r1");
       S.now += 60;
@@ -584,6 +617,7 @@
   };
   $("cosignBtn").onclick = function () {
     if (!S.m) grant(true);
+    if (!S.m) { render(); return; } // refused as unbounded — there is no mandate to co-sign against
     var r = { amount: Math.floor(Number($("amt").value) || 0), to: $("to").value, nonce: $("nonce").value.trim() };
     S.m.cosignApproved[spendKey(r)] = true;
     log(null, "CO-SIGNED", "Bound to " + r.amount + " → " + r.to + ", nonce " + r.nonce + ". Any other combination is a different hash.");

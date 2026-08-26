@@ -122,8 +122,8 @@ path.
 | :--- | :--- |
 | Only the named spender can spend | `spend`: `msg.sender != m.spender` → `WrongSpender` |
 | A mandate id is unique to one payer forever | id = `keccak256(DOMAIN, chainid, this, msg.sender, salt)`; `payer != address(0)` → `MandateExists`. `payer` is never cleared, so an id is single-use permanently and no revoked mandate's storage can be reinterpreted |
-| No mandate can be created without some bound | `createMandate`: `hasBound` → `Unbounded`. **But see F5 for what "bound" does and does not mean** |
-| Every flag agrees with the value it describes | five biconditionals in `createMandate`. **Except `F_EXPIRY` — see F1** |
+| No mandate can be created without a bound on **lifetime** exposure | `createMandate` at `v2:424`: `(flags & F_TOTAL == 0) && (flags & F_EXPIRY == 0)` → `Unbounded`. Narrowed in #22; v1's `hasBound` local also accepted `F_PER_TX` or a window, neither of which bounds a lifetime — that was F5, and this row is what the contract's own comment had been claiming all along |
+| Every flag agrees with the value it describes | five biconditionals in `createMandate`, plus the one-directional `F_EXPIRY` rule at `v2:446` added in #22 — F1. No field in the struct can now be displayed and unread |
 | A displayed co-signature requirement is a real one | three grant-time guards: threshold-without-flag, `cosigner == spender`, and `effectiveMax <= cosignThreshold` |
 | Caps cannot be exceeded per-transaction, per-window, or per-lifetime | `OverPerTxCap`, `OverWindowCap`, `OverTotalCap`; window accounting independently searched over 3.0M spend sequences with zero violations, on a harness that reproduces the historical K-bucket bug at 2× cap |
 | A rolling window is genuinely rolling | K+1 bucket summation. The proof in the source is valid but proves less than the code guarantees: eviction (`bucketIndex < oldest`) is the exact negation of inclusion (`bucketIndex >= oldest`) computed from the same `oldest` in the same call, and `oldest` is monotone, so nothing counted is ever discarded. `createMandate`'s `lengthSeconds % buckets != 0` check is load-bearing for cap soundness, not merely for uniformity |
@@ -146,14 +146,14 @@ not a measure of anything — it is a function of how long the search ran. Triag
 
 | Fix before v2 freezes | Cost | Needs a decision first |
 | :--- | :--- | :--- |
-| F1 `expiresAt` grant-time refusal | 1 line + 1 test + model mirror | — |
-| F2 `DESIGN.md` worked example | numbers derived, needs a doc sweep | — |
+| ✅ F1 `expiresAt` grant-time refusal | **DONE in #22.** 1 line + 1 test; no model mirror, and F1 says why | — |
+| F2 `DESIGN.md` worked example | numbers derived, needs a doc sweep — and it grew a second defect, see F2 | — |
 | F3 `SpendCountCeiling` guard | 1 error + 1 line | or leave it and fix the changelist text |
 | F9 `spendable` clamp | 1 line | — |
 | F10 four → five | comment only | — |
 | F11 `withdrawCosign` two guards, `revoke` idempotence | 3 lines | — |
 | F4, F7, F8, F14 wrong justifications | comment rewrites | — |
-| F5 `Unbounded()` scope | new guard + tests + model mirror | **DECIDED 2026-08-26: refuse** |
+| ✅ F5 `Unbounded()` scope | **DONE in #22.** 1 line, +1 model test, and a horizon threaded through both suites | **DECIDED 2026-08-26: refuse** |
 | F6 threshold splitting | doc + one composition test | **DECIDED: document, recommend pairing with a window** |
 | F13 gate pre-validation | 2 registry reads at grant + tests | **DECIDED 2026-08-26: validate at grant** |
 | §5 coverage gaps | 4 tests | fold into #14, which needs the gas number anyway |
@@ -167,52 +167,77 @@ payer is *shown* and what is *enforced*, which is the thing Remit sells.
 
 ### F1 — `expiresAt` is stored, emitted and displayed on a mandate that never expires
 
-**Severity: medium. Status: OPEN. Confidence: certain.**
+**Severity: medium. Status: FIXED in v2 (#22), 2026-08-26. Confidence: certain.**
 
 `createMandate` couples each flag to the value it describes with a biconditional, for
-`F_PER_TX`, `F_TOTAL`, `F_COSIGN`, `F_CREDENTIAL` and `F_ALLOWLIST`. `F_EXPIRY` has no
-such rule: `v2:413` validates `expiresAt` only *when the flag is set*
+`F_PER_TX`, `F_TOTAL`, `F_COSIGN`, `F_CREDENTIAL` and `F_ALLOWLIST`. `F_EXPIRY` had no
+such rule: `v2:433` validates `expiresAt` only *when the flag is set*
 (`if (flags & F_EXPIRY != 0 && p.expiresAt <= p.notBefore)`). With the flag unset, any
-`expiresAt` is accepted, written to storage, and emitted in `MandateCreated`, while
-nothing ever reads it — `spend` and `isLive` both gate the comparison on the flag.
+`expiresAt` was accepted, written to storage, and emitted in `MandateCreated`, while
+nothing ever read it — `spend` and `isLive` both gate the comparison on the flag.
 
-So a payer can be shown, by `getMandate` and by the creation event, a mandate that
+So a payer could be shown, by `getMandate` and by the creation event, a mandate that
 expired last Tuesday and that will spend forever. This is the identical failure class as
 the `cosignThreshold`-without-`F_COSIGN` lie that v2 already refuses at `v2:432`, and
 the argument that settled that one applies verbatim: a grant that appears to carry a
 control it does not carry is refused rather than documented.
 
-The fact is not new — `L3-VAULT.md:218` records that `expiresAt` "is then an unvalidated
+The fact was not new — `L3-VAULT.md:232` records that `expiresAt` "is then an unvalidated
 field that may be zero", and the arithmetic sweep independently reached the same place.
-What is new is the framing: it was written down as a trap for a *future vault's* release
-predicate, addressed to a reader building on top of Remit. It was never treated as a
-property of the mandate that every direct payer also sees.
+What was new is the framing: it had been written down as a trap for a *future vault's*
+release predicate, addressed to a reader building on top of Remit. It was never treated
+as a property of the mandate that every direct payer also sees.
 
 The asymmetry with `notBefore` is worth stating because it looks like the same problem
 and is not: `notBefore` is enforced unconditionally, in both `spend` and `isLive`, with
 no flag at all. It therefore cannot be displayed-but-dead, and needs no rule.
 
-**Fix:** one line beside the existing guard —
+**Fixed in #22** by one line beside the existing guard, at `v2:446`:
 `if (flags & F_EXPIRY == 0 && p.expiresAt != 0) revert BadConfig();` — one-directional
-for the same reason the threshold rule is, plus its mirror in `reference/policy.js` and
-a `Creation.t.sol` test. `expiresAt` is the last field in the struct that can lie; the
-enumeration of all thirteen `Mandate` fields and three gate structs is in §6.
+for the same reason the threshold rule is, since with the flag SET the paired guard at
+`v2:433` already constrains the value, so only the flag-unset direction was open. Zero
+with the flag unset stays legal, because that is how "no expiry" is spelled, and an iff
+would have turned it into "expired at the epoch".
+
+Two notes on the shape of the fix. It has **no mirror in `reference/policy.js`**, and
+that is not an omission: the model has no flags, so `expiresAt: null` is the only way it
+can say "no expiry" and the value and the flag cannot disagree there. The contract needs
+the rule precisely because it encodes "unset" as a zero in a field of its own. And the
+Solidity test that pins it — `test_createMandate_expiresAtWithoutTheFlag_reverts` — has
+to set a `totalCap` first, because `Unbounded()` at `v2:424` is checked before every
+`BadConfig()` and would otherwise be what fires.
+
+`expiresAt` was the last field in the struct that could lie; the enumeration of all
+thirteen `Mandate` fields and three gate structs is in §6, and it is now closed.
 
 ---
 
 ### F2 — `DESIGN.md`'s flagship worked example specifies a mandate v2 refuses to create, and its central claim was already false in v1
 
-**Severity: medium (documentation, fail-closed). Status: OPEN. Confidence: certain.**
+**Severity: medium (documentation, fail-closed). Status: OPEN, owned by #26. Confidence: certain.**
 
-The narrative at `DESIGN.md:30-96` is the document's opening argument and the clearest
+The narrative at `DESIGN.md:59-97` is the document's opening argument and the clearest
 statement anywhere of what Remit is for. It specifies a mandate with an allowlist, a
 **€5,000 per-transaction cap**, a **rolling 24-hour cap of €15,000**, and a **€10,000
-co-signature threshold**. Two things are wrong with it.
+co-signature threshold**. Three things are wrong with it, and they were found one at a
+time, which is itself the point — each new grant-time guard re-audits every configuration
+the repository has ever printed.
 
-**It cannot be created under v2.** The reachability guard added in #11 computes
-`effectiveMax = min(2^96 - 1, perTxCap, minWindowCap) = min(5,000, 15,000) = 5,000` and
-refuses when `effectiveMax <= cosignThreshold`. 5,000 ≤ 10,000, so `createMandate`
-reverts `BadConfig`. A payer following the canonical example lands on a revert.
+**It cannot be created under v2, for the co-signature reason.** The reachability guard
+added in #11 computes `effectiveMax = min(2^96 - 1, perTxCap, minWindowCap) =
+min(5,000, 15,000) = 5,000` and refuses when `effectiveMax <= cosignThreshold`.
+5,000 ≤ 10,000, so `createMandate` reverts `BadConfig`. A payer following the canonical
+example lands on a revert.
+
+**It cannot be created under v2, for a second and independent reason.** As specified it
+carries no `totalCap` and no `expiresAt`, so #22's narrowed guard at `v2:424` reverts
+`Unbounded()` — and `Unbounded()` is checked *first*, so it is the error the payer
+actually sees; the co-signature defect is hidden behind it. This one is not a
+pre-existing flaw the way the other two are: v1 accepted the configuration, and #22
+made it invalid. That is the honest description, and it is the expected cost of the
+decision recorded in F5 rather than an argument against it. The narrative already
+implies a horizon — it is a story about one night in a company's ordinary operations —
+so naming one is an addition, not a change of meaning.
 
 **Its conclusion was already false in v1.** The narrative says: *"Suppose they aimed at
 €12,000, under every cap. That is above the €10,000 co-signature threshold, so Ada is
@@ -230,14 +255,19 @@ defect because this is the passage a payer reads to learn how to configure the t
 per-transaction cap to **€12,000** and leaving the threshold at €10,000 satisfies all
 five requirements the narrative makes: €48,000 is still refused by the cap; ten × €4,800
 is still stopped at the fourth by the €15,000 rolling window (3 × 4,800 = 14,400 fits,
-19,200 does not); €12,000 is now genuinely under every cap and above the threshold, so
-Ada is asked; ordinary €4,800 invoices stay below the threshold, preserving the "once,
-rather than two hundred times a month" point; and `effectiveMax = 12,000 > 10,000`, so
-v2 creates it. Lowering the threshold instead would work arithmetically but would put it
-below the €4,800 routine invoice and ask Ada about all of them.
+19,200 does not); €12,000 is now permitted by every cap — at the per-transaction cap
+rather than under it, which passes because `spend` tests `amount > perTxCap` strictly —
+and above the threshold, so Ada is asked; ordinary €4,800 invoices stay below the
+threshold, preserving the "once, rather than two hundred times a month" point; and
+`effectiveMax = 12,000 > 10,000`, so #11's guard accepts it. Lowering the threshold
+instead would work arithmetically but would put it below the €4,800 routine invoice and
+ask Ada about all of them. **Plus a lifetime bound**, for `v2:424` — an `expiresAt`
+rather than a `totalCap`, since the narrative's caps are about rate and blast radius and
+a lifetime total would be a fourth number the story does not need.
 
-Every other worked configuration in the repository needs the same check against the new
-guard, which is a sweep, not an edit.
+Every other worked configuration in the repository needs the same check against **both**
+grant-time guards, which is a sweep, not an edit. #22 has already swept for `v2:424`;
+what remains for #26 is #11's reachability guard.
 
 ---
 
@@ -315,38 +345,61 @@ only from the accurate version.
 
 ### F5 — `Unbounded()` guarantees that *a* bound exists, not that *lifetime exposure* is bounded
 
-**Severity: medium as a legibility gap. Status: OPEN (design question, not necessarily a code change). Confidence: certain.**
+**Severity: medium as a legibility gap. Status: FIXED in v2 (#22), 2026-08-26. Confidence: certain.**
 
-`hasBound` is satisfied by `F_PER_TX` **or** `F_TOTAL` **or** `F_EXPIRY` **or** any
-window. So a mandate carrying only a per-transaction cap of 100 passes, and the delegate
-may spend 100 repeatedly, forever, until the payer's allowance is dry. The same holds for
-a window alone: bounded per window, unbounded over a lifetime.
+v1's `hasBound` local was satisfied by `F_PER_TX` **or** `F_TOTAL` **or** `F_EXPIRY`
+**or** any window. So a mandate carrying only a per-transaction cap of 100 passed, and
+the delegate could spend 100 repeatedly, forever, until the payer's allowance was dry.
+The same held for a window alone: bounded per window, unbounded over a lifetime.
 
 Only `F_TOTAL` and `F_EXPIRY` bound total exposure. The contract's own comment beside the
-check says *"refusing to mint an unbounded authority is the entire point of the
-primitive, so it is enforced rather than documented"* — and what is enforced is weaker
-than what that sentence promises.
+check said *"refusing to mint an unbounded authority is the entire point of the
+primitive, so it is enforced rather than documented"* — and what was enforced was weaker
+than what that sentence promised.
 
-`L3-VAULT.md:175-181` states this exactly and correctly, and concludes *"the vault must
-require it in its own code."* As with F1, the knowledge is in the repository but is
-addressed to somebody building a vault on top of Remit, not to the ordinary payer who
-reads `README.md` and grants a mandate directly.
+`L3-VAULT.md:174` states this exactly and correctly, and concludes *"the vault must require
+it in its own code."* As with F1, the knowledge was in the repository but was addressed
+to somebody building a vault on top of Remit, not to the ordinary payer who reads
+`README.md` and grants a mandate directly. Both passages have since been extended to record
+what v2 changed — and in each case the conclusion the vault spec had reached survives the
+narrowing, for reasons the spec now states rather than leaves as an inference.
 
-Whether to *change* it is a real design question rather than an obvious fix. Refusing
+Whether to *change* it was a real design question rather than an obvious fix. Refusing
 `F_PER_TX`-only grants breaks legitimately open-ended arrangements (a subscription with a
 monthly window and no end date is a reasonable thing to want). An opt-in strictness flag
 was considered and is not available: `flags` is a `uint8`, bit 7 is the last free bit, and
 it is already committed to `F_ALLOWLIST_ROOT` in #13, so a new flag would mean widening
 `flags` to `uint16` — touching every gate, every test and the `MandateCreated` signature.
 
-**DECIDED 2026-08-26 — refuse.** `createMandate` will require `F_TOTAL` **or** `F_EXPIRY`
-on every mandate. The open-ended case is served by setting a distant `expiresAt`, which
-costs the payer nothing and makes the horizon explicit rather than absent; the reasoning
-is the same one that retired the dead co-signature gate in #11 — "merely useless" is not a
-reason to allow a configuration whose display and whose enforcement disagree. Note this
-makes `hasBound` strictly stronger than its own comment currently claims, so the comment
-becomes true rather than aspirational. Implementation belongs with F1's `expiresAt` fix,
-since both touch the same block and both need the same mirror in `reference/policy.js`.
+**DECIDED 2026-08-26 — refuse. Implemented the same day in #22.** `v2:424` is now
+`if ((flags & F_TOTAL == 0) && (flags & F_EXPIRY == 0)) revert Unbounded();` and the
+`hasBound` local is gone. The open-ended case is served by setting a distant `expiresAt`,
+which costs the payer nothing and makes the horizon explicit rather than absent; the
+reasoning is the same one that retired the dead co-signature gate in #11 — "merely
+useless" is not a reason to allow a configuration whose display and whose enforcement
+disagree. The comment quoted above is now true rather than aspirational.
+
+Three consequences worth having written down, because each cost something:
+
+**The guard runs before every other validation.** `v2:424` precedes all six `BadConfig`
+checks and `BadWindow`. So any revert-asserting test whose parameters lack a lifetime
+bound now reverts for the *wrong reason* — and a bare `vm.expectRevert()` would still
+pass while proving nothing. Seven tests in `test/` were in that position and each was
+given an explicit horizon; `Cosign.t.sol`'s dead-gate test carries the note.
+
+**The test suites had to name a horizon rather than be given one silently.** Both
+`reference/policy.test.js` and `test/Base.t.sol` gained an explicit `FAR` constant and a
+`withExpiry`-style helper that each mandate calls. Making the shared `grant()` inject a
+bound would have repaired every failing test in one edit and, in the same edit, stopped
+the suites from demonstrating that a real caller has to supply one. `FAR` in Solidity is
+`type(uint40).max` rather than a plausible date, because `WindowInvariant`'s reachable
+clock is `depth × (L + S + 1)` and `depth` is a `foundry.toml` knob the deep profile
+already raises from 64 to 256 — a horizon safe under one profile and not another is a
+trap. The contract permits it: `expiresAt` is only ever compared, never used in
+arithmetic, at `v2:608` in `spend` and `v2:1012` in `isLive`.
+
+**Every worked configuration in the repository had to be re-checked against it**, on top
+of the #11 re-check that F2 already required. Two guards now, not one.
 
 ---
 
@@ -646,7 +699,10 @@ unconditionally. `perTxCap`, `totalCap`, `cosigner` and the allowlist are pinned
 biconditionals. `cosignThreshold` is pinned by the one-directional rule added in #11.
 `IdentityGate` and `CredentialGate` are written *only* when their flags are set, which is
 the cleanest form of the guarantee and the pattern the others should be read against.
-That leaves exactly one: `expiresAt`.
+That left exactly one: `expiresAt` — and #22 closed it at `v2:446`, so as of 2026-08-26 the
+sweep finds no field in the struct that can be displayed and unread. That is a statement
+about *this* struct and *these* thirteen fields only; it has to be re-run against any field
+#13 or #23 adds, and neither of those has landed yet.
 
 **What has not been swept:** the actor-versus-actor matrix is complete for the delegate
 and for third parties but only partial for a hostile *cosigner* and a hostile *recipient*;

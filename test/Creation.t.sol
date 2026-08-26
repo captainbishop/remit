@@ -54,10 +54,14 @@ contract CreationTest is Base {
         assertEq(m.spender, agent, "spender");
         assertEq(m.perTxCap, usd(100), "perTxCap");
         assertEq(m.totalCap, usd(1000), "totalCap");
+        assertEq(m.cosigner, address(0), "cosigner");
+        assertEq(m.cosignThreshold, 0, "cosignThreshold");
+        assertEq(m.notBefore, 0, "notBefore");
+        assertEq(m.expiresAt, FAR, "expiresAt");
         assertEq(m.totalSpent, 0, "totalSpent");
         assertEq(m.spendCount, 0, "spendCount");
         assertEq(m.windowCount, 1, "windowCount");
-        assertEq(m.flags, F_PER_TX | F_TOTAL, "flags");
+        assertEq(m.flags, F_PER_TX | F_EXPIRY | F_TOTAL, "flags");
         assertFalse(m.revoked, "revoked");
 
         MandateManager.WindowSpec memory w = mm.getWindow(id, 0);
@@ -73,7 +77,7 @@ contract CreationTest is Base {
             keccak256(abi.encode(mm.DOMAIN(), block.chainid, address(mm), payer, bytes32(uint256(1))));
 
         vm.expectEmit(true, true, true, true, address(mm));
-        emit MandateManager.MandateCreated(expectedId, payer, agent, usd(100), 0, 0, 0, F_PER_TX, 1);
+        emit MandateManager.MandateCreated(expectedId, payer, agent, usd(100), 0, 0, FAR, F_PER_TX | F_EXPIRY, 1);
 
         vm.prank(payer);
         bytes32 id = mm.createMandate(bytes32(uint256(1)), p);
@@ -108,12 +112,117 @@ contract CreationTest is Base {
 
     // ----------------------------------------------------------- refusals
 
-    /// The whole point of the primitive. A mandate with no bound is an allowance
-    /// with extra steps, so it is refused rather than documented against.
-    function test_createMandate_unbounded_reverts() public {
-        vm.prank(payer);
+    /**
+     * The whole point of the primitive — and NEW IN v2 it is narrower than it was.
+     *
+     * v1 accepted a `perTxCap` alone, or a window alone, as a sufficient bound. Neither
+     * bounds LIFETIME exposure: a per-transaction cap is spent again, and again, until
+     * the payer's allowance is dry, and a window is bounded per period and unbounded over
+     * a lifetime. The contract's own comment claimed the opposite, so the sentence
+     * promised more than the code delivered — F5 in THREAT-MODEL.md. Only `totalCap` and
+     * `expiresAt` count now.
+     *
+     * The four refusals here and the three acceptances below mirror the model's
+     * `construction: a mandate with no LIFETIME bound is refused, and a perTxCap is not
+     * one` one for one; both were written from the same list.
+     */
+    function test_createMandate_withNoLifetimeBound_reverts() public {
+        vm.startPrank(payer);
+
+        // (1) Nothing at all. The only one of the four v1 also refused.
         vm.expectRevert(MandateManager.Unbounded.selector);
-        mm.createMandate(bytes32("u"), emptyParams());
+        mm.createMandate(bytes32("u1"), emptyParams());
+
+        // (2) A per-transaction cap alone.
+        MandateManager.MandateParams memory perTx = emptyParams();
+        perTx.perTxCap = usd(100);
+        perTx.flags = F_PER_TX;
+        vm.expectRevert(MandateManager.Unbounded.selector);
+        mm.createMandate(bytes32("u2"), perTx);
+
+        // (3) A rolling window alone. This is the refusal that costs something; the
+        // replacement shape is the third acceptance below.
+        MandateManager.MandateParams memory win = emptyParams();
+        win.windows = new MandateManager.WindowParams[](1);
+        win.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(500), buckets: 12});
+        vm.expectRevert(MandateManager.Unbounded.selector);
+        mm.createMandate(bytes32("u3"), win);
+
+        // (4) Both together, because two bounds that each fail to bound a lifetime do not
+        // combine into one that does. Built fresh rather than by mutating `win`: a memory
+        // struct assignment in Solidity copies the pointer, so `both = win` would have
+        // silently edited case (3) as well.
+        MandateManager.MandateParams memory both = emptyParams();
+        both.perTxCap = usd(100);
+        both.flags = F_PER_TX;
+        both.windows = new MandateManager.WindowParams[](1);
+        both.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(500), buckets: 12});
+        vm.expectRevert(MandateManager.Unbounded.selector);
+        mm.createMandate(bytes32("u4"), both);
+
+        vm.stopPrank();
+    }
+
+    /// The shapes that ARE bounded, granted rather than merely validated — a rule that
+    /// only ever refuses is indistinguishable from one that refuses everything.
+    function test_createMandate_aLifetimeBoundIsEitherATotalOrAnExpiry() public {
+        // (1) A lifetime cap alone: no expiry, no window, no per-transaction cap.
+        MandateManager.MandateParams memory total = emptyParams();
+        total.totalCap = usd(1000);
+        total.flags = F_TOTAL;
+        assertTrue(mm.isLive(grant(total)), "a lifetime cap alone is a bound");
+
+        // (2) An expiry alone is the case test_createMandate_expiryAloneIsEnoughOfABound
+        //     below already pins, from the isLive side.
+
+        // (3) A window plus an expiry — THE MIGRATION for every open-ended arrangement v1
+        //     would have accepted. A subscription with a monthly window and no end date is
+        //     no longer creatable as written; naming a distant horizon costs the payer
+        //     nothing and makes the horizon explicit rather than absent.
+        MandateManager.MandateParams memory sub = emptyParams();
+        sub.windows = new MandateManager.WindowParams[](1);
+        sub.windows[0] = MandateManager.WindowParams({lengthSeconds: 30 days, cap: usd(50), buckets: 30});
+        sub.expiresAt = uint40(block.timestamp + 3650 days);
+        sub.flags = F_EXPIRY;
+        bytes32 id = grant(sub);
+        assertTrue(mm.isLive(id), "window plus a distant expiry is the documented replacement");
+        assertEq(mm.getMandate(id).windowCount, 1, "and it is still a windowed mandate");
+    }
+
+    /**
+     * An `expiresAt` with F_EXPIRY unset is refused. NEW IN v2, F1 in THREAT-MODEL.md.
+     *
+     * v1 stored the value, emitted it in `MandateCreated`, and never read it — both
+     * `spend` and `isLive` gate the comparison on the flag. So `getMandate` could show a
+     * payer a mandate that expired last Tuesday and that spends forever. That is the
+     * precise failure this primitive exists to prevent: a control that is displayed and
+     * not enforced. The value and the flag now have to agree.
+     *
+     * One-directional rather than an iff, because with the flag SET the `expiresAt >
+     * notBefore` rule already constrains the value. Only the flag-unset direction was
+     * open.
+     *
+     * There is deliberately no mirror of this in reference/policy.js, and that is not an
+     * omission. The model has no flags: `expiresAt: null` is the only way to say "no
+     * expiry", so the value and the flag cannot disagree there. The contract needs the
+     * rule because it encodes "unset" as a zero in a field of its own.
+     */
+    function test_createMandate_expiresAtWithoutTheFlag_reverts() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.totalCap = usd(1000); // a real lifetime bound, so Unbounded() is not what fires
+        p.flags = F_TOTAL;
+        p.expiresAt = uint40(block.timestamp + 1 days); // ...but F_EXPIRY stays unset
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("x1"), p);
+
+        // Zero with the flag unset stays legal, because that is how "no expiry" is
+        // spelled — and it must not be read as "expired at the epoch", which is what a
+        // guard written as an iff would have produced.
+        p.expiresAt = 0;
+        bytes32 id = grant(p);
+        assertEq(mm.getMandate(id).expiresAt, 0, "no expiry is still expressible");
+        assertTrue(mm.isLive(id), "and the mandate is live rather than instantly expired");
     }
 
     function test_createMandate_expiryAloneIsEnoughOfABound() public {
@@ -298,6 +407,7 @@ contract CreationTest is Base {
         p.windows = new MandateManager.WindowParams[](2);
         p.windows[0] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(900), buckets: 7});
         p.windows[1] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(40), buckets: 12});
+        p = withExpiry(p); // or Unbounded() fires first and the assertion below proves nothing
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("ct6"), withCosign(p, boss, usd(40)));
 
@@ -307,6 +417,7 @@ contract CreationTest is Base {
         q.flags = F_PER_TX;
         q.windows = new MandateManager.WindowParams[](1);
         q.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(40), buckets: 12});
+        q = withExpiry(q);
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("ct7"), withCosign(q, boss, usd(100)));
 
@@ -445,6 +556,7 @@ contract CreationTest is Base {
         for (uint256 i = 0; i < 5; ++i) {
             p.windows[i] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(100), buckets: 12});
         }
+        p = withExpiry(p); // or Unbounded() fires before the window count is even read
         vm.prank(payer);
         vm.expectRevert(MandateManager.BadWindow.selector);
         mm.createMandate(bytes32("w6"), p);
@@ -457,6 +569,7 @@ contract CreationTest is Base {
         p.windows[1] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(200), buckets: 12});
         p.windows[2] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(800), buckets: 7});
         p.windows[3] = MandateManager.WindowParams({lengthSeconds: 30 days, cap: usd(2000), buckets: 30});
+        p = withExpiry(p); // v2: four windows are still not a lifetime bound
         bytes32 id = grant(p);
         assertEq(mm.getMandate(id).windowCount, 4);
     }

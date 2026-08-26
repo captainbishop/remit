@@ -226,6 +226,7 @@ contract WindowFuzzTest is Base {
             p.windows = new MandateManager.WindowParams[](2);
             p.windows[0] = MandateManager.WindowParams({lengthSeconds: r.l, cap: r.cap, buckets: 6});
             p.windows[1] = MandateManager.WindowParams({lengthSeconds: longL, cap: longCap, buckets: 12});
+            p = withExpiry(p); // v2: two windows are still not a lifetime bound
             r.id = grant(p);
         }
 
