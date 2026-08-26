@@ -17,9 +17,13 @@ checked below. The second half is an argument, and it is presented as one.
 > exactly what the tag preserves.
 
 **What this document does not say** is that v1 is correct. It is not. `THREAT-MODEL.md`
-records fourteen findings against the same surface, six of which are being fixed in v2. v1
-has never been audited, holds nothing but faucet money, and must not hold real money.
-Immutable and correct are independent properties, and this document is only about the first.
+records twenty-two findings against the same surface. Two are already fixed in v2's code and
+one in that document itself; eight more have a fix that changes v2's behaviour, six are
+comment rewrites, three are documentation, one needs a decision and one needs nothing — a
+partition worth more than the total, since it says how much of the list is about the code
+doing the wrong thing rather than about it being described wrongly. v1 has never been audited,
+holds nothing but faucet money, and must not hold real money. Immutable and correct are
+independent properties, and this document is only about the first.
 
 ---
 
@@ -406,7 +410,7 @@ shows ten `Transfer` logs across five receipts to that effect. It claims two ind
 switches exist and that one of them lives outside this codebase.
 
 It does not claim that v1 is correct, safe, or ready for real money. It is a testnet artifact
-holding faucet funds, controlled by two throwaway wallets, with fourteen known findings
+holding faucet funds, controlled by two throwaway wallets, with twenty-two known findings
 against it and no audit. Immutability is what makes its *caps* trustworthy if they are
 implemented correctly; it does nothing whatsoever to establish that they are. That is the
 audit's job, and because this repository's contract, tests, reference model and threat model

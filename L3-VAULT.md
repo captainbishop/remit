@@ -495,6 +495,15 @@ depositor's escrow into unattributed pool surplus. Arc additionally emits no EIP
 system log for a self-transfer, so a vault reconciling escrow from logs would not see
 it at all. Reconcile from `getMandate(mandateId).totalSpent`, never from transfer logs.
 
+> **This paragraph is where the general form of the problem was found, and for a day it
+> was filed only here.** It is not a vault-specific hazard: `recipient == m.payer` is a
+> legal spend on *any* mandate, and the reconciliation hole is the same for a payer with a
+> payroll bot as for a vault. It is now `THREAT-MODEL.md` **F19**, where a payer will
+> actually read it, and the self-transfer rule this paragraph asserts has since been
+> confirmed against Arc's `usdc-system-events` reference — *"self-transfers (`from == to`)
+> emit no log"* — where before it was an unsourced claim. Keep both: this one for the vault
+> reader, F19 for everyone.
+
 Withdrawal deserves its own warning. A depositor who has their agent pay *themselves*
 has published their own address as `recipient` and undone the vault. Withdrawals need
 a distinct path — prove a commitment, transfer to a fresh address, submitted through a

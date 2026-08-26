@@ -645,6 +645,54 @@ between report and receipt. The consequence recorded above — that v2 costs are
 predictable before deploying for everything except `spend` — comes directly from
 this run's own receipts.
 
+**Newly on this list as of 2026-08-26, from the #16a and #16b adversary sweeps, and one of
+the four is time-limited.** `THREAT-MODEL.md` grew from fourteen findings to twenty-two that
+day; four of the eight new ones change what the contract does and therefore belong here
+rather than in a document sweep.
+
+**F16 is the one with a deadline, and it is the reason this entry exists at all.** A
+co-signature approval never expires: `_cosignApproved` is `mapping(bytes32 => mapping(bytes32
+=> bool))` and the fix stores a `uint40` deadline instead of a `bool`. That is a **storage
+layout change**, which costs nothing today and is unavailable the moment v2 is deployed — the
+same class of constraint as any struct-field addition, and the only item on this list whose
+cost depends on *when* it is done rather than on what it does. The suite's own
+`test_approval_survivesAnUnrelatedFailure` demonstrates the edge: it approves a 90 spend, has
+the window refuse it at `t0`, warps most of a day forward, and spends successfully — with a
+docstring that argues persistence is *correct*, which it is, for the failure it was written
+about. Persistence across a revert and persistence across a day are different properties and
+the test only establishes the first.
+
+**F15 and F17 are additive and can wait, but they are ordered.** F15 adds
+`approveCosignFor(mandateId, recipient, amount, ref, nonce)`, computing the spend hash
+internally from `m.spender` so a co-signer approving from a hardware wallet sees the payment
+rather than a 32-byte hash — today `approveCosign` takes a hash and a hash is not invertible,
+so the second signature is not a second opinion. F17 refuses approvals that can never be
+consumed (a revoked mandate, an amount at or below the threshold); its threshold half needs
+F15's explicit fields to be checkable at all, so F15 lands first or F17 lands half-done.
+Neither changes `spend`, the mapping, or any event, so neither is deadline-bound.
+
+**F19 is one line and closes a hole in the audit trail, not in the caps.** `recipient ==
+m.payer` is a legal spend: it consumes `perTxCap`, the window ring and the lifetime cap, burns
+its nonce, emits `Spend` — and moves nothing, because `transferFrom(payer, payer, amount)` is
+a no-op. Arc's `usdc-system-events` reference makes it worse than cosmetic: *"self-transfers
+(`from == to`) emit no log"*, so the 18-decimal system emitter that `evidence/` reconciles
+against is silent for exactly these transactions. A reconciler sees a `Spend` with no transfer
+and concludes its indexer dropped a log. The fix is `if (recipient == m.payer) revert
+SelfPayment();` beside the existing `ZeroRecipient` guard. One sub-question is still open and
+**cannot be settled locally**: whether Arc's ERC-20 USDC at `0x3600…0000` emits its own
+6-decimal `Transfer` for a self-transfer is undocumented, and `MockUSDC` answering it would
+only be our assumption answering itself. That needs one real transaction on Arc Testnet — the
+first item on this list in a while that is blocked on a receipt rather than on a decision.
+
+**And the corrective that matters more than any of the four.** F19 was already written down,
+completely and correctly, at `L3-VAULT.md:492-496` — for somebody building a shielded vault.
+That is the **third** time a hazard about `MandateManager` has been discovered while writing
+for one audience and filed only against that audience (F1 was known to this file, F5 to the
+reference model, F19 to the vault spec). Three makes it a process defect: from now on, a
+document that discovers a hazard about the contract gets a line in `THREAT-MODEL.md` **in the
+same commit**, even when it handles the hazard correctly for its own reader. Nothing in the
+repository required that, which is precisely why it happened three times.
+
 ## What does not go in
 
 **No privacy mechanism inside `MandateManager` beyond the allowlist root.** This
