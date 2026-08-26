@@ -1,10 +1,10 @@
 # THREAT-MODEL.md
 
 **Status: FIRST PASS, 2026-08-26. Not an audit.** Written by the same author as the
-contract, which is the reason it cannot substitute for the professional audit already
-scheduled. Its purpose is narrower and still worth something: to make the search for
-defects *systematic* instead of opportunistic, and to write down what Remit protects,
-what it does not, and what nobody has looked at yet.
+contract, which is the reason it cannot substitute for the professional audit this project
+still requires before any mainnet deployment. Its purpose is narrower and still worth
+something: to make the search for defects *systematic* instead of opportunistic, and to write
+down what Remit protects, what it does not, and what nobody has looked at yet.
 
 > **Line numbers in this file are marked `v2:NNN` and are anchored to commit
 > `f2d3b35`**, the commit that landed tasks #10–#12 and the exact code this review
@@ -590,7 +590,12 @@ comments are explicitly addressed to a future auditor, that is its own category 
 finding, and it is the category this pass was best placed to find, since it requires
 reading the prose against the code rather than either alone.
 
+## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
+Two kinds of gap are listed together because a reader deciding how much weight to put on
+this document needs both: things a source review cannot settle in principle, and things the
+test suite simply never runs. Neither kind is a finding. Each one is a reason a finding
+could still be hiding there.
 
 - **Whether a precompile-backed ERC-20 `transferFrom` on Arc executes recipient code.**
   Bears on F7. Settleable with one testnet transaction to a contract recipient that logs

@@ -25,6 +25,14 @@ Otherwise read **[DESIGN.md](DESIGN.md)** first — it covers why the four exist
 options (allowance, unified-balance delegate, per-job escrow, custodial off-chain
 policy) are all inadequate, and what this does *not* bound.
 
+Two documents are about the limits rather than the capabilities, and they are the ones to
+read before trusting anything here with money. **[THREAT-MODEL.md](THREAT-MODEL.md)** is the
+adversarial review — what Remit protects, what it does not, and fourteen findings against the
+current surface. **[IMMUTABILITY.md](IMMUTABILITY.md)** answers the question a payer should
+ask second: the deployed contract has no admin, no pause and no upgrade path, so what happens
+when something is wrong with it? It includes the migration runbook and the two kill switches,
+one of which lives in USDC rather than in this codebase.
+
 ## Layout
 
 ```
@@ -34,7 +42,9 @@ contracts/MandateManager.sol   on-chain implementation (140 tests pass; live on 
 test/                      140 Forge tests against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 demo/playground.html       browser simulation with 7 scripted attacks
-DESIGN.md                  rationale, threat model, verification worksheet
+DESIGN.md                  rationale, worked examples, verification worksheet
+THREAT-MODEL.md            the adversarial review: assets, boundaries, 14 findings
+IMMUTABILITY.md            what "no upgrade path" means for a payer, and the migration runbook
 FORGE.md                   how to run the Forge suite, and what to expect
 START-HERE.md              the on-ramp, if this is your first project
 ```
@@ -47,7 +57,7 @@ Node 18+, no dependencies, no network.
 node --test reference/policy.test.js
 ```
 
-Expected: `# tests 46 / # pass 46 / # fail 0`.
+Expected: `# tests 56 / # pass 56 / # fail 0`.
 
 The tests are the actual correctness evidence for this project. They include named
 attack cases (tumbling-window boundary burst, backwards clock, co-signature

@@ -6,7 +6,7 @@ one is written for someone who doesn't yet, and it assumes nothing.
 
 ## Where you are
 
-**All five stages below are done, as of 2026-08-24.** Node is installed and the 46
+**All five stages below are done, as of 2026-08-24.** Node is installed and the 56
 reference tests pass. Foundry is installed under WSL, the contract compiles, and all 140
 Forge tests pass — including 2,048 randomised fuzz runs and 49,152 invariant calls. Gas is
 measured. And stage 4 is complete: the contract is deployed to Arc Testnet with its source
@@ -166,20 +166,22 @@ node --test reference/policy.test.js
 The last lines should read:
 
 ```
-# tests 47
-# pass 47
+# tests 56
+# pass 56
 # fail 0
 ```
 
 That's the rulebook verifying itself, including six deliberately reconstructed attacks
-it defeats. If you see `47 pass`, the foundation of the project is sound and you've run
+it defeats. If you see `56 pass`, the foundation of the project is sound and you've run
 your first test suite. If you see anything else, paste all of it to me — that would be
 genuinely surprising and I'd want to know.
 
-(It said 46 until v2, and if you are reading an older screenshot of your own terminal,
-that is why. The forty-seventh test pins the audit counter's own upper bound, which the
-model could not previously express — the contract panicked there and a JavaScript integer
-has no width to panic at.)
+(It said 46 before v2 work began, and if you are reading an older screenshot of your own
+terminal, that is why. The count went 46 → 47 → 50 → 56 across three v2 tasks: one test
+pinning the audit counter's own upper bound, which the model previously could not express
+because the contract panicked there and a JavaScript integer has no width to panic at;
+three for the co-signature gate holes; and six for the joint-ceiling view. This number
+will move again when the merkle allowlist lands.)
 
 ## Stage 2 — compile the contract ✅ done
 
