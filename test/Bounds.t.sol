@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {stdError} from "forge-std/StdError.sol";
 import {Base} from "./Base.t.sol";
 import {MandateManager} from "../contracts/MandateManager.sol";
 
@@ -112,31 +111,84 @@ contract BoundsTest is Base {
     }
 
     /**
-     * DOCUMENTED SOFT SPOT, pinned so a refactor cannot quietly change it.
+     * FIXED IN v2. The test is kept, re-pointed at the new behaviour, because the
+     * boundary is still worth pinning even though it no longer panics.
      *
-     * `newTotal = m.totalSpent + uint96(amount)` is computed BEFORE the F_TOTAL flag
-     * is consulted, so the addition is evaluated even for a mandate that has no
-     * lifetime cap at all. Under checked arithmetic that is a panic, not a graceful
-     * denial, once cumulative spending approaches 2^96 base units — about 7.9e22
-     * USDC, which is roughly ten billion times the total supply of every currency
-     * on earth. The mandate becomes permanently unusable rather than incorrect.
+     * v1 computed `newTotal = m.totalSpent + uint96(amount)` BEFORE consulting the
+     * F_TOTAL flag, so the addition was evaluated even for a mandate with no lifetime
+     * cap at all, and a cumulative total near 2^96 base units produced an arithmetic
+     * PANIC rather than a denial. That is about 7.9e22 USDC — unreachable in the
+     * world, but reachable in two transactions right here, which is precisely why it
+     * was pinned rather than waved away.
      *
-     * This is recorded in README.md as an accepted liveness cliff. The test exists
-     * because "unreachable in practice" is a claim about the world, not about the
-     * code, and a future change that made large amounts reachable should fail here
-     * rather than in production. If this test starts failing with OverTotalCap
-     * instead of a panic, someone moved the addition below the flag check — which is
-     * an improvement, and this test should be updated to match, deliberately.
+     * v2 checks the lifetime cap without performing the addition, then guards the
+     * counter with a named error. Three things deliberately did NOT change: the
+     * counter is still exact (not saturated — `totalSpent` rides in the Spend event,
+     * and a counter that quietly stops counting understates real flow), it still
+     * advances for mandates without F_TOTAL, and the mandate still becomes unusable
+     * at the ceiling, which is inherent to a bounded counter. What changed is that it
+     * now says why.
+     *
+     * Note for anyone reading the old comment in git history: it predicted this test
+     * would start failing with `OverTotalCap`. It does not, and could not — this
+     * mandate has no F_TOTAL flag, so the cap is not what binds. Getting
+     * `OverTotalCap` here would mean the contract had invented a cap nobody granted.
      */
-    function test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping() public {
-        // A window cap at the maximum so that nothing else can bind first.
+    function test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic() public {
+        // A window cap at the maximum, which is the loosest bound the type can express.
+        // Note carefully what that does and does not achieve: it does NOT stop the window
+        // from binding, because 1 + (2^96 - 1) exceeds 2^96 - 1 as surely as it exceeds any
+        // smaller cap. Two bounds are violated by this request, and what decides which
+        // error comes back is the ORDER of the checks — the ceiling guard sits with the
+        // amount narrowing, above `_checkAndCommitWindows`. That order is deliberate and
+        // inherited from v1, where the counter arithmetic was in the same place, so the fix
+        // moved no policy check relative to any other. The maximum cap is here to make the
+        // window the *last* thing that could bind rather than the first, so a regression
+        // that reordered them would show up as `OverWindowCap` instead of a passing test.
         bytes32 id = grant(windowOnlyParams(DAY, type(uint96).max, 12));
 
         pay(id, 1); // totalSpent = 1
         assertEq(mm.getMandate(id).totalSpent, 1);
 
-        // 1 + (2^96 - 1) overflows uint96.
-        payReverts(id, uint256(type(uint96).max), stdError.arithmeticError);
+        // 1 + (2^96 - 1) would wrap the counter.
+        payReverts(id, uint256(type(uint96).max), MandateManager.TotalSpentCeiling.selector);
+
+        // And one base unit less fits exactly, which is what proves the boundary is the
+        // width of the counter rather than an off-by-one in something cheaper. The
+        // reverting half alone cannot prove that: a guard at 2^96 - 2 would also refuse
+        // the request above.
+        //
+        // This needs a mint, and the size of that mint is the point. Base.t.sol funds the
+        // payer with 1e9 USDC — 1e15 base units — which is generous for every other test
+        // in the suite and about 79 trillion times too small to reach here. So the token
+        // balance, not the counter, is what binds at default funding, and the ceiling is
+        // unreachable in the tests for the same reason it is unreachable in the world.
+        // The JS model has no token and asserts this boundary without ceremony; that
+        // difference between the two suites is worth seeing rather than papering over.
+        token.mint(payer, type(uint96).max);
+        pay(id, uint256(type(uint96).max) - 1);
+        assertEq(mm.getMandate(id).totalSpent, type(uint96).max, "counter should sit exactly at its ceiling");
+
+        // At the ceiling the mandate is spent out, and the smallest possible request is
+        // now refused by the same guard — a bounded counter's cliff is inherent, and what
+        // v2 changed is only that it arrives with a name.
+        payReverts(id, 1, MandateManager.TotalSpentCeiling.selector);
+    }
+
+    /**
+     * The other half of that claim: the ceiling guard is UNREACHABLE once F_TOTAL is
+     * set, because a lifetime cap is itself a uint96 and so binds first. Pinned so the
+     * two denials on the same counter cannot be confused, at the largest cap the type
+     * can express — the one case where they come closest to coinciding.
+     */
+    function test_totalSpent_withMaximumLifetimeCap_deniesWithOverTotalCap() public {
+        MandateManager.MandateParams memory p = windowOnlyParams(DAY, type(uint96).max, 12);
+        p.totalCap = type(uint96).max;
+        p.flags |= F_TOTAL;
+        bytes32 id = grant(p);
+
+        pay(id, 1);
+        payReverts(id, uint256(type(uint96).max), MandateManager.OverTotalCap.selector);
     }
 
     /// The uint96 ceiling is enforced explicitly, and BEFORE the caps, so an
@@ -280,14 +332,18 @@ contract BoundsTest is Base {
     }
 
     /**
-     * KNOWN DIVERGENCE from reference/policy.js, asserted against the CONTRACT.
+     * The spender may revoke as well as the payer, asserted against the CONTRACT.
      *
-     * The contract lets the spender revoke as well as the payer; the model allows
-     * only the payer. The contract is the intended behaviour — an agent that
-     * detects it has been compromised should be able to hand back its own authority
-     * without waiting for a human, and it can only ever reduce its own power, so
-     * there is nothing to abuse. The model is the one that needs updating, and the
-     * error name `NotPayer` is now slightly misleading for the third-party case.
+     * An agent that detects it has been compromised should be able to hand back its
+     * own authority without waiting for a human, and doing so can only ever reduce its
+     * own power, so there is nothing here to abuse.
+     *
+     * This comment used to open "KNOWN DIVERGENCE from reference/policy.js" and close
+     * "the model is the one that needs updating". Both halves are stale: `revoke` in
+     * policy.js accepts the payer or the spender, so the two sides agree and a failure
+     * here is a real regression rather than a recorded gap. The third sentence is
+     * stale too — v2 renamed the error, because two roles hold the authority and
+     * naming it after one of them was the misleading part.
      */
     function test_revoke_bySpender_isAlsoPermitted() public {
         bytes32 id = grant(simpleParams());
@@ -299,7 +355,7 @@ contract BoundsTest is Base {
     function test_revoke_byStranger_reverts() public {
         bytes32 id = grant(simpleParams());
         vm.prank(other);
-        vm.expectRevert(MandateManager.NotPayer.selector);
+        vm.expectRevert(MandateManager.NotAuthorised.selector);
         mm.revoke(id);
         assertFalse(mm.getMandate(id).revoked);
     }

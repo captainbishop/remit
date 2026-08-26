@@ -3,31 +3,47 @@ pragma solidity 0.8.28;
 
 /*
  * ┌───────────────────────────────────────────────────────────────────────────┐
- * │  NOT AUDITED. LIVE ON ARC TESTNET SINCE 2026-08-24. REAL MONEY IS OUT OF  │
- * │  SCOPE UNTIL AN AUDIT SAYS OTHERWISE.                                     │
+ * │  NOT AUDITED. NOT DEPLOYED - this is v2, in progress, and it has never    │
+ * │  run against any chain. REAL MONEY IS OUT OF SCOPE UNTIL AN AUDIT SAYS    │
+ * │  OTHERWISE.                                                               │
  * │                                                                           │
- * │  Deployed at 0x3744E93B9e796E05CB66311d897559B6F3860196 on Arc Testnet    │
- * │  (chain 5042002), source verified. It compiles under solc 0.8.28 and      │
- * │  passes the full Forge suite: 139 tests in test/, including 2,048 fuzz    │
- * │  runs and 49,152 stateful-invariant calls. The policy logic is            │
- * │  independently modelled by reference/policy.js, whose 46 tests found six  │
- * │  real cap-bypass bugs during development. One mandate has been granted    │
- * │  and one spend executed live; both Transfer logs on that spend carry the  │
- * │  payer as sender, never this contract, so non-custody is now observable   │
- * │  rather than argued.                                                      │
+ * │  V1 IS LIVE AND VERIFIED, AND IT IS A DIFFERENT CONTRACT, at              │
+ * │  0x3744E93B9e796E05CB66311d897559B6F3860196 on Arc Testnet (chain         │
+ * │  5042002). There is no proxy and no upgrade path, deliberately, so v2     │
+ * │  gets its own address and v1 keeps running until its payers revoke.       │
+ * │  Check out the tag v1.0.0-arc-testnet to build the bytes Blockscout       │
+ * │  verified against that address. This file no longer does, and is not      │
+ * │  meant to.                                                                │
  * │                                                                           │
- * │  What that does NOT establish: testnet exercised exactly ONE mandate      │
- * │  shape — no cosigner, no identity gate, no credential gate, one window,   │
- * │  one allowlist entry. Cosignature, both ERC-8004 gates and revoke have    │
- * │  139 passing tests and zero live transactions. Sub-second blocks sharing  │
+ * │  WHAT V1 ESTABLISHED - evidence for the design, not proof of these        │
+ * │  bytes. Thirty-one live transactions, every one status 1: five mandates,  │
+ * │  five spends, three revocations, two cosign approvals, two withdrawals.   │
+ * │  That is all five state-changing paths with receipts - createMandate,     │
+ * │  spend, revoke, approveCosign, withdrawCosign - and the five is           │
+ * │  enumerated from this file rather than recalled. Every spend emitted two  │
+ * │  Transfer logs, one from USDC's ERC-20 view and one from Arc's native     │
+ * │  emitter, and all ten carry the PAYER as sender, never this contract, so  │
+ * │  non-custody is observable rather than argued. Both ERC-8004 gates fired  │
+ * │  against Arc's real registries. Gas against real Arc USDC at the 21 Gwei  │
+ * │  charged: a first-ever policed spend cost 216,458 and the steady state    │
+ * │  is 177,429, of which ~103,500 is the policy machinery and ~13,100 is     │
+ * │  Arc's own native-USDC accounting.                                        │
+ * │                                                                           │
+ * │  WHAT NONE OF THAT ESTABLISHES ABOUT THIS FILE. Every figure above is a   │
+ * │  property of v1's bytecode. v2 changes the ABI, adds a grant-time         │
+ * │  revert, a view and a flag, so its own test count and gas table are       │
+ * │  deliberately absent here until both have been re-run against it - an     │
+ * │  inherited number is worse than a missing one. Sub-second blocks sharing  │
  * │  a timestamp and the CallFrom precompile are still asserted from          │
- * │  documentation, not observed. Gas IS now measured against real Arc USDC:  │
- * │  a policed spend cost 216,458 gas, ~0.0045 USDC at the 21 Gwei charged,   │
- * │  of which ~142,500 is the policy machinery and ~32,700 is Arc's own       │
- * │  native-USDC accounting. No third party has reviewed this. A green suite  │
- * │  says the implementation matches the model; it does not say the model is  │
- * │  right about the world. This is INTENDED to hold real money, so the audit │
- * │  is a requirement, not advice.                                            │
+ * │  documentation, not observed. No third party has reviewed any of this. A  │
+ * │  green suite says the implementation matches the model; it does not say   │
+ * │  the model is right about the world. This is INTENDED to hold real        │
+ * │  money, so the audit is a requirement, not advice.                        │
+ * │                                                                           │
+ * │  THIS BANNER GOES FALSE THE MOMENT V2 DEPLOYS. Rewrite it in that         │
+ * │  deployment's own commit. V1's said NEVER RUN AGAINST A LIVE CHAIN for    │
+ * │  hours after it had, and a banner that lies teaches readers to skip the   │
+ * │  next one.                                                                │
  * └───────────────────────────────────────────────────────────────────────────┘
  *
  * REMIT — bounded, revocable, non-custodial spending authority.
@@ -163,6 +179,15 @@ contract MandateManager {
     uint256 public constant MAX_WINDOWS = 4;
     uint256 public constant MAX_BUCKETS = 32;
 
+    /// NEW IN v2. How many mandates `spendableAcross` will read in one call. Same
+    /// purpose as the two caps above — bound the gas of a loop over untrusted input —
+    /// but note the difference that keeps it OUT of reference/policy.js: those two
+    /// change which mandates can exist and therefore which spends are legal, while
+    /// this one only rations a read and nothing downstream depends on it. Sized from
+    /// the worst case it permits: 8 * ~290k storage-read gas is about 2.3M, which
+    /// fits one `eth_call` at every default node gas cap.
+    uint256 public constant MAX_JOINT = 8;
+
     // Feature flags. Explicit rather than inferred from zero values, because
     // some zeros are meaningful: a cosignThreshold of 0 means "every spend needs
     // a co-signature", which is very different from "no co-signature required".
@@ -273,9 +298,22 @@ contract MandateManager {
     event CosignWithdrawn(bytes32 indexed mandateId, bytes32 indexed spendHash, address indexed cosigner);
 
     // ---------------------------------------------------------------------
-    // Errors. One-to-one with the Denial reasons in reference/policy.js.
-    // When called through Memo, Arc wraps a child revert in MemoFailed(bytes),
-    // so clients must unwrap one layer before decoding these.
+    // Errors.
+    //
+    // The correspondence with reference/policy.js is one-directional, and v1's
+    // comment here claimed it both ways. Every one of the model's 21 `Denial`
+    // reasons has an error below with the same name — that is the direction that
+    // matters, because a denial the contract could not express would be a real
+    // divergence. The reverse does not hold: ten of the errors below have no
+    // `Denial` counterpart because the model reports those conditions by THROWING
+    // rather than denying. They are MandateExists, Unbounded, BadWindow, BadConfig,
+    // NotAuthorised, NotCosigner, MixedPayers, DuplicateMandate, TooManyMandates —
+    // all caller or grant-time mistakes rather than policy outcomes — plus
+    // TransferFailed, which the model cannot have an opinion about because it has
+    // no token. 21 + 10 = 31. Counted, not asserted.
+    //
+    // When called through Memo, Arc wraps a child revert in MemoFailed(bytes), so
+    // clients must unwrap one layer before decoding these.
     // ---------------------------------------------------------------------
 
     error UnknownMandate();
@@ -290,6 +328,9 @@ contract MandateManager {
     error OverPerTxCap();
     error OverWindowCap(uint32 lengthSeconds, uint96 cap, uint256 used);
     error OverTotalCap();
+    /// The uint96 audit counter would wrap. Only reachable without F_TOTAL, since a
+    /// lifetime cap is itself a uint96 and binds first. v1 panicked here instead.
+    error TotalSpentCeiling();
     error NonceAlreadyUsed();
     error CosignRequired(bytes32 spendHash);
     error IdentityNotHeld();
@@ -302,9 +343,17 @@ contract MandateManager {
     error Unbounded();
     error BadWindow();
     error BadConfig();
-    error NotPayer();
+    error NotAuthorised();
     error NotCosigner();
     error AmountTooLarge();
+
+    /// NEW IN v2, all three raised only by `spendableAcross` — the first errors in
+    /// this contract that report a badly formed QUESTION rather than a refused
+    /// action. Each replaces a plausible wrong number with a diagnosis; see that
+    /// function for why returning the number was not an option.
+    error MixedPayers();
+    error DuplicateMandate();
+    error TooManyMandates();
 
     constructor(address _usdc, address _identityRegistry, address _validationRegistry) {
         if (_usdc == address(0)) revert BadConfig();
@@ -365,6 +414,40 @@ contract MandateManager {
         if (flags & F_CREDENTIAL != 0 && address(validationRegistry) == address(0)) revert BadConfig();
         if (flags & F_IDENTITY != 0 && address(identityRegistry) == address(0)) revert BadConfig();
 
+        // ---------------------------------------------------------------------
+        // The co-signature gate has to be checked as a WHOLE, not field by field.
+        // Three ways to grant a mandate that displays a co-signature requirement and
+        // does not have one; v1 accepted all three. The first two are settled here
+        // because they are pure comparisons, and the third waits for the window loop
+        // below because it needs the window caps.
+        // ---------------------------------------------------------------------
+
+        // (1) A threshold with no gate behind it is a lie told by `getMandate`. The field
+        // is stored, a reader sees a number, and no spend is ever measured against it.
+        // Note this is deliberately NOT folded into the biconditional above: that one is
+        // on the cosigner ADDRESS, because a threshold of zero is meaningful when F_COSIGN
+        // is set — it means every spend needs a signature, since the gate tests
+        // `amount > threshold` strictly and `amount` is at least 1. So the threshold gets
+        // a one-directional rule rather than an iff.
+        if (flags & F_COSIGN == 0 && p.cosignThreshold != 0) revert BadConfig();
+
+        // (2) The agent may not be its own cosigner. `approveCosign` requires
+        // msg.sender == m.cosigner and nothing else, so a mandate whose cosigner is its
+        // spender lets the agent approve its own spend hash and then spend it: two
+        // transactions instead of one, and no second party anywhere. That is not a weaker
+        // control, it is the absence of one wearing its clothes — and it is invisible in
+        // `getMandate`, which shows F_COSIGN set and a plausible threshold. Refusing it is
+        // the same argument as Unbounded() above: this primitive exists to make authority
+        // legible, so a grant that appears to carry a control it does not carry is refused
+        // rather than documented.
+        //
+        // Written unconditionally because it is equivalent to the guarded form and
+        // cheaper: with F_COSIGN unset the biconditional above has already forced
+        // `cosigner == address(0)`, and `spender == address(0)` was refused at the top, so
+        // this can only fire when a cosigner was actually named. `cosigner == payer`
+        // stays legal and is the ordinary case — it is what mandate 2 does on Arc today.
+        if (p.cosigner == p.spender) revert BadConfig();
+
         if (p.windows.length > MAX_WINDOWS) revert BadWindow();
 
         _mandates[mandateId] = Mandate({
@@ -383,18 +466,58 @@ contract MandateManager {
             revoked: false
         });
 
+        // Tracks the tightest window cap as the loop validates each one, so the cosign
+        // reachability check below costs no second pass over calldata. The identity value
+        // is the uint96 ceiling rather than zero, because "no windows" must mean "no
+        // window constraint on a single spend", and a minimum initialised to zero would
+        // say the opposite.
+        uint96 minWindowCap = type(uint96).max;
+
         for (uint256 i = 0; i < p.windows.length; ++i) {
             WindowParams calldata w = p.windows[i];
             // Sub-periods must be uniform, so the length has to divide evenly.
             if (w.lengthSeconds == 0 || w.cap == 0) revert BadWindow();
             if (w.buckets == 0 || w.buckets > MAX_BUCKETS) revert BadWindow();
             if (w.lengthSeconds % w.buckets != 0) revert BadWindow();
+            if (w.cap < minWindowCap) minWindowCap = w.cap;
             _windows[mandateId][i] = WindowSpec({
                 lengthSeconds: w.lengthSeconds,
                 subLength: w.lengthSeconds / w.buckets,
                 cap: w.cap,
                 buckets: w.buckets
             });
+        }
+
+        // (3) The gate must be able to fire. `spend` requires a co-signature when
+        // `amount > cosignThreshold`, strictly, so the gate is dead unless the policy
+        // permits at least one amount above the threshold. Compare the threshold against
+        // the largest single spend the WHOLE policy allows:
+        //
+        //   effectiveMax = min(2^96 - 1, perTxCap if F_PER_TX, totalCap if F_TOTAL,
+        //                      every window cap)
+        //
+        // and refuse when `effectiveMax <= cosignThreshold`. Each term earns its place.
+        // The uint96 ceiling is the bound when nothing else applies — a mandate bounded
+        // only by an expiry still caps amounts, at `AmountTooLarge`, so a threshold of
+        // 2^96 - 1 is unreachable there and is caught here. `totalCap` is evaluated at
+        // `totalSpent == 0`, which is correct because reachability asks whether the gate
+        // can EVER fire, and the lifetime cap is loosest on the first spend. Window caps
+        // enter as a minimum for the same reason: the tightest one binds every spend.
+        //
+        // WHY THE OBVIOUS TEST IS WRONG TWICE. `perTxCap < cosignThreshold` fails on both
+        // counts. It has the comparison backwards — equality is dead too, since
+        // `amount > threshold` and `amount <= perTxCap` cannot both hold when the two are
+        // equal, and this repository already held the receipt: `DESIGN.md:1272` records a
+        // 50,000 spend against a 50,000 threshold not tripping the gate on Arc Testnet.
+        // And `perTxCap` is not the only ceiling — with F_PER_TX unset, `totalCap = 100`
+        // with `cosignThreshold = 100` is equally dead and passes both spellings of the
+        // naive check. `L3-VAULT.md` inherited that same error from `CHANGELIST.md`, which
+        // is why the fix is phrased against the whole policy rather than against one field.
+        if (flags & F_COSIGN != 0) {
+            uint96 effectiveMax = minWindowCap;
+            if (flags & F_PER_TX != 0 && p.perTxCap < effectiveMax) effectiveMax = p.perTxCap;
+            if (flags & F_TOTAL != 0 && p.totalCap < effectiveMax) effectiveMax = p.totalCap;
+            if (effectiveMax <= p.cosignThreshold) revert BadConfig();
         }
 
         for (uint256 i = 0; i < p.allowlist.length; ++i) {
@@ -475,18 +598,61 @@ contract MandateManager {
 
         if (m.flags & F_PER_TX != 0 && amount > m.perTxCap) revert OverPerTxCap();
 
-        // The two `uint96(amount)` casts below cannot truncate. `amount` is bounded by
-        // the `AmountTooLarge` guard above, which is unconditional and runs before any
-        // policy check precisely so that this holds — see the comment there. If that
-        // guard is ever moved behind a flag, both casts become unsound: a caller could
-        // pass 2^96 and have it wrap to 0, spending nothing against the caps while the
-        // transfer below moves the full amount.
+        // `amount` is bounded by the `AmountTooLarge` guard above, which is
+        // unconditional and runs before any policy check precisely so that this cast
+        // is sound — see the comment there. If that guard is ever moved behind a flag
+        // this becomes unsound: a caller could pass 2^96 and have it wrap to 0,
+        // spending nothing against the caps while the transfer below moves the full
+        // amount. Narrowed once into a local rather than cast at each of the four
+        // uses below, so there is a single line to audit.
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint96 newTotal = m.totalSpent + uint96(amount);
-        if (m.flags & F_TOTAL != 0 && newTotal > m.totalCap) revert OverTotalCap();
+        uint96 amount96 = uint96(amount);
 
-        // forge-lint: disable-next-line(unsafe-typecast)
-        _checkAndCommitWindows(mandateId, m.windowCount, uint96(amount), nowTs);
+        // The lifetime cap is consulted BEFORE the counter advances, and is phrased so
+        // that the check itself cannot overflow: comparing `totalSpent` against
+        // `totalCap - amount96` is equivalent to comparing `totalSpent + amount96`
+        // against `totalCap`, without performing the addition. The first clause also
+        // proves the subtraction cannot underflow.
+        //
+        // v1 added first and read the flag second, which meant the addition was
+        // evaluated even for a mandate with no lifetime cap — a panic rather than a
+        // graceful denial near the uint96 ceiling. `_checkAndCommitWindows` already
+        // used this compare-before-committing shape for window caps; the lifetime cap
+        // was the only bound in the contract that did not.
+        if (m.flags & F_TOTAL != 0) {
+            if (amount96 > m.totalCap || m.totalSpent > m.totalCap - amount96) {
+                revert OverTotalCap();
+            }
+        }
+
+        // Advance the audit counter. This is deliberately NOT conditional on F_TOTAL:
+        // `totalSpent` rides in the `Spend` event and reconcilers read it, so it must
+        // record what was actually transferred even for a mandate that has no
+        // lifetime cap. That is also why it is not saturated — a counter that quietly
+        // stops counting understates real flow, which is a worse failure than a
+        // mandate that stops working.
+        //
+        // So the uint96 ceiling remains, but as a denial with a name instead of a
+        // panic. It is reachable ONLY when F_TOTAL is unset, because a lifetime cap is
+        // itself a uint96 and therefore binds first. Widening `totalSpent` to uint120
+        // would fit the struct's three spare bytes for free and push this 2^24 further
+        // out; it was declined because the range was never the defect — the
+        // illegibility of a panic was — and it would change the `Spend` event
+        // signature, hence its topic0, for a condition this guard already answers.
+        //
+        // Placed here, above `_checkAndCommitWindows`, which is where v1 did the counter
+        // arithmetic — so the fix reorders no policy check relative to any other, and the
+        // audit diff is a rewritten comparison rather than a moved gate. One consequence
+        // to know when reading a revert: at the ceiling this error is returned even when a
+        // window cap would also have refused the request, because it is tested first.
+        // `Bounds.t.sol` pins that ordering deliberately rather than relying on it.
+        if (m.totalSpent > type(uint96).max - amount96) revert TotalSpentCeiling();
+        uint96 newTotal;
+        unchecked {
+            newTotal = m.totalSpent + amount96; // cannot overflow: guarded above
+        }
+
+        _checkAndCommitWindows(mandateId, m.windowCount, amount96, nowTs);
 
         hash = spendHash(mandateId, msg.sender, recipient, amount, ref, nonce);
         if (m.flags & F_COSIGN != 0 && amount > m.cosignThreshold) {
@@ -697,11 +863,18 @@ contract MandateManager {
      *
      * The spender may also revoke. Giving up your own authority can never harm
      * the payer, and it lets a compromised agent shut itself off.
+     *
+     * The error is named for authority rather than for a role, because two roles
+     * hold it. v1 called it NotPayer() and said so in four places while keeping
+     * the name, on the grounds that it was already in a deployed ABI. That reason
+     * expired with the tag v1.0.0-arc-testnet: v1's ABI is pinned at v1's address
+     * and this is a different contract, so the selector changes here from
+     * 0x1435e357 to 0x1648fd01 and clients decoding v2 must be rebuilt.
      */
     function revoke(bytes32 mandateId) external {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) revert UnknownMandate();
-        if (msg.sender != m.payer && msg.sender != m.spender) revert NotPayer();
+        if (msg.sender != m.payer && msg.sender != m.spender) revert NotAuthorised();
         m.revoked = true;
         emit MandateRevoked(mandateId, msg.sender);
     }
@@ -824,8 +997,23 @@ contract MandateManager {
         return used >= w.cap ? 0 : w.cap - used;
     }
 
-    /// @notice Largest single spend the POLICY would currently permit, ignoring
-    /// the allowlist and any co-signature requirement.
+    /// @notice Largest single spend the POLICY'S AMOUNT BOUNDS would currently
+    /// permit: the per-transaction cap, the lifetime cap and every window,
+    /// intersected, for a mandate `isLive` accepts.
+    ///
+    /// Four things can still deny a spend this function calls affordable, and the
+    /// v1 comment here named only the first two. The allowlist is a property of the
+    /// recipient rather than the amount. The co-signature requirement gates spends
+    /// ABOVE a threshold instead of capping them, so a large number here may still
+    /// need an `approveCosign` first. BOTH ERC-8004 GATES ARE ALSO INVISIBLE HERE:
+    /// `isLive` covers revocation, `notBefore` and expiry and stops there, making no
+    /// external calls, while the identity and credential gates read the registries
+    /// during `spend` — so a mandate whose agent has transferred its identity NFT,
+    /// or whose attestation has gone stale, reports full headroom here and reverts
+    /// there. That omission is deliberate rather than an oversight: this is the
+    /// pre-flight path, and it should not cost two external calls or stop working
+    /// when a registry is unreachable. Lastly the spend nonce is per-call, not
+    /// per-mandate, so replay is not knowable from a mandate id alone.
     ///
     /// Returns type(uint256).max for a live mandate bounded only by expiry — such a
     /// mandate genuinely has no amount limit, and reporting 0 would tell a
@@ -869,5 +1057,115 @@ contract MandateManager {
         if (allowed < limit) limit = allowed;
         uint256 bal = usdc.balanceOf(m.payer);
         return bal < limit ? bal : limit;
+    }
+
+    /// @notice NEW IN v2. The joint ceiling across several mandates held against one
+    /// payer: the largest total that ONE spend from each named mandate could move
+    /// right now. Mirrored in reference/policy.js as `headroomAcross`.
+    ///
+    /// WHY IT EXISTS. `spendable` answers "what can this mandate move?" and cannot
+    /// answer "what can all of them move?", because the thing they share is in no
+    /// mandate — it is the payer's single ERC-20 allowance to this contract. On
+    /// 2026-08-24 two live mandates at this address each returned `spendable` of
+    /// 90,000 against an allowance of exactly 90,000, and a 50,000 dry-run succeeded
+    /// on both. A payer adding those up gets 180,000, twice what they can lose; a
+    /// payer reading this view gets 90,000. It does NOT fix the underlying race — two
+    /// delegates can still both spend until the shared allowance is dry, which is
+    /// inherent to layering per-mandate policy over one allowance and is the reason
+    /// `MAX_JOINT` exists at all rather than a general-purpose batching API. It makes
+    /// the overlap a number instead of an inference nobody makes.
+    ///
+    /// WHAT IT IS NOT. Not total flow. A mandate with a rolling window permits
+    /// repeated spends as buckets age out, so over any interval longer than an
+    /// instant the real total exceeds this. Not a promise either: like `spendable`,
+    /// it is blind to the allowlist, the cosign threshold, both ERC-8004 gates and
+    /// the per-call nonce — see `policyHeadroom` for why those are absent.
+    ///
+    /// WHY EACH TERM IS CLAMPED AT type(uint96).max. Not defensive padding: the same
+    /// correction the cosign gate needed. `policyHeadroom` returns
+    /// `type(uint256).max` for a mandate bounded only by an expiry, but `spend`
+    /// refuses anything above `type(uint96).max` with `AmountTooLarge` — so that
+    /// return value over-reports the largest single spend, and `sum += policyHeadroom`
+    /// over two such mandates from one payer does not merely over-report, it PANICS.
+    /// Two expiry-only grants is a two-line construction, so this is the same failure
+    /// class as v1's `totalSpent` cliff rather than an astronomical edge. Clamping
+    /// each term first makes every term the true largest single spend, and has a
+    /// second consequence that is easy to lose: the sum can then not overflow at all.
+    /// `MAX_JOINT * type(uint96).max` is 8 * (2^96 - 1) < 2^99, against a uint256
+    /// ceiling of 2^256. Do NOT "harden" the addition with a saturating add or an
+    /// unchecked block — either would give identical answers while destroying the
+    /// reason they are correct, which is that the terms are bounded and not that the
+    /// sum is caught.
+    ///
+    /// THREE REFUSALS, ALL BECAUSE THE ALTERNATIVE IS A PLAUSIBLE WRONG NUMBER.
+    /// `MixedPayers` because there is no joint ceiling across payers — each has a
+    /// separate allowance and balance, so no single clamp applies and the sum means
+    /// nothing. `DuplicateMandate` because one mandate's headroom exists once, and
+    /// deduplicating silently would hand the right number to a caller who still
+    /// believes they hold two grants. `UnknownMandate` because a name that resolves
+    /// to nothing must not quietly contribute zero: `spendable` returning 0 for an
+    /// unknown id is unambiguous, but one bad id among eight is invisible, and this
+    /// view exists precisely to surface what the per-mandate views hide. Revoked and
+    /// expired mandates do contribute zero WITHOUT reverting — they are the ordinary
+    /// contents of any real caller's list.
+    ///
+    /// GAS. Up to 139 cold storage reads per mandate (2 for the struct slots `isLive`
+    /// touches, 1 for `totalCap`, then 4 windows x (1 spec + 33 ring slots)), so
+    /// roughly 290k gas each and about 2.3M for a full eight. That fits one `eth_call`
+    /// at every default node gas cap and one on-chain call inside a block, which is
+    /// what `MAX_JOINT` is sized for. A payer with more than eight mandates on one
+    /// allowance does off chain what this does on chain: read `policyHeadroom` per id,
+    /// clamp each at `type(uint96).max`, add, then clamp by `allowance` and
+    /// `balanceOf`. `MAX_JOINT` is deliberately NOT in reference/policy.js: bounds
+    /// that constrain the state machine are mirrored there because they change which
+    /// spends are legal, while a bound that only rations a read has nothing
+    /// downstream depending on it, and JavaScript has no gas budget to ration.
+    function spendableAcross(bytes32[] calldata mandateIds) external view returns (uint256) {
+        uint256 n = mandateIds.length;
+        // Answered, not refused. Nothing can move nothing, and reading `mandateIds[0]`
+        // to find the payer of an empty set would revert with a panic that says
+        // nothing about policy.
+        if (n == 0) return 0;
+        if (n > MAX_JOINT) revert TooManyMandates();
+
+        // The payer is read from the first id rather than taken as a parameter — it is
+        // derivable, and a parameter would let a caller assert a payer the ids do not
+        // have. Checking it for existence here is what makes "the payer of nothing"
+        // unreachable below. The loop reads slot 0 of this same mandate again at i == 0;
+        // that is a warm SLOAD at 100 gas, bought deliberately to keep the loop body
+        // uniform rather than branching on the first iteration.
+        address payer = _mandates[mandateIds[0]].payer;
+        if (payer == address(0)) revert UnknownMandate();
+
+        // The largest amount `spend` will accept, and therefore the largest a single
+        // spend from any mandate can be regardless of what caps the payer set. Hoisted
+        // because it is the same bound for every term and because naming it is what
+        // makes the loop body's clamp read as a correction rather than a guard.
+        uint256 maxSingleSpend = type(uint96).max;
+
+        uint256 total;
+        for (uint256 i = 0; i < n; ++i) {
+            bytes32 id = mandateIds[i];
+            address p = _mandates[id].payer;
+            if (p == address(0)) revert UnknownMandate();
+            if (p != payer) revert MixedPayers();
+
+            // O(n^2) over at most 8 ids is at most 28 comparisons of already-warm
+            // calldata, which is free beside the ~290k of storage reads each id costs.
+            // The alternative — requiring strictly ascending ids so duplicates fall out
+            // of one pass — would push a sort by keccak hash onto every caller to save
+            // nothing measurable. A view cannot write the seen-set to storage.
+            for (uint256 j = 0; j < i; ++j) {
+                if (mandateIds[j] == id) revert DuplicateMandate();
+            }
+
+            uint256 one = policyHeadroom(id);
+            total += one > maxSingleSpend ? maxSingleSpend : one;
+        }
+
+        uint256 allowed = usdc.allowance(payer, address(this));
+        if (allowed < total) total = allowed;
+        uint256 bal = usdc.balanceOf(payer);
+        return bal < total ? bal : total;
     }
 }

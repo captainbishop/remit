@@ -1,5 +1,11 @@
 # Evidence
 
+> *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — and here that is
+> not merely a convention but the only correct reading: every receipt in this folder was
+> produced by v1's bytecode, so v1's source is the thing being annotated. v2 work has shifted
+> the working tree's numbering; see FORGE.md.*
+
 Every number published in `DESIGN.md`, `CHANGELIST.md`, `PRIVACY.md`, `FORGE.md`
 and the comment block in `foundry.toml` was measured, not estimated. This folder
 is the raw output those numbers came from, kept so that a reader — or an auditor —
@@ -107,7 +113,7 @@ to re-derive, not a confirmation.
 | `spend.log` | The first live spend receipt. |
 | `fund.log` | Funding the delegate so it could pay its own gas, which on Arc is USDC. |
 | `headroom.log` | `policyHeadroom` and `spendable` agreeing with the per-transaction cap. Confirms `spendable()` does traverse the rolling window rather than ignoring it. |
-| `ceiling.log`, `race.log`, `restore.log`, `restored.log` | The allowance-ceiling failure shape. With the allowance at 90,000, **two** mandates each reported `spendable` = 90,000 — summing to 180,000 — and 50,000 dry-runs succeeded on both. No funds are at risk, because the losing `transferFrom` reverts, but per-mandate policy layered over one global ERC-20 allowance is silent about the joint constraint. This is the measurement behind the proposed `spendableAcross` view. |
+| `ceiling.log`, `race.log`, `restore.log`, `restored.log` | The allowance-ceiling failure shape. With the allowance at 90,000, **two** mandates each reported `spendable` = 90,000 — summing to 180,000 — and 50,000 dry-runs succeeded on both. No funds are at risk, because the losing `transferFrom` reverts, but per-mandate policy layered over one global ERC-20 allowance is silent about the joint constraint. This is the measurement behind the `spendableAcross` view, which v1 does not have and v2 does: it returns 90,000 here where the two `spendable` calls sum to 180,000. |
 | `ref-spend.log`, `ref-after.log` | Spend #4, carrying `ref` as a commitment rather than a plaintext label: `keccak256(abi.encode(invoiceId, poNumber, amountMinor, vendor, salt))`. Two independent implementations produced the same digest. This is layer L0 in `PRIVACY.md`. It costs **240 gas**, not zero: the digest `0x4fa8c8c1…077a` has no zero bytes, so its calldata word costs 32×16 = 512 against 272 for `"invoice-0002"` zero-padded. Padding is what makes short plaintext cheap. |
 
 ## Cosignature

@@ -37,7 +37,7 @@ a real blockchain rather than only in tests.
 
 The **reference model** (`reference/policy.js`) is the rulebook, written in JavaScript.
 It decides every question: is this spend allowed, and if not, exactly why. It works
-right now. Its 46 tests pass.
+right now. Its 56 tests pass.
 
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
 Solidity, the language blockchains run. As of 2026-08-24 it compiles, the 140 tests written
@@ -95,6 +95,18 @@ revisit first is a mandate configured with `perTxCap` below `cosignThreshold`: i
 produces a policy where no human is ever asked to approve anything. Right now the contract
 accepts that configuration and we wrote it down. For fake money, documenting it is a
 reasonable call. For real money, it should probably be refused at grant time.
+
+That happened, and it is worth knowing how it went, because it is the pattern to expect from
+the rest of the list. The refusal took four lines. Working out *what* to refuse took much
+longer, and the version written down here and in two other files was wrong in two separate
+ways — the comparison needed to be `<=` rather than `<`, and `perTxCap` turned out not to be
+the only ceiling that can strand a threshold. Then asking the general question rather than
+the specific one — how many ways are there to look supervised without being supervised? —
+turned up two more holes, one of which is worse than the item on the list: a mandate could
+name the agent as its own cosigner, and `approveCosign` would let that agent approve its own
+spends. Nothing in the suite failed for any of this beforehand. The lesson to carry to the
+next item is that a documented soft spot is a description of what somebody noticed, not a
+specification of the defect.
 
 None of this changed stages 4 or 5, which were identical either way and are now both done.
 It changes what happens next.
@@ -154,15 +166,20 @@ node --test reference/policy.test.js
 The last lines should read:
 
 ```
-# tests 46
-# pass 46
+# tests 47
+# pass 47
 # fail 0
 ```
 
 That's the rulebook verifying itself, including six deliberately reconstructed attacks
-it defeats. If you see `46 pass`, the foundation of the project is sound and you've run
+it defeats. If you see `47 pass`, the foundation of the project is sound and you've run
 your first test suite. If you see anything else, paste all of it to me — that would be
 genuinely surprising and I'd want to know.
+
+(It said 46 until v2, and if you are reading an older screenshot of your own terminal,
+that is why. The forty-seventh test pins the audit counter's own upper bound, which the
+model could not previously express — the contract panicked there and a JavaScript integer
+has no width to panic at.)
 
 ## Stage 2 — compile the contract ✅ done
 

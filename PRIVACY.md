@@ -1,5 +1,10 @@
 # Privacy in Remit
 
+> *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — which is what
+> they were written against and where they are still exact. v2 work has shifted them; see
+> FORGE.md.*
+
 ## Position
 
 Privacy is a required option in Remit, not a feature to be talked down into

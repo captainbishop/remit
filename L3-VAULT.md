@@ -6,6 +6,11 @@ its leak inventory, and its naming rule. Task #39.
 Status: **spec only.** Nothing here is built, and one of its conclusions is that L3
 should not be built until a prerequisite outside this document is solved.
 
+> *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — which is what
+> they were written against and where they are still exact. v2 work has shifted them; see
+> FORGE.md.*
+
 Every line number below refers to `contracts/MandateManager.sol` at the deployed,
 frozen revision, and every one was checked against the source rather than recalled.
 The first draft of this document was checked a second time by an independent pass over
@@ -278,7 +283,7 @@ already linked and `salt = f(nullifier)` reveals nothing new. A reused salt reve
 The vault should refuse a configuration whose cosign gate can never fire, since it is
 the depositor's own control being silently disabled. But the condition is **not**
 `perTxCap < cosignThreshold`, which is what the first draft wrote and what
-`CHANGELIST.md` still says.
+`CHANGELIST.md` said until this section was written.
 
 Line 492 tests `amount > m.cosignThreshold`, strictly, and line 476 caps
 `amount ≤ perTxCap`. So `perTxCap == cosignThreshold` is *also* dead, and this repo has
@@ -293,6 +298,20 @@ vault should compare the threshold against the effective maximum spend implied b
 whole policy, not against one field. **This also means the `CHANGELIST.md` entry for
 the v2 grant-time revert is stated with the wrong operator and should be corrected
 there before v2 is cut.**
+
+**Superseded, in the best way: `MandateManager` v2 does this itself.** The correction was
+carried into `CHANGELIST.md` and then implemented, so the vault inherits the guard rather
+than reimplementing it — a grant that a depositor's vault forwards to `createMandate` is
+refused by the mandate contract before the vault has to have an opinion. Two amendments to
+the paragraphs above follow from the implementation. The effective maximum includes a term
+this section missed, `2^96 - 1`, which binds when the depositor set no amount bound at all;
+and the enumeration turned up two further dead-gate shapes the vault would also have
+forwarded happily, a threshold stored with `F_COSIGN` unset and `cosigner == spender`. The
+second matters more here than in the base contract, because a vault that lets a depositor
+name the spender as its own cosigner has built a supervision gate the spender operates. Both
+are now refused underneath the vault. What the vault still owes its depositor is the *error
+message*: `BadConfig` arriving from a nested call is legible to a developer and not to a
+person, so the vault should pre-check and explain rather than forward and relay.
 
 ### The pass-through fields, and why "only narrows" is not the same as "harmless"
 

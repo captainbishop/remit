@@ -165,6 +165,255 @@ contract ViewsTest is Base {
         assertEq(token.balanceOf(vendor), max);
     }
 
+    // ----------------------------------------------- spendableAcross (NEW IN v2)
+    //
+    // Eight tests for one view, because every one of them pins a case where the
+    // obvious implementation — `for (..) sum += policyHeadroom(ids[i]);` — returns a
+    // confidently wrong number or panics, rather than failing in a way anyone would
+    // notice. The joint ceiling is the only figure in the contract that depends on
+    // something no mandate contains: the payer's single ERC-20 allowance.
+
+    /// The property that makes the joint view trustworthy: for one mandate it is not
+    /// a second opinion, it is the same opinion. If these ever diverge, the joint path
+    /// has grown a rule `spendable` does not have.
+    function test_spendableAcross_ofOne_agreesWithSpendable() public {
+        bytes32[] memory one = new bytes32[](1);
+
+        one[0] = grant(simpleParams());
+        assertEq(mm.spendableAcross(one), mm.spendable(one[0]), "policy binds");
+
+        vm.prank(payer);
+        token.approve(address(mm), usd(30));
+        assertEq(mm.spendableAcross(one), mm.spendable(one[0]), "allowance binds");
+        assertEq(mm.spendableAcross(one), usd(30));
+
+        vm.prank(payer);
+        token.approve(address(mm), type(uint256).max);
+        vm.prank(payer);
+        mm.revoke(one[0]);
+        assertEq(mm.spendableAcross(one), mm.spendable(one[0]), "revoked");
+        assertEq(mm.spendableAcross(one), 0);
+    }
+
+    /**
+     * THE WHOLE REASON THIS VIEW EXISTS, in the exact shape it was found in.
+     *
+     * On 2026-08-24 two live mandates at 0x3744E93B…0196 each returned `spendable` of
+     * 90,000 against an allowance of exactly 90,000, and a 50,000 dry-run succeeded on
+     * both. Nothing was wrong with either answer. Adding them up gives 180,000, which
+     * is twice what the payer could lose, and no view in v1 could say so.
+     *
+     * This does NOT fix the race — both delegates can still spend until the shared
+     * allowance is dry, which is inherent to layering per-mandate policy over one
+     * ERC-20 approval. It converts the overlap from an inference nobody makes into a
+     * number one call away.
+     */
+    function test_spendableAcross_exposesTheSharedAllowanceOverlap() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.perTxCap = 90_000;
+        p.flags = F_PER_TX;
+        bytes32 a = grant(p);
+        p.spender = other; // a second delegate, same payer, same allowance
+        bytes32 b = grant(p);
+
+        vm.prank(payer);
+        token.approve(address(mm), 90_000);
+
+        assertEq(mm.spendable(a), 90_000, "each mandate's own answer is correct");
+        assertEq(mm.spendable(b), 90_000);
+
+        bytes32[] memory both = new bytes32[](2);
+        both[0] = a;
+        both[1] = b;
+        assertEq(mm.spendableAcross(both), 90_000, "and the joint answer is half their sum");
+        assertEq(mm.spendable(a) + mm.spendable(b), 180_000, "which is what a payer would add up");
+    }
+
+    /**
+     * The overflow, and why the fix is a clamp on each term rather than a saturating
+     * add on the total.
+     *
+     * `policyHeadroom` returns `type(uint256).max` for a mandate bounded only by an
+     * expiry — correctly, since the payer set no amount bound. But `spend` refuses
+     * anything above `type(uint96).max` with `AmountTooLarge`, so that return value
+     * over-reports the largest single spend, and adding two of them PANICS. Two
+     * expiry-only grants from one payer is a two-line construction, which puts this in
+     * the same class as v1's `totalSpent` cliff rather than among the astronomical
+     * edges. Clamping each term first makes every term the true largest single spend
+     * AND makes the sum unable to overflow: MAX_JOINT * (2^96 - 1) < 2^99.
+     */
+    function test_spendableAcross_unboundedTermsClampInsteadOfOverflowing() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.expiresAt = uint40(block.timestamp + 1 days);
+        p.flags = F_EXPIRY;
+        bytes32 a = grant(p);
+        bytes32 b = grant(p);
+
+        // The input condition that makes a naive sum panic, asserted rather than
+        // asserted about: these are the two addends.
+        assertEq(mm.policyHeadroom(a), type(uint256).max);
+        assertEq(mm.policyHeadroom(b), type(uint256).max);
+
+        // Base funds the payer with 1e15 base units, far below 2^96, so the balance
+        // clamp would hide the arithmetic entirely. Mint past it to see the sum.
+        token.mint(payer, type(uint128).max);
+
+        bytes32[] memory both = new bytes32[](2);
+        both[0] = a;
+        both[1] = b;
+        assertEq(mm.spendableAcross(both), 2 * uint256(type(uint96).max), "each term clamped, no panic");
+
+        // The widest total the contract can be asked for, which is the arithmetic that
+        // makes a saturating add unnecessary rather than merely unused.
+        bytes32[] memory eight = new bytes32[](mm.MAX_JOINT());
+        eight[0] = a;
+        eight[1] = b;
+        for (uint256 i = 2; i < eight.length; ++i) {
+            eight[i] = grant(p);
+        }
+        uint256 widest = mm.spendableAcross(eight);
+        assertEq(widest, mm.MAX_JOINT() * uint256(type(uint96).max));
+        assertLt(widest, 2 ** 99);
+    }
+
+    /// There is no joint ceiling across two payers: each has a separate allowance and
+    /// a separate balance, so no single clamp applies and the sum is meaningless.
+    /// Refused in both orders — the payer is read from the first element, and taking
+    /// whichever one happened to be named first would be exactly the silent summing
+    /// this view exists to prevent.
+    function test_spendableAcross_mixedPayers_reverts() public {
+        bytes32 mine = grant(simpleParams());
+
+        token.mint(other, 1_000_000 * ONE);
+        vm.prank(other);
+        token.approve(address(mm), type(uint256).max);
+        vm.prank(other);
+        bytes32 theirs = mm.createMandate(bytes32("other-payer"), simpleParams());
+
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = mine;
+        ids[1] = theirs;
+        vm.expectRevert(MandateManager.MixedPayers.selector);
+        mm.spendableAcross(ids);
+
+        ids[0] = theirs;
+        ids[1] = mine;
+        vm.expectRevert(MandateManager.MixedPayers.selector);
+        mm.spendableAcross(ids);
+
+        // Each is a perfectly good single-payer request on its own.
+        bytes32[] memory one = new bytes32[](1);
+        one[0] = mine;
+        assertEq(mm.spendableAcross(one), usd(100));
+        one[0] = theirs;
+        assertEq(mm.spendableAcross(one), usd(100));
+    }
+
+    /// A repeated id would double-count headroom that exists once. Refused rather than
+    /// deduplicated, because deduplicating hands the right number to a caller who
+    /// still believes they hold two grants — and 200 is far more convincing than 100
+    /// to somebody in that state.
+    function test_spendableAcross_duplicateIds_revert() public {
+        bytes32 a = grant(simpleParams());
+        bytes32 b = grant(simpleParams());
+
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = a;
+        ids[1] = a;
+        vm.expectRevert(MandateManager.DuplicateMandate.selector);
+        mm.spendableAcross(ids);
+
+        // Non-adjacent too, which is what the O(n^2) scan buys over "must be sorted".
+        bytes32[] memory three = new bytes32[](3);
+        three[0] = a;
+        three[1] = b;
+        three[2] = a;
+        vm.expectRevert(MandateManager.DuplicateMandate.selector);
+        mm.spendableAcross(three);
+
+        three[2] = grant(simpleParams());
+        assertEq(mm.spendableAcross(three), usd(300), "three distinct mandates, nothing else binding");
+    }
+
+    /**
+     * An id that resolves to nothing reverts, and this is a DELIBERATE divergence from
+     * `spendable`, which returns 0 for an unknown mandate.
+     *
+     * The justification is that the two zeros mean different things. `spendable(x) ==
+     * 0` for a single unknown id is unambiguous — the caller asked about one thing and
+     * got nothing. One bad id among eight is invisible: it contributes 0 to a total
+     * that still looks plausible, and the caller walks away believing they enumerated
+     * their exposure when they enumerated seven eighths of it. This view exists to
+     * surface what the per-mandate views hide, so it cannot itself hide a typo.
+     */
+    function test_spendableAcross_unknownId_reverts() public {
+        assertEq(mm.spendable(bytes32("nope")), 0, "the single-mandate view is unchanged");
+
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = bytes32("nope");
+        vm.expectRevert(MandateManager.UnknownMandate.selector);
+        mm.spendableAcross(ids);
+
+        // Buried among real ones, which is the case that matters.
+        bytes32[] memory three = new bytes32[](3);
+        three[0] = grant(simpleParams());
+        three[1] = bytes32("nope");
+        three[2] = grant(simpleParams());
+        vm.expectRevert(MandateManager.UnknownMandate.selector);
+        mm.spendableAcross(three);
+    }
+
+    /// Dead mandates contribute zero WITHOUT reverting — they are the ordinary
+    /// contents of any real caller's list, and a view that refused them would be
+    /// unusable exactly when a payer most wants to audit what is still live. Only
+    /// malformed questions revert; a mandate that has simply run its course is a valid
+    /// answer of nothing.
+    function test_spendableAcross_revokedAndExpiredContributeZero() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.perTxCap = usd(100);
+        p.expiresAt = uint40(block.timestamp + 1 days);
+        p.flags = F_PER_TX | F_EXPIRY;
+
+        bytes32 live = grant(p);
+        bytes32 dead = grant(p);
+        bytes32 lapsed = grant(p);
+        vm.prank(payer);
+        mm.revoke(dead);
+
+        bytes32[] memory ids = new bytes32[](3);
+        ids[0] = live;
+        ids[1] = dead;
+        ids[2] = lapsed;
+        assertEq(mm.spendableAcross(ids), usd(200), "revoked drops out, the other two remain");
+
+        vm.warp(block.timestamp + 2 days);
+        assertEq(mm.spendableAcross(ids), 0, "all three are now dead");
+    }
+
+    /// The gas cap. `spendableAcross` performs up to 139 cold storage reads per
+    /// mandate, so the length limit is what keeps an unbounded loop over untrusted
+    /// input out of the contract — the same job MAX_WINDOWS and MAX_BUCKETS do for
+    /// `spend`. The boundary is tested from both sides so the cap is exact.
+    function test_spendableAcross_lengthCapIsExact() public {
+        assertEq(mm.MAX_JOINT(), 8);
+
+        bytes32[] memory ok = new bytes32[](8);
+        bytes32[] memory tooMany = new bytes32[](9);
+        for (uint256 i = 0; i < 9; ++i) {
+            bytes32 id = grant(simpleParams());
+            if (i < 8) ok[i] = id;
+            tooMany[i] = id;
+        }
+
+        assertEq(mm.spendableAcross(ok), usd(800), "eight is allowed");
+        vm.expectRevert(MandateManager.TooManyMandates.selector);
+        mm.spendableAcross(tooMany);
+
+        // An empty set is answered, not refused: nothing can move nothing, and reading
+        // ids[0] to find the payer of an empty set would panic on an array bound.
+        assertEq(mm.spendableAcross(new bytes32[](0)), 0);
+    }
+
     // ------------------------------------------------------- misc accessors
 
     function test_isAllowedRecipient_withoutAnAllowlist() public {

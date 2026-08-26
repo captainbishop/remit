@@ -302,26 +302,54 @@ contract CosignTest is Base {
     }
 
     /**
-     * DOCUMENTED SOFT SPOT: perTxCap below cosignThreshold makes co-signing dead.
+     * FIXED IN v2. This test used to be named `test_DOCUMENTED_SOFT_SPOT_...` and its
+     * comment argued the opposite of what it now asserts, so the old text is worth
+     * quoting rather than deleting: *"`createMandate` accepts this configuration rather
+     * than rejecting it, which is a deliberate choice not to grow a validation rule for
+     * every combination that is merely useless — but it IS a footgun, it is in the
+     * README, and it is pinned here so the behaviour is a decision rather than an
+     * accident."*
      *
-     * Every amount that would trip the threshold is already refused by the per-tx cap,
-     * so the cosign branch is unreachable and the mandate silently has no human in
-     * the loop. `createMandate` accepts this configuration rather than rejecting it,
-     * which is a deliberate choice not to grow a validation rule for every
-     * combination that is merely useless — but it IS a footgun, it is in the README,
-     * and it is pinned here so the behaviour is a decision rather than an accident.
+     * Two things retired that reasoning. Remit is now intended to hold real money, which
+     * turns "merely useless" into "advertises a control it does not have" — `getMandate`
+     * returns a populated cosigner and a plausible threshold either way, so a payer
+     * auditing their own grant cannot tell the difference. And v1's immutability means a
+     * combination left legal now is legal forever at that address; the cost of the rule
+     * is one comparison at grant time, paid once per mandate, against a supervision gate
+     * that silently never fires.
+     *
+     * The refusal is deliberately NOT `perTxCap < cosignThreshold`, which the changelist
+     * proposed and which is wrong twice over — see `Creation.t.sol`, where the whole
+     * boundary lives. This test keeps only the shape it was originally written for.
      */
-    function test_DOCUMENTED_SOFT_SPOT_perTxCapBelowThresholdMakesCosignUnreachable() public {
+    function test_perTxCapBelowThreshold_isRefusedAtGrantTime() public {
         MandateManager.MandateParams memory p = emptyParams();
         p.perTxCap = usd(10);
         p.flags = F_PER_TX;
         p = withCosign(p, boss, usd(100)); // threshold above the per-tx cap
-        bytes32 id = grant(p); // accepted, though co-signing can never trigger
 
-        pay(id, usd(10)); // the largest permitted spend, no signature needed
-        assertEq(token.balanceOf(vendor), usd(10));
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("dead-gate"), p);
 
-        payReverts(id, uint256(usd(10)) + 1, MandateManager.OverPerTxCap.selector);
+        // And the spends the old test performed are now unperformable, because there is
+        // no mandate to spend from. Asserted by reusing THE SAME SALT with the threshold
+        // repaired: if the refused attempt had written any state, this would come back
+        // `MandateExists` instead of succeeding. That is a stronger check than reading a
+        // zeroed struct, and it needs no off-chain id derivation — there is no
+        // `mandateId` view, the id is keccak over (DOMAIN, chainid, this, payer, salt).
+        p.cosignThreshold = usd(9);
+        vm.prank(payer);
+        bytes32 id = mm.createMandate(bytes32("dead-gate"), p);
+
+        // One base unit of threshold below the cap is all it takes, and the gate is
+        // alive: the largest spend the mandate permits now demands a signature. This is
+        // the same boundary the old test straddled from the wrong side.
+        bytes32 nonce = nextNonce();
+        bytes32 hash = mm.spendHash(id, agent, vendor, usd(10), REF, nonce);
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, hash));
+        mm.spend(id, vendor, usd(10), REF, nonce);
     }
 
     // ---------------------------------------------------------------- util

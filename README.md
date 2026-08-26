@@ -29,7 +29,7 @@ policy) are all inadequate, and what this does *not* bound.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   46 tests, including boundary-aiming fuzzers
+reference/policy.test.js   56 tests, including boundary-aiming fuzzers
 contracts/MandateManager.sol   on-chain implementation (140 tests pass; live on Arc Testnet)
 test/                      140 Forge tests against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
@@ -147,7 +147,7 @@ by `createMandate(salt, params)`, and then the delegate can `spend`.
 
 ## Status, honestly
 
-**Verified.** The reference model runs and passes 46 tests. It found six real
+**Verified.** The reference model runs and passes 56 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
 collision at low timestamps) and two in the credential gate (unchecked validator,
@@ -318,7 +318,9 @@ the model returns encodes directly into the contract's struct with no second lay
 defaults to disagree with. A specification that needs a translator has moved the bug
 rather than fixed it.
 
-The model now matches on all ten, which took its suite from 41 tests to 46. One Forge
+The model now matches on all ten, which took its suite from 41 tests to 46 — and to 56 over
+the course of v2, which added the counter-ceiling denial, three cosign-gate refusals and six
+joint-ceiling tests. One Forge
 test was also rewritten for proving nothing — it tripped two `BadWindow` conditions at
 once, so it would have passed with either check removed.
 
@@ -333,16 +335,51 @@ event behind — which is true of the chain and not true of the recorder, so the
 was unanswerable rather than merely wrong. It was replaced with the observable form of
 the same claim.
 
-Three known soft spots that neither the compiler nor a green suite will flag, because
-they are behaviours rather than errors — two of the three are in fact pinned by passing
-tests, which is the point. `m.totalSpent + uint96(amount)` is computed before the `F_TOTAL` check, so a mandate
-with no lifetime cap would revert on overflow after roughly 7.9e22 USDC of cumulative
-spending — an absurd threshold, but it is a liveness cliff rather than a graceful
-stop. A mandate configured with `perTxCap < cosignThreshold` makes the co-signature
-branch unreachable, which creates a policy that silently never asks for a signature;
-`createMandate` accepts it. And `revoke` reverts with `NotPayer()` even though the
-spender is also permitted to call it, so the error name is misleading — kept, because
-the name is part of the ABI that every client decodes against.
+**v1's three known soft spots, and what v2 has done with them.** None was something the
+compiler or a green suite would flag, because they are behaviours rather than errors —
+two of the three were in fact pinned by *passing* tests, which is the point. All three
+remain permanent properties of the deployed v1 at
+`0x3744E93B9e796E05CB66311d897559B6F3860196`, which has no upgrade path. The fixes below
+are in this tree, for a contract that has not been deployed. All three are now fixed, and
+the third one turned up two further holes that no list anywhere had recorded — so read
+"three" as the number that had been written down, not the number that existed.
+
+*Fixed.* `m.totalSpent + uint96(amount)` was computed before the `F_TOTAL` check, so the
+addition ran even for a mandate with no lifetime cap, and a cumulative total near 2^96
+base units — roughly 7.9e22 USDC — produced an arithmetic **panic** rather than a
+graceful stop. v2 consults the lifetime cap without performing the addition, then guards
+the counter with a named `TotalSpentCeiling()`. The mandate still stops at the ceiling,
+which is inherent to a counter that is bounded and must stay exact because the audit
+trail carries it; what changed is that it now says why.
+
+*Fixed.* `revoke` reverted with `NotPayer()` even though the spender is also permitted to
+call it. Four places in this repo recorded that the name was misleading and kept it
+anyway, on the grounds that it was already in a deployed ABI. Tagging
+`v1.0.0-arc-testnet` retired that reason — v1's ABI is pinned at v1's address — so v2
+calls it `NotAuthorised()`, moving the selector from `0x1435e357` to `0x1648fd01`.
+
+*Fixed, and it grew.* A mandate whose co-signature threshold sits at or above the largest
+single spend its other bounds permit makes the co-signature branch unreachable, producing a
+policy that looks supervised and silently never asks for a signature; v1's `createMandate`
+accepts it. Two details this paragraph previously got wrong: the condition is `<=` rather
+than `<`, because `spend` tests `amount > cosignThreshold` strictly, so a threshold exactly
+equal to the ceiling is dead too — and `perTxCap` is not the only ceiling, since with
+`F_PER_TX` unset the effective one is the smaller of the lifetime cap and the window caps.
+v2 refuses the grant, comparing the threshold against `min(2^96 - 1, perTxCap, totalCap,
+every window cap)`, which still accepts a mandate that bounds no amount at all.
+
+Fixing it properly meant asking the general question — *in how many ways can a mandate
+display a co-signature requirement and not have one?* — and the answer was five, not one.
+Two were already refused in v1, this was the third, and **two more had never been written
+down anywhere**. A threshold with `F_COSIGN` unset is stored and shown by `getMandate` and
+measured against nothing. And, worse, `approveCosign` authorises on `msg.sender ==
+m.cosigner` alone, so a mandate whose **cosigner is its own spender** lets the agent
+approve its own spend hash and then spend it: the supervision gate becomes two
+transactions and no second party. Neither is a divergence between the contract and
+`reference/policy.js` — the model accepted both too, so no amount of cross-checking the
+two implementations would have surfaced them. v2 refuses all three. `cosigner == payer`
+remains legal and is the ordinary case; it is what live mandate 2 does on Arc today, and a
+rule that condemned it would have contradicted a receipt.
 
 **Not audited.** No third party has looked at this. Do not put money behind it.
 
@@ -350,9 +387,12 @@ This is a blocker rather than a disclaimer: Remit is intended to hold real money
 be a testnet demonstration. That intent is what makes the audit a scheduled line item and
 what makes `forge test --profile deep` (20,000 fuzz runs, 2,000 invariant runs at depth
 256) the gate to clear before it, rather than the default profile used during development.
-It also reopens the three soft spots listed above as decisions — the `perTxCap <
-cosignThreshold` case in particular, which silently yields a policy that never asks a human
-for anything and is currently accepted at grant time.
+It is also what reopened the three soft spots listed above as decisions rather than
+curiosities, and what settled each of them the strict way — the dead co-signature gate in
+particular, which had been left legal on the reasoning that a merely useless configuration
+does not deserve a validation rule. Real money turns "useless" into "advertises a control
+it does not have", and immutability means a combination left legal is legal forever at that
+address.
 
 **Unresolved factual questions.** Whether Circle's `agent-wallet-policy` already
 implements equivalent caps off-chain in its custodial API — unverified, so the claim
@@ -381,14 +421,26 @@ caveat that nearly made this look like a 40% improvement.
 
 What's left, in order:
 
-`forge test --profile deep` — 20,000 fuzz runs, 2,000 invariant runs at depth 256 — as the
-pre-audit gate. Then resolve the three soft spots as decisions rather than curiosities,
-starting with `perTxCap < cosignThreshold`, which should probably revert at grant time
-instead of silently producing a policy that never asks a human for anything. Then live
-exercises of the paths testnet has not touched: a cosigned spend, an identity gate, a
-credential gate, and a revocation. Then answer whether an EIP-7702-delegated EOA counts as
-an EOA for the Memo path. Then a viem client. Then the audit, which is mandatory rather
-than optional, because this is meant to hold real money.
+Four items that used to head this list are done and are struck from it rather than quietly
+dropped, because the order they came off in is itself a record. `forge test --profile deep`
+— 20,000 fuzz runs, 2,000 invariant runs at depth 256 — has been run as the pre-audit gate.
+The three soft spots have been resolved as decisions, all three the strict way, and the
+third one uncovered two more. And the live exercises are closed: a cosigned spend and a
+revocation both have receipts on Arc Testnet, along with `approveCosign` and
+`withdrawCosign`, which is all five state-changing functions. The identity and credential
+gates are the exception and are still unexercised on chain, blocked on something no amount
+of care in this repository can supply — an ERC-8004 identity minted to our agent wallet,
+and an attestation that passes rather than the one real attestation on Arc Testnet, whose
+response is a failing 1.
+
+So: finish v2 — the merkle allowlist is the last change, the joint-ceiling view having landed
+as `spendableAcross`, which exposes the shared-allowance overlap the live 2026-08-24 run found
+and cost three new refusals and a `2^96 − 1` clamp on top of the sum the changelist described.
+Then re-measure
+the whole baseline against v2's bytecode, since the published gas figures describe v1's.
+Then answer whether an EIP-7702-delegated EOA counts as an EOA for the Memo path. Then a
+viem client. Then the audit, which is mandatory rather than optional, because this is meant
+to hold real money.
 
 The model has already been reconciled against every place the contract was right and it
 was not — ten of them — so the two suites now agree on every question both of them ask.

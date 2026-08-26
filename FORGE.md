@@ -3,7 +3,7 @@
 140 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
-is the port of `reference/policy.test.js`, which has 46 tests and verifies the *policy*.
+is the port of `reference/policy.test.js`, which has 56 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
@@ -67,19 +67,53 @@ Those are bash commands. On Windows they belong in WSL rather than PowerShell, a
 `START-HERE.md` has the step-by-step for setting that up.
 
 Vendoring is deliberate, and the reason is reproducibility rather than convenience.
-Every gas figure in `DESIGN.md` and all 140 tests are properties of these exact bytes
-compiled by solc 0.8.28 at `optimizer_runs = 200`, and the deployment at
-`0x3744E93B9e796E05CB66311d897559B6F3860196` is verified on-chain against them.
-Re-resolving the dependency — whether by `forge install`, a submodule, or a fresh clone
-of a moving branch — risks silently fetching different bytes and invalidating the whole
-baseline. `forge install` is the idiomatic route and was considered; it wants a git
-repository, manages submodules, and the flag controlling whether it commits has changed
-across Foundry versions. `libs = ["lib"]` in `foundry.toml` makes the `forge-std/`
-remapping resolve either way.
+Every gas figure in `DESIGN.md` and all 140 tests are properties of exact bytes compiled
+by solc 0.8.28 at `optimizer_runs = 200`. Re-resolving the dependency — whether by
+`forge install`, a submodule, or a fresh clone of a moving branch — risks silently
+fetching different bytes and invalidating the whole baseline. `forge install` is the
+idiomatic route and was considered; it wants a git repository, manages submodules, and
+the flag controlling whether it commits has changed across Foundry versions.
+`libs = ["lib"]` in `foundry.toml` makes the `forge-std/` remapping resolve either way.
+
+**Which bytes, precisely.** This paragraph used to say the deployment at
+`0x3744E93B9e796E05CB66311d897559B6F3860196` is verified on-chain against *these* bytes,
+meaning whatever is in the working tree. That was true while `contracts/MandateManager.sol`
+was frozen and it stopped being true the moment v2 work began, so the claim now names a
+commit instead:
+
+```
+git checkout v1.0.0-arc-testnet && forge build
+```
+
+reproduces the runtime bytecode Blockscout verified — 11,572 bytes, initcode 11,868. The
+tag is annotated and its message carries the address, the deploy transaction, the compiler
+settings and the `DOMAIN` constant. `main` no longer reproduces that deployment and is not
+supposed to; it is v2 in progress, and v2 gets its own address, its own verification and
+its own gas baseline. A reproducibility claim has to name a revision to mean anything, and
+tying one to "the current tree" guarantees it expires without anyone noticing.
 
 The cost, stated plainly: `forge update` will fight this, and the diff on any future
 forge-std bump will be large. Bump deliberately, in its own commit, and re-run the full
 suite plus `forge test --profile deep` afterwards.
+
+**And the same reasoning governs every line number in this repo.** Sixty `line NNN`
+references across `DESIGN.md`, `CHANGELIST.md`, `L3-VAULT.md`, `PRIVACY.md`,
+`GAS-ABSTRACTION.md` and `evidence/README.md` point into
+`contracts/MandateManager.sol`. All sixty were written against v1 and all sixty shifted
+the moment v2 edits began — the header banner alone moved everything below it by sixteen
+lines. **Unqualified line numbers therefore refer to the tagged v1 source**, which is
+where they are still exactly right:
+
+```
+git show v1.0.0-arc-testnet:contracts/MandateManager.sol
+```
+
+That is deliberately not a renumbering. Almost every one of those passages is describing
+v1's live, verified behaviour — `evidence/README.md` is annotating real testnet receipts —
+so v1 line numbers are the *correct* pointers, not stale ones. Renumbering to v2 would
+make them wrong about their own subject and wrong again after the next commit. Where a v2
+line is meant, the text says so; and new references should prefer a function name over a
+number, because a name does not move.
 
 If you ever need to restore `lib/` from scratch — a corrupted checkout, say — the exact
 version is:
@@ -184,7 +218,7 @@ non-abstract but a fuzzing handler with no test functions of its own — and you
 
 ## What this proves that the JavaScript model cannot
 
-Three properties are structural to the EVM and cannot be demonstrated in a model, only
+Four properties are structural to the EVM and cannot be demonstrated in a model, only
 imitated by one.
 
 **A denial consumes nothing.** The contract writes the nonce and commits window buckets
@@ -200,10 +234,49 @@ the same physical slot as an old one. `test_ATTACK_rewindOntoTheSameRingSlot_acc
 proves the slot accumulates rather than overwrites — a distinction that exists only
 because the ring is a real mapping and not a JavaScript array of every timestamp.
 
-**Packed-struct arithmetic.** `totalSpent` is a `uint96` and `m.totalSpent + uint96(amount)`
-is computed unconditionally, before the `F_TOTAL` check. `test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping`
-pins the resulting liveness cliff at roughly 7.9e22 USDC using `stdError.arithmeticError`.
-The model has arbitrary-precision integers and cannot have this bug, or find it.
+**Packed-struct arithmetic.** `totalSpent` is a `uint96`, and the model's integers are
+arbitrary-precision, so the model cannot have this class of bug or find it. In v1 the contract
+computed `m.totalSpent + uint96(amount)` unconditionally, *before* the `F_TOTAL` check, so the
+addition was evaluated even for a mandate with no lifetime cap at all, and a cumulative total
+near 2^96 base units — roughly 7.9e22 USDC — produced an arithmetic **panic** rather than a
+denial. `test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping` pinned exactly that,
+using `stdError.arithmeticError`.
+
+**v2 fixed it, so neither that test nor that import exists in this tree.** The lifetime cap is
+now consulted without performing the addition (`totalSpent > totalCap - amount`, whose first
+clause proves its own subtraction cannot underflow), and the counter itself is guarded by a
+named `TotalSpentCeiling()`. The two replacement tests are
+`test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic` and
+`test_totalSpent_withMaximumLifetimeCap_deniesWithOverTotalCap` — the second pinning that the
+ceiling guard is *unreachable* once `F_TOTAL` is set, because a lifetime cap is itself a `uint96`
+and therefore binds first. The reachability boundary is the part worth pinning; the panic was
+only ever the symptom.
+
+The point survives the fix, and is in fact sharpened by it: **the model could not express a
+panic, which is how this divergence stayed invisible.** Closing it meant giving the model a
+`TOTAL_SPENT_CEILING` denial it had no reason to invent on its own — the width of an EVM integer
+leaking into a specification that has no widths.
+
+**A ceiling that lives outside every mandate.** NEW WITH v2's `spendableAcross`. The model has
+no token, so it cannot hold the fact that matters most about several mandates at once: they draw
+on one ERC-20 allowance, which belongs to neither of them. `reference/policy.js` can compute the
+policy half — `headroomAcross` sums each mandate's largest single spend and refuses mixed payers
+and duplicate ids — and that is genuinely all a specification of *policy* can say, because the
+allowance is not policy. It is the reason two mandates on Arc each honestly reported 90,000
+against an allowance of 90,000. `Views.t.sol` closes the gap by asserting both halves in the same
+test: that `spendable(a) + spendable(b)` is 180,000 and that `spendableAcross([a, b])` is 90,000,
+against a real `MockUSDC` whose approval a real payer can change without touching this contract
+at all. Note the shape this shares with the packed-struct case above — in both, the thing the
+model cannot represent is the thing the contract has to be careful about, and in both the model
+still had to be extended so the halves it *can* check cannot drift.
+
+There is one deliberate asymmetry inside that, worth knowing before somebody files it as drift:
+`MAX_JOINT = 8` is in the contract and **not** in the model, unlike `MAX_WINDOWS`,
+`MAX_BUCKETS` and `MAX_AMOUNT`. The rule is that a bound constraining the state machine gets
+mirrored, because it changes which mandates can exist and therefore which spends are legal,
+whereas a bound that only rations a **read** has nothing downstream depending on it. `MAX_JOINT`
+exists to keep 139 cold storage reads per mandate inside one call's gas budget, and JavaScript
+has no gas budget.
 
 The exact-ledger property tests are the crown of the port. `WindowFuzz.t.sol` records
 every accepted spend and brute-forces the true trailing window after each step, asserting
@@ -427,22 +500,36 @@ five are labelled in-file.
 Three of them were places the contract was right and `reference/policy.js` was wrong.
 Writing the Forge suite is what surfaced them, and the model has since been reconciled,
 so both sides now agree and a failure is a real regression rather than a known gap. The
-spender is permitted to call `revoke`, not only the payer — and the error is still named
-`NotPayer`, which is misleading and pinned as-is because the name is in the deployed ABI.
+spender is permitted to call `revoke`, not only the payer — and v1's error was named
+`NotPayer`, which is misleading and was pinned as-is because the name was in the deployed
+ABI. v2 renames it `NotAuthorised` (selector `0x1435e357` → `0x1648fd01`); the tag
+`v1.0.0-arc-testnet` pins v1's ABI at v1's address, which is what retired the objection.
 `maxStaleness == 0` means *no* freshness requirement rather than *maximum* strictness:
 the right reading of "maximum permitted age", and also the value a caller leaves in a
 struct field they never thought about. And `amount > 2^96-1` is refused with
 `AmountTooLarge` *before* any cap is consulted, because every cap is a packed `uint96`
 and an unchecked downcast would truncate a huge amount into a small one that passes.
 
-The other two are not divergences — the model and the contract agree, and both are
-arguably wrong together. `perTxCap < cosignThreshold` makes the co-signature branch
-unreachable, so the policy silently never asks for a signature, and `createMandate`
-accepts the configuration anyway. And with `F_CREDENTIAL` set, `credential.agentId == 0`,
-and no identity gate, there is no agent id to compare against, so the wrong-agent check
-is skipped entirely — bounded only by the fact that the payer fixes `requestHash` at
-grant time. Both are recorded in DESIGN.md rather than fixed, because the fix in each
-case is a grant-time refusal that would reject configurations somebody may want.
+The other two are not divergences — the model and the contract agree, and both were
+arguably wrong together, which is the interesting part: no amount of cross-checking two
+implementations against each other can find a hole they share. `perTxCap < cosignThreshold`
+makes the co-signature branch unreachable, so the policy silently never asks for a
+signature, and v1's `createMandate` accepts the configuration anyway. **v2 refuses it, in
+both implementations**, and the condition is not the one written here: it is `<=` rather
+than `<`, and it compares against `min(2^96 - 1, perTxCap, totalCap, every window cap)`
+rather than against `perTxCap` alone. Fixing it properly meant enumerating the whole
+question — how many ways are there to display a co-signature requirement without having
+one? — which produced two further holes that neither implementation refused and no document
+listed: a threshold stored with `F_COSIGN` unset, and a mandate whose cosigner is its own
+spender, which lets the agent approve its own spends.
+
+The remaining one: with `F_CREDENTIAL` set, `credential.agentId == 0`, and no identity gate,
+there is no agent id to compare against, so the wrong-agent check is skipped entirely —
+bounded only by the fact that the payer fixes `requestHash` at grant time. That one is still
+recorded in DESIGN.md rather than fixed, because the fix is a grant-time refusal that would
+reject configurations somebody may want. Note that this was the reasoning offered for both,
+and for the cosign case it did not survive contact with the real-money decision: a grant
+that appears to carry a control it does not carry is not a configuration somebody wants.
 
 That second one has a footnote worth reading before touching `_checkCredential`. Writing
 the DESIGN.md caveat for it turned up a model divergence that no test had caught: the

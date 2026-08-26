@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Adversarial test suite for the Remit policy engine.
-// Run: node --test reference/
+// Run: node --test reference/policy.test.js
+//
+// This line used to read `node --test reference/`, which was correct on the Node that
+// wrote it and fails on Node 22 with a MODULE_NOT_FOUND for the directory itself — the
+// runner hands a bare positional to the CJS loader instead of walking it. Naming the
+// file works on every version; `node --test 'reference/**/*.test.js'` also works, and
+// so does a bare `node --test` with the cwd inside reference/.
 //
 // These tests are the correctness evidence for MandateManager.sol. The contract
 // cannot be compiled or deployed from the authoring sandbox, so the logic is
@@ -15,7 +21,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const P = require('./policy.js');
-const { usdc, window: win, createMandate, evaluate, spend, revoke, approveCosign, headroom, Denial, DAY, WEEK } = P;
+const { usdc, window: win, createMandate, evaluate, spend, revoke, approveCosign, headroom, headroomAcross, MAX_AMOUNT, Denial, DAY, WEEK } = P;
 
 const PAYER = '0xPAYER000000000000000000000000000000000001';
 const AGENT = '0xAGENT000000000000000000000000000000000002';
@@ -72,6 +78,93 @@ test('construction: cosignThreshold without a cosigner is refused', () => {
     () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), cosignThreshold: usdc('1') }),
     /requires a cosigner/,
   );
+});
+
+test('construction: a cosigner without a threshold is refused, because the contract cannot store it', () => {
+  // The converse of the test above, and it is not symmetry for its own sake. On-chain
+  // F_COSIGN is derived from `cosigner != address(0)` and the threshold is a uint96 whose
+  // zero is meaningful, so there is no state for "a cosigner is named and nothing is
+  // gated". This model accepted one until v2, which made it MORE PERMISSIVE than the thing
+  // it specifies — the same failure class as the uint96 counter, found the same way, by
+  // asking what the contract can represent rather than what JavaScript can.
+  assert.throws(
+    () => createMandate({ id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), cosigner: BOSS }),
+    /requires a cosignThreshold/,
+  );
+  // Zero is the spelling that gates everything, and it must be accepted.
+  const all = createMandate({
+    id: 'all', payer: PAYER, spender: AGENT, perTxCap: usdc('10'), cosigner: BOSS, cosignThreshold: 0n,
+  });
+  assert.equal(evaluate(all, req(1n), { now: 1 }).reason, Denial.COSIGN_REQUIRED);
+});
+
+test('construction: the spender cannot be its own cosigner', () => {
+  // approveCosign authorises on `caller === mandate.cosigner` and nothing else, so this
+  // configuration lets the agent approve its own spend hash and then spend it. The gate
+  // becomes two transactions and no second party — not a weaker control, the absence of
+  // one. It is invisible in the mandate object, which is what makes it worth refusing.
+  assert.throws(
+    () =>
+      createMandate({
+        id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+        cosigner: AGENT, cosignThreshold: usdc('10'),
+      }),
+    /cannot be its own cosigner/,
+  );
+  // The payer cosigning for itself is the ordinary case and stays legal — it is what
+  // mandate 2 does on Arc today.
+  assert.doesNotThrow(() =>
+    createMandate({
+      id: 'ok', payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+      cosigner: PAYER, cosignThreshold: usdc('10'),
+    }),
+  );
+});
+
+test('construction: a cosign gate that can never fire is refused, measured against the whole policy', () => {
+  const MAX = (1n << 96n) - 1n;
+  const gate = (over) =>
+    createMandate({ id: 'g', payer: PAYER, spender: AGENT, cosigner: BOSS, ...over });
+
+  // The gate tests `amount > threshold` STRICTLY, so equality is dead: an amount both
+  // above the threshold and within a per-transaction cap of the same value cannot exist.
+  // Confirmed on Arc Testnet before it was ever fixed — a 50,000 spend against a 50,000
+  // threshold did not trip the gate (DESIGN.md:1272).
+  assert.throws(() => gate({ perTxCap: usdc('50'), cosignThreshold: usdc('50') }), /can never fire/);
+  // One base unit lower and the gate is alive, which is what makes the bound exact rather
+  // than merely conservative.
+  const live = gate({ perTxCap: usdc('50'), cosignThreshold: usdc('50') - 1n });
+  assert.equal(evaluate(live, req(usdc('50')), { now: 1 }).reason, Denial.COSIGN_REQUIRED);
+
+  // perTxCap is NOT the only ceiling. With no per-transaction cap the lifetime cap binds,
+  // and this shape passes both spellings of the naive `perTxCap < threshold` check because
+  // perTxCap is absent entirely.
+  assert.throws(() => gate({ totalCap: usdc('100'), cosignThreshold: usdc('100') }), /can never fire/);
+  // So does a window cap.
+  assert.throws(
+    () => gate({ windows: [win(DAY, usdc('40'), 12)], cosignThreshold: usdc('40') }),
+    /can never fire/,
+  );
+  // And it is a MINIMUM over the windows, not the first or the last of them.
+  assert.throws(
+    () => gate({ windows: [win(WEEK, usdc('900'), 7), win(DAY, usdc('40'), 12)], cosignThreshold: usdc('40') }),
+    /can never fire/,
+  );
+  // The minimum also crosses cap KINDS: a generous per-transaction cap does not rescue a
+  // threshold that the tightest window has already put out of reach.
+  assert.throws(
+    () => gate({ perTxCap: usdc('1000'), windows: [win(DAY, usdc('40'), 12)], cosignThreshold: usdc('100') }),
+    /can never fire/,
+  );
+
+  // The UNBOUNDED-AMOUNT case must still be accepted. A mandate bounded only by an expiry
+  // has no amount cap at all, so every threshold below the uint96 ceiling is reachable.
+  assert.doesNotThrow(() => gate({ expiresAt: 10_000, cosignThreshold: usdc('1000000') }));
+  // But the ceiling itself is not, because the contract refuses amounts above it outright
+  // — the bound exists even where the payer set none, and this is the term in the check
+  // that a model with arbitrary-precision integers has no reason to invent.
+  assert.throws(() => gate({ expiresAt: 10_000, cosignThreshold: MAX }), /can never fire/);
+  assert.doesNotThrow(() => gate({ expiresAt: 10_000, cosignThreshold: MAX - 1n }));
 });
 
 test('construction: window length must divide evenly into buckets', () => {
@@ -217,6 +310,34 @@ test('total lifetime cap blocks the spend that would cross it', () => {
   assert.equal(spend(m, req(usdc('50')), { now: 2 }).allowed, true); // exact fit
   assert.equal(m.totalSpent, usdc('150'));
   assert.equal(evaluate(m, req(usdc('0.000001')), { now: 3 }).reason, Denial.OVER_TOTAL_CAP);
+});
+
+test('the uint96 audit counter denies by name rather than overflowing, and only without a total cap', () => {
+  const MAX = (1n << 96n) - 1n;
+
+  // A window cap at the maximum so nothing cheaper binds first, and deliberately NO
+  // totalCap — the only shape that can reach the ceiling, because a lifetime cap is
+  // itself a uint96 and is consulted above it. Mirrors Bounds.t.sol.
+  const m = createMandate({
+    id: 'ceiling', payer: PAYER, spender: AGENT, windows: [win(DAY, MAX, 12)],
+  });
+  assert.equal(spend(m, req(1n), { now: 1 }).allowed, true);
+  assert.equal(m.totalSpent, 1n);
+
+  const d = evaluate(m, req(MAX), { now: 2 });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, Denial.TOTAL_SPENT_CEILING);
+
+  // One base unit less fits exactly, so what binds is the width of the counter and not
+  // an off-by-one in something cheaper.
+  assert.equal(evaluate(m, req(MAX - 1n), { now: 2 }).allowed, true);
+
+  // Given a lifetime cap, the identical request is refused for the truthful reason.
+  const capped = createMandate({
+    id: 'capped', payer: PAYER, spender: AGENT, totalCap: MAX, windows: [win(DAY, MAX, 12)],
+  });
+  assert.equal(spend(capped, req(1n), { now: 1 }).allowed, true);
+  assert.equal(evaluate(capped, req(MAX), { now: 2 }).reason, Denial.OVER_TOTAL_CAP);
 });
 
 test('recipient allowlist blocks anyone not named at grant time', () => {
@@ -633,6 +754,112 @@ test('headroom reports the binding constraint', () => {
   assert.equal(headroom(m, 1).maxSpendNow, usdc('100'), 'per-tx cap binds first');
   spend(m, req(usdc('100')), { now: 1 });
   assert.equal(headroom(m, 1).maxSpendNow, usdc('20'), 'total cap now binds');
+});
+
+// ------------------------------------------------- the joint ceiling (NEW IN v2)
+//
+// Six tests for one small function, because every one of them pins a way the
+// obvious implementation (`sum += headroom(m).maxSpendNow`) returns a confidently
+// wrong number rather than failing loudly.
+
+test('joint ceiling: one mandate agrees exactly with the single-mandate view', () => {
+  const m = createMandate({
+    id: 'j1', payer: PAYER, spender: AGENT,
+    perTxCap: usdc('100'),
+    windows: [win(DAY, usdc('500'), 12)],
+  });
+  // The property that makes the joint view trustworthy: it is not a separate
+  // opinion about a mandate, it is the same opinion summed. If these ever diverge
+  // the joint view has grown a rule the per-mandate view does not have.
+  assert.equal(headroomAcross([m], 1).maxJointSpendNow, headroom(m, 1).maxSpendNow);
+  assert.equal(headroomAcross([m], 1).payer, PAYER.toLowerCase());
+  assert.equal(headroomAcross([m], 1).count, 1);
+});
+
+test('joint ceiling: the overlap the per-mandate views cannot show', () => {
+  // The shape of the 2026-08-24 demonstration on Arc, with the caps chosen so the
+  // policy half equals what `spendable` reported there — two mandates, each
+  // reporting 90,000 base units, against one allowance of 90,000. What this model
+  // can show is that the policy sum is 180,000; that the true joint ceiling is
+  // 90,000 is the contract's clamp against allowance and balance, which this file
+  // has no token to perform. Both halves matter: the sum is what a caller would
+  // naively add up, and the clamp is what makes it a lie.
+  const a = createMandate({ id: 'j2a', payer: PAYER, spender: AGENT, perTxCap: 90_000n });
+  const b = createMandate({ id: 'j2b', payer: PAYER, spender: OTHER, perTxCap: 90_000n });
+  assert.equal(headroom(a, 1).maxSpendNow, 90_000n);
+  assert.equal(headroom(b, 1).maxSpendNow, 90_000n);
+  assert.equal(headroomAcross([a, b], 1).maxJointSpendNow, 180_000n);
+});
+
+test('joint ceiling: an unbounded term clamps at MAX_AMOUNT instead of overflowing', () => {
+  // `headroom()` reports null — "no cap on any axis the payer set" — for a mandate
+  // bounded only by an expiry. In Solidity the same case returns type(uint256).max,
+  // so `sum += policyHeadroom(id)` over two of these PANICS. Not remotely: two
+  // expiry-only grants from one payer is a two-line construction, which is what
+  // makes this the same failure class as the totalSpent cliff #10 fixed.
+  const spec = (id) => ({ id, payer: PAYER, spender: AGENT, expiresAt: 10_000n });
+  const a = createMandate(spec('j3a'));
+  const b = createMandate(spec('j3b'));
+  assert.equal(headroom(a, 1).maxSpendNow, null, 'unbounded on every axis the payer set');
+  assert.equal(headroomAcross([a, b], 1).maxJointSpendNow, 2n * MAX_AMOUNT);
+
+  // The other clamp path: a cap larger than a spend could ever be. Nothing rejects
+  // this at grant time — perTxCap is not checked against MAX_AMOUNT — so the cap is
+  // stored and `headroom` reports it faithfully. It is still not the largest single
+  // spend, because AmountTooLarge refuses anything above MAX_AMOUNT first.
+  const huge = createMandate({ id: 'j3c', payer: PAYER, spender: AGENT, perTxCap: 1n << 200n });
+  assert.equal(headroom(huge, 1).maxSpendNow, 1n << 200n, 'the view repeats the stored cap');
+  assert.equal(headroomAcross([huge], 1).maxJointSpendNow, MAX_AMOUNT, 'the joint view corrects it');
+
+  // And with every term bounded, the widest total the contract can be asked for —
+  // its array cap of 8, all unbounded — is nowhere near a uint256. This is the
+  // arithmetic that makes a saturating add unnecessary rather than merely unused.
+  const eight = Array.from({ length: 8 }, (_, i) => createMandate(spec(`j3d${i}`)));
+  const widest = headroomAcross(eight, 1).maxJointSpendNow;
+  assert.equal(widest, 8n * MAX_AMOUNT);
+  assert.ok(widest < 1n << 99n);
+  assert.ok(widest < (1n << 256n) - 1n);
+});
+
+test('joint ceiling: mandates held against different payers are refused, not summed', () => {
+  const a = createMandate({ id: 'j4a', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const b = createMandate({ id: 'j4b', payer: OTHER, spender: AGENT, perTxCap: usdc('100') });
+  assert.throws(() => headroomAcross([a, b], 1), /must share one payer/);
+  // Order does not matter — the payer is taken from the first element, so the
+  // reversed array must be refused for the same reason and not silently accept
+  // whichever payer happened to be named first.
+  assert.throws(() => headroomAcross([b, a], 1), /must share one payer/);
+  // Separately, each is a perfectly good single-payer request.
+  assert.equal(headroomAcross([a], 1).maxJointSpendNow, usdc('100'));
+  assert.equal(headroomAcross([b], 1).maxJointSpendNow, usdc('100'));
+});
+
+test('joint ceiling: naming the same mandate twice is refused', () => {
+  const a = createMandate({ id: 'j5', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  assert.throws(() => headroomAcross([a, a], 1), /named more than once/);
+  // The reason this is refused rather than deduplicated: the caller asked a
+  // question about a set they got wrong, and 200 is a more convincing answer than
+  // 100 to somebody who believes they hold two mandates. Deduplicating would
+  // return the right number to a caller still holding the wrong belief.
+  const b = createMandate({ id: 'j5b', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  assert.throws(() => headroomAcross([a, b, a], 1), /named more than once/);
+  assert.equal(headroomAcross([a, b], 1).maxJointSpendNow, usdc('200'));
+});
+
+test('joint ceiling: an empty set is answered, and dead mandates contribute zero', () => {
+  assert.deepEqual(headroomAcross([], 1), { payer: null, count: 0, maxJointSpendNow: 0n });
+
+  // Revoked and expired mandates must NOT throw — they are the ordinary contents of
+  // any real caller's list, and a view that refused them would be unusable exactly
+  // when a payer most wants to check what is still live.
+  const live = createMandate({ id: 'j6a', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const dead = createMandate({ id: 'j6b', payer: PAYER, spender: AGENT, perTxCap: usdc('100') });
+  const gone = createMandate({ id: 'j6c', payer: PAYER, spender: AGENT, expiresAt: 500n });
+  revoke(dead, PAYER);
+  assert.equal(headroomAcross([live, dead, gone], 1000).maxJointSpendNow, usdc('100'));
+  // Sanity: the expiry-only one was worth MAX_AMOUNT before it lapsed, so the zero
+  // above is the expiry doing the work and not the clamp silently failing.
+  assert.equal(headroomAcross([gone], 1).maxJointSpendNow, MAX_AMOUNT);
 });
 
 test('REGRESSION: a spend late in a sub-bucket is still counted K buckets later', () => {

@@ -185,6 +185,163 @@ contract CreationTest is Base {
         mm.createMandate(bytes32("e"), p);
     }
 
+    // ------------------------------------------- the cosign gate as a whole
+    //
+    // NEW IN v2. The two tests above check the flag against the cosigner ADDRESS, which
+    // is where v1 stopped. Enumerating the question properly — in how many ways can a
+    // mandate display a co-signature requirement and not have one? — turned up three
+    // more, and `getMandate` is honest about none of them: it returns a populated
+    // cosigner and a plausible threshold in every case. The changelist named only the
+    // third, and named it wrongly.
+
+    /// A threshold with no gate behind it. The field is stored, a reader sees a number,
+    /// and no spend is ever measured against it. Deliberately not folded into the
+    /// biconditional on the address, because zero is MEANINGFUL when F_COSIGN is set — it
+    /// means every spend needs a signature, since the gate tests `amount > threshold`
+    /// strictly and an amount is at least 1. So the threshold gets a one-directional rule
+    /// where the address gets an iff.
+    function test_createMandate_thresholdWithoutCosignFlag_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.cosignThreshold = usd(10); // F_COSIGN not set, cosigner still zero
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct1"), p);
+    }
+
+    /**
+     * The agent may not be its own cosigner — the worst of the three, and the one that
+     * was on no list anywhere.
+     *
+     * `approveCosign` authorises on `msg.sender == m.cosigner` and nothing else, so a
+     * mandate whose cosigner is its spender lets the agent approve its own spend hash and
+     * then spend it. Two transactions instead of one, and no second party anywhere. That
+     * is not a weaker control, it is the absence of one wearing its clothes, and it is
+     * exactly as invisible in `getMandate` as a supervised mandate would be.
+     *
+     * The distinction that makes this a rule rather than an over-reach: `cosigner ==
+     * payer` is legitimate and stays legal, because the payer is a second party to the
+     * agent. It is what live mandate 2 does on Arc today, so refusing it would have
+     * condemned a configuration this repository has receipts for.
+     */
+    function test_createMandate_spenderAsItsOwnCosigner_reverts() public {
+        MandateManager.MandateParams memory p = withCosign(simpleParams(), agent, usd(10));
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct2"), p);
+
+        // The payer cosigning for its own agent is the ordinary case.
+        bytes32 id = grant(withCosign(simpleParams(), payer, usd(10)));
+        assertEq(mm.getMandate(id).cosigner, payer);
+    }
+
+    /**
+     * The gate must be able to FIRE, measured against the whole policy.
+     *
+     * `spend` demands a signature when `amount > cosignThreshold`, strictly, so the gate
+     * is dead unless the policy permits at least one amount above the threshold:
+     *
+     *   effectiveMax = min(2^96 - 1, perTxCap if F_PER_TX, totalCap if F_TOTAL, every
+     *                      window cap)   and the grant is refused when
+     *   effectiveMax <= cosignThreshold
+     *
+     * WHY THE CHANGELIST'S CONDITION WAS WRONG TWICE. It proposed `perTxCap <
+     * cosignThreshold`. The comparison is backwards — equality is dead too, and this
+     * repository already held the receipt for that, at `DESIGN.md:1272`, where a 50,000
+     * spend against a 50,000 threshold did not trip the gate on Arc Testnet. And
+     * `perTxCap` is not the only ceiling, so the check misses whole families of dead
+     * configuration. `L3-VAULT.md` inherited the same error from the changelist.
+     */
+    function test_createMandate_deadCosignGate_perTxCapBoundaryIsExact() public {
+        MandateManager.MandateParams memory p = withCosign(simpleParams(), boss, usd(100));
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct3"), p); // perTxCap 100 == threshold 100: dead
+
+        // One base unit lower and the gate is alive, which is what makes the bound exact
+        // rather than merely conservative. A guard written with `<` would accept the case
+        // above and this one, and the difference between them is the entire point.
+        bytes32 id = grant(withCosign(simpleParams(), boss, usd(100) - 1));
+        bytes32 nonce = nextNonce();
+        bytes32 hash = mm.spendHash(id, agent, vendor, usd(100), REF, nonce);
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, hash));
+        mm.spend(id, vendor, usd(100), REF, nonce);
+    }
+
+    /// With no per-transaction cap the LIFETIME cap binds. This shape passes both
+    /// spellings of the naive check for the same reason: `perTxCap` is absent entirely,
+    /// so a condition phrased against it compares zero to a threshold and concludes the
+    /// gate is fine. Evaluated at `totalSpent == 0` because reachability asks whether the
+    /// gate can EVER fire, and a lifetime cap is loosest on the first spend.
+    function test_createMandate_deadCosignGate_lifetimeCapBinds() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.totalCap = usd(100);
+        p.flags = F_TOTAL;
+        p = withCosign(p, boss, usd(100));
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct4"), p);
+    }
+
+    /// And so does a window cap — as a MINIMUM over the windows, not the first or the
+    /// last of them, and the minimum crosses cap KINDS: a generous per-transaction cap
+    /// does not rescue a threshold the tightest window has already put out of reach.
+    function test_createMandate_deadCosignGate_windowCapBinds() public {
+        vm.startPrank(payer);
+
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct5"), withCosign(windowOnlyParams(DAY, usd(40), 12), boss, usd(40)));
+
+        // Two windows, the tighter one second, so a guard that read only `windows[0]`
+        // would let this through.
+        MandateManager.MandateParams memory p = emptyParams();
+        p.windows = new MandateManager.WindowParams[](2);
+        p.windows[0] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(900), buckets: 7});
+        p.windows[1] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(40), buckets: 12});
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct6"), withCosign(p, boss, usd(40)));
+
+        // Across kinds: perTxCap 1000 is irrelevant once a 40 window exists.
+        MandateManager.MandateParams memory q = emptyParams();
+        q.perTxCap = usd(1000);
+        q.flags = F_PER_TX;
+        q.windows = new MandateManager.WindowParams[](1);
+        q.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(40), buckets: 12});
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct7"), withCosign(q, boss, usd(100)));
+
+        vm.stopPrank();
+    }
+
+    /**
+     * The UNBOUNDED-AMOUNT case must still be accepted, and the ceiling term is why the
+     * check is not simply a loop over the caps the payer set.
+     *
+     * A mandate bounded only by an expiry has no amount cap at all, so every threshold
+     * below the uint96 ceiling is reachable and the grant is fine. But the ceiling ITSELF
+     * is not reachable, because `spend` refuses amounts above it outright with
+     * `AmountTooLarge` — the bound exists even where the payer set none. That term has no
+     * analogue in a specification with arbitrary-precision integers, which is precisely
+     * the kind of thing the reference model cannot be trusted to have invented on its
+     * own; it was added to `reference/policy.js` from this direction, not the reverse.
+     */
+    function test_createMandate_deadCosignGate_unboundedAmountIsStillAccepted() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.expiresAt = uint40(block.timestamp + 1 days);
+        p.flags = F_EXPIRY;
+
+        bytes32 id = grant(withCosign(p, boss, usd(1_000_000)));
+        assertEq(mm.getMandate(id).cosignThreshold, usd(1_000_000), "no amount cap: any real threshold is reachable");
+
+        vm.startPrank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct8"), withCosign(p, boss, type(uint96).max));
+
+        // And one below it is fine, so this boundary is exact too.
+        mm.createMandate(bytes32("ct9"), withCosign(p, boss, type(uint96).max - 1));
+        vm.stopPrank();
+    }
+
     function test_createMandate_allowlistFlagMismatch_reverts() public {
         MandateManager.MandateParams memory p = simpleParams();
         p.flags |= F_ALLOWLIST; // empty allowlist
@@ -302,10 +459,5 @@ contract CreationTest is Base {
         p.windows[3] = MandateManager.WindowParams({lengthSeconds: 30 days, cap: usd(2000), buckets: 30});
         bytes32 id = grant(p);
         assertEq(mm.getMandate(id).windowCount, 4);
-    }
-
-    // A tiny shim so the intent reads clearly at the call site above.
-    function vmic_expectBadConfig() private {
-        vm.expectRevert(MandateManager.BadConfig.selector);
     }
 }

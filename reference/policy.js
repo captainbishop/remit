@@ -64,6 +64,7 @@ const Denial = {
   OVER_PER_TX_CAP: 'OVER_PER_TX_CAP',
   OVER_WINDOW_CAP: 'OVER_WINDOW_CAP',
   OVER_TOTAL_CAP: 'OVER_TOTAL_CAP',
+  TOTAL_SPENT_CEILING: 'TOTAL_SPENT_CEILING',
   NONCE_ALREADY_USED: 'NONCE_ALREADY_USED',
   COSIGN_REQUIRED: 'COSIGN_REQUIRED',
   IDENTITY_NOT_HELD: 'IDENTITY_NOT_HELD',
@@ -209,6 +210,31 @@ function createMandate(spec) {
   if (cosignThreshold !== null && !cosigner) {
     throw new Error('createMandate(): cosignThreshold requires a cosigner');
   }
+  // And the converse, which this model accepted until v2 and the contract never could.
+  // On-chain, F_COSIGN is derived from `cosigner != address(0)` and the threshold is a
+  // plain uint96 whose zero is meaningful — "every spend needs a signature", since the
+  // gate tests `amount > threshold` strictly and amount is at least 1. There is no
+  // on-chain state for "a cosigner is named but nothing is gated", so a model that
+  // accepted one was describing a mandate that cannot exist. Spell it `cosignThreshold: 0`
+  // to gate everything; that is what the contract stores.
+  if (cosigner && cosignThreshold === null) {
+    throw new Error(
+      'createMandate(): a cosigner requires a cosignThreshold — use 0 to require a ' +
+        'signature for every spend, which is what the contract stores',
+    );
+  }
+  // The agent may not be its own cosigner. `approveCosign` authorises on
+  // `caller === mandate.cosigner` alone, so this configuration lets the spender approve
+  // its own spend hash and then spend it — the gate becomes two transactions and no
+  // second party. Worth refusing rather than documenting, because it is invisible in the
+  // mandate object: the cosigner field is populated and the threshold looks plausible.
+  // `cosigner === payer` stays legal and is the ordinary case.
+  if (cosigner && normalizeAddr(cosigner) === normalizeAddr(spender)) {
+    throw new Error(
+      'createMandate(): the spender cannot be its own cosigner — it could approve its ' +
+        'own spends, which is not a weaker control but the absence of one',
+    );
+  }
 
   // Grant-time refusals that mirror the contract's. Each of these is a configuration
   // the contract rejects outright, so a model that accepted them would be describing a
@@ -269,6 +295,41 @@ function createMandate(spec) {
   }
   if (windows.length > MAX_WINDOWS) {
     throw new Error(`createMandate(): at most ${MAX_WINDOWS} windows (gas bound)`);
+  }
+
+  // The co-signature gate must be able to fire. `evaluate` demands a signature when
+  // `amount > cosignThreshold`, strictly, so the gate is dead unless the policy permits
+  // at least one amount above the threshold. Compare against the largest single spend the
+  // WHOLE policy allows, not against any one field:
+  //
+  //   effectiveMax = min(MAX_AMOUNT, perTxCap, totalCap, every window cap)
+  //
+  // MAX_AMOUNT is in there because it is the bound that applies when nothing else does —
+  // a mandate bounded only by an expiry still caps amounts at the width of the on-chain
+  // uint96, so a threshold of MAX_AMOUNT is unreachable even with no caps at all. totalCap
+  // is evaluated at totalSpent = 0, which is right because reachability asks whether the
+  // gate can EVER fire and the lifetime cap is loosest on the first spend. Window caps
+  // enter as a minimum because the tightest one binds every spend.
+  //
+  // The obvious test, `perTxCap < cosignThreshold`, is wrong twice over: the comparison
+  // is backwards, since equality is dead too (`amount > threshold` and `amount <= perTxCap`
+  // cannot both hold when they are equal — confirmed on Arc Testnet, DESIGN.md:1272), and
+  // perTxCap is not the only ceiling, since `totalCap = 100` with `cosignThreshold = 100`
+  // and no per-transaction cap is equally dead.
+  if (cosignThreshold !== null) {
+    let effectiveMax = MAX_AMOUNT;
+    if (perTxCap !== null && BigInt(perTxCap) < effectiveMax) effectiveMax = BigInt(perTxCap);
+    if (totalCap !== null && BigInt(totalCap) < effectiveMax) effectiveMax = BigInt(totalCap);
+    for (const w of windows) {
+      if (BigInt(w.cap) < effectiveMax) effectiveMax = BigInt(w.cap);
+    }
+    if (effectiveMax <= BigInt(cosignThreshold)) {
+      throw new Error(
+        `createMandate(): the cosign gate can never fire — the policy permits at most ` +
+          `${effectiveMax} per spend and the threshold is ${cosignThreshold}, so no amount ` +
+          `is strictly above it. Lower the threshold or raise a cap.`,
+      );
+    }
   }
 
   return {
@@ -541,6 +602,20 @@ function evaluate(mandate, request, ctx) {
       cap: mandate.totalCap,
     });
   }
+  // The contract's audit counter is a uint96 and a BigInt has no such width, so the
+  // model has to carry the bound or it is more permissive than the thing it specifies
+  // — the same reasoning as MAX_AMOUNT above, applied to the CUMULATIVE total rather
+  // than to one amount. Reachable only when totalCap is null, because a lifetime cap
+  // is itself a uint96 and so binds in the check above. v1 of the contract had no
+  // equivalent: it panicked on the overflow instead of denying, and this model could
+  // not express a panic, which is how the divergence stayed invisible.
+  if (mandate.totalSpent + amount > MAX_AMOUNT) {
+    return deny(Denial.TOTAL_SPENT_CEILING, {
+      amount,
+      spent: mandate.totalSpent,
+      max: MAX_AMOUNT,
+    });
+  }
 
   // --- rolling windows ---
   const windowEffects = [];
@@ -646,10 +721,12 @@ function spend(mandate, request, ctx) {
  * spendable. On Ethereum a revocation is only economically final after minutes,
  * which is a real gap when the counterparty is an automated agent.
  *
- * NOTE FOR THE CONTRACT: MandateManager reverts with `NotPayer()` here even though the
- * spender is also permitted, so the error name is misleading. Left as-is rather than
- * renamed, because the name is part of the deployed ABI in every client that decodes
- * it; recorded in the README instead.
+ * NOTE FOR THE CONTRACT: v1 reverted with `NotPayer()` here even though the spender is
+ * also permitted, and four places in the repo recorded that the name was misleading
+ * while keeping it, because it was already in a deployed ABI. v2 renamed it to
+ * `NotAuthorised()` — v1's ABI is pinned at v1's address by the tag v1.0.0-arc-testnet,
+ * so a new deployment is free to be accurate. Two roles hold the authority; naming the
+ * error after one of them was the defect.
  */
 function revoke(mandate, caller) {
   const who = normalizeAddr(caller);
@@ -723,6 +800,105 @@ function headroom(mandate, now) {
   };
 }
 
+/**
+ * NEW IN v2. The joint ceiling across several mandates held against ONE payer.
+ *
+ * WHY THIS EXISTS. Every per-mandate view answers "what can this mandate move?"
+ * and none of them can answer "what can all of them move?", because the thing
+ * they share is not in any mandate: it is the payer's single ERC-20 allowance to
+ * the manager. On 2026-08-24 two live mandates on Arc each reported 90,000
+ * spendable against an allowance of exactly 90,000, and a 50,000 dry-run
+ * succeeded on both. Summing the two per-mandate answers gives 180,000, which is
+ * twice what the payer can actually lose. This does NOT fix that race — the race
+ * is inherent to layering per-mandate policy on one shared allowance — it makes
+ * the overlap a number you can read instead of an inference nobody makes.
+ *
+ * WHAT THE NUMBER MEANS, EXACTLY. The largest total that ONE spend from each
+ * named mandate could move right now. It is deliberately NOT total flow: a
+ * mandate with a rolling window permits repeated spends as buckets age out, so
+ * flow over any interval longer than an instant is unbounded by this figure.
+ *
+ * EACH TERM IS CLAMPED AT MAX_AMOUNT, and that is not defensive padding — it is
+ * the same correction #11 had to make to `effectiveMax`. `headroom()` reports
+ * `null` for a mandate bounded only by an expiry, meaning "no cap on this axis",
+ * but a spend from such a mandate is still refused above MAX_AMOUNT. So `null`
+ * over-reports, and an uncorrected sum inherits the over-report. Clamping first
+ * makes each term the true largest single spend, which has a second consequence
+ * worth stating because it is easy to lose: the sum can then no longer be made
+ * to overflow. The Solidity side caps the array at 8, so the widest possible
+ * total is 8 * (2^96 - 1) < 2^99, against a uint256 ceiling of 2^256. **Do not
+ * "harden" the addition with a saturating add.** A saturating add would give the
+ * same answers and would destroy the reason they are correct, which is that the
+ * terms are bounded, not that the sum is caught.
+ *
+ * WHAT IT OMITS, AND WHY THAT IS THE WHOLE DIFFERENCE FROM SOLIDITY. This model
+ * has no token, so it can only compute the policy half of the answer. The
+ * contract's `spendableAcross` finishes the job by intersecting this sum with
+ * `allowance(payer, manager)` and `balanceOf(payer)`, and it is that intersection
+ * that turns 180,000 into 90,000. A client running this model against a real
+ * chain must apply both clamps itself.
+ *
+ * TWO REFUSALS, AND ONE THE CONTRACT HAS THAT THIS DOES NOT.
+ * Mixed payers and duplicate ids throw, because both would return a confidently
+ * wrong number: there is no joint ceiling across two payers (they have separate
+ * allowances and separate balances, so no single clamp applies), and a repeated
+ * id double-counts headroom that exists once. Note that duplicates are the more
+ * dangerous of the two — mixing payers at least tends to produce an obviously
+ * odd figure, whereas naming the same mandate twice produces a plausible one.
+ * The contract additionally refuses arrays longer than 8, and that bound is
+ * deliberately NOT mirrored here. The rule being followed: bounds that constrain
+ * the state machine get mirrored, because they change which spends are legal
+ * (MAX_WINDOWS, MAX_BUCKETS and MAX_AMOUNT are all in this file for that
+ * reason); bounds that merely ration a read do not, because nothing downstream
+ * depends on them. The 8 exists to keep ~139 storage reads per mandate inside
+ * one call's gas budget, and JavaScript has no such budget. A caller with more
+ * than eight mandates does exactly what this function does — read
+ * `policyHeadroom` per id, clamp each at MAX_AMOUNT, add, then clamp the total
+ * by allowance and balance off chain.
+ */
+function headroomAcross(mandates, now) {
+  if (!Array.isArray(mandates)) {
+    throw new Error('headroomAcross(): mandates must be an array');
+  }
+  // An empty request is answered, not refused. Zero mandates can move zero, and
+  // reading `mandates[0].payer` to find the payer of nothing would throw a
+  // TypeError that says nothing about policy.
+  if (mandates.length === 0) {
+    return { payer: null, count: 0, maxJointSpendNow: 0n };
+  }
+
+  const payer = mandates[0].payer;
+  const seen = new Set();
+  let total = 0n;
+
+  for (const m of mandates) {
+    if (m.payer !== payer) {
+      throw new Error(
+        `headroomAcross(): all mandates must share one payer — ${mandates[0].id} is held ` +
+          `against ${payer} and ${m.id} against ${m.payer}. There is no joint ceiling ` +
+          `across payers: each has its own allowance and its own balance, so no single ` +
+          `clamp applies to the sum. Call once per payer.`,
+      );
+    }
+    if (seen.has(m.id)) {
+      throw new Error(
+        `headroomAcross(): mandate ${m.id} named more than once. Its headroom exists ` +
+          `once and would be counted twice, which returns a plausible wrong number ` +
+          `rather than an obvious one.`,
+      );
+    }
+    seen.add(m.id);
+
+    // `null` means "unbounded on every axis the payer set", which is still bounded
+    // by MAX_AMOUNT at spend time. See the note above on why this clamp, and not a
+    // saturating add, is what makes the total safe.
+    const one = headroom(m, now).maxSpendNow;
+    total += one === null || one > MAX_AMOUNT ? MAX_AMOUNT : one;
+  }
+
+  return { payer, count: mandates.length, maxJointSpendNow: total };
+}
+
 module.exports = {
   USDC,
   DAY,
@@ -745,4 +921,5 @@ module.exports = {
   revoke,
   approveCosign,
   headroom,
+  headroomAcross,
 };

@@ -5,6 +5,11 @@ layers. Task #5. Sourced entirely from Arc's own documentation via the arc-docs 
 claim below cites the page it came from, and the section at the end lists what the docs do
 **not** say, because that is as load-bearing as what they do.
 
+> *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — which is what
+> they were written against and where they are still exact. v2 work has shifted them; see
+> FORGE.md.*
+
 **Headline: gas abstraction on Arc is not one mechanism but three, and the one that fits
 Remit is the one I was not looking for.** Separately, this research turned up a documented
 Arc feature that changes the privacy roadmap materially and was absent from every document

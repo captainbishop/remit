@@ -6,6 +6,11 @@ Remit is the protocol. A **mandate** is the object it issues — the term of art
 standing, bounded authority over someone else's account, kept because it is already
 correct. Throughout this document, "a mandate" means one grant of authority.
 
+> *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — which is what
+> they were written against, what Blockscout verified, and where they are still exact. v2
+> work has shifted them; see FORGE.md.*
+
 Status: reference implementation verified; Solidity compiles and passes its full Forge
 suite; gas measured against real Arc USDC; **live on Arc Testnet since 2026-08-24**, one
 mandate granted and one spend executed; unaudited. See
@@ -429,7 +434,7 @@ mandate or the ERC-20 allowance independently stops all spending.
 executable model of every decision the contract makes. It is the source of truth
 because it is the artifact that has actually been executed.
 
-`reference/policy.test.js` is 46 tests over that model: construction guards, each
+`reference/policy.test.js` is 56 tests over that model: construction guards, each
 cap and gate, named attack tests, and property-based fuzzers. It includes a greedy
 adversary that aims spends at bucket boundaries across `K ∈ {2,3,4,6,12,24}` × 25
 seeds × 200 steps, checked against a brute-force exact ledger. This is the primary
@@ -446,7 +451,7 @@ FORGE.md. As of 2026-08-24 it compiles and all 140 pass.
 ## Honest status
 
 The reference model is real, executed, and passing: `node --test
-reference/policy.test.js` reports 46 tests, 46 pass, 0 fail. It found six genuine
+reference/policy.test.js` reports 56 tests, 56 pass, 0 fail. It found six genuine
 cap-bypass bugs during development, four in the window algorithm and two in the
 credential gate, each of which is now a named regression test.
 
@@ -790,6 +795,14 @@ counts as an EOA for the Memo path is also unresolved and matters for smart-acco
 
 Before this is trusted with money: run the suite at `--profile deep`, exercise the untouched
 paths on testnet, resolve the three documented soft spots as decisions, and get it audited.
+Three of those four have since happened — the deep profile has been run, the live phase is
+closed at 31 receipts covering all five state-changing functions, and all three soft spots
+are resolved the strict way in v2 (which turned up two more, both fixed). Two paths are
+still unexercised on chain and the phase was closed knowing it: the identity gate and the
+credential gate, both blocked on external facts rather than on effort — no ERC-8004 identity
+is minted to our agent wallet, and the only real attestation on Arc Testnet carries a
+failing response of 1. The audit is the fourth item, and it is the one that was always going
+to be a hard requirement.
 
 Two factual questions remain open and should not be presented as settled. Whether
 Circle's `agent-wallet-policy` already implements equivalent caps off-chain in its
@@ -1008,12 +1021,15 @@ Two incidental findings, both worth keeping. Gate structs are written **conditio
 grant costs of 127,834 for M3 against 151,036 and 151,072 for M4 and M5. And line 407
 *already* reverts `BadConfig` when `minResponse == 0`, commented that 0 would accept a failed
 attestation. The contract therefore already refuses one gate configuration that could never
-fire, which is the same principle the proposed unreachable-cosign-threshold guard would
-apply — so v2 extends an existing pattern rather than inventing one. (That guard was written
-here and in `CHANGELIST.md` as `perTxCap < cosignThreshold`, which is off by one: line 492 is
-strict, so equality is dead too, as this document goes on to demonstrate with a live receipt
-260 lines below. The correct form, and the case where `F_PER_TX` is unset, are stated in
-`CHANGELIST.md`.)
+fire, which is the same principle the unreachable-cosign-threshold guard applies — so v2
+extended an existing pattern rather than inventing one, and this paragraph is the reason the
+guard was easy to argue for. (That guard was written here and in `CHANGELIST.md` as `perTxCap
+< cosignThreshold`, which is off by one: line 492 is strict, so equality is dead too, as this
+document goes on to demonstrate with a live receipt 260 lines below. **v2 implements it as
+`effectiveMax <= cosignThreshold` where `effectiveMax = min(2^96 - 1, perTxCap, totalCap,
+every window cap)`**, and the boundary is pinned one base unit either side in
+`test/Creation.t.sol`. Implementing it also turned up two dead-gate configurations that
+neither this document nor `CHANGELIST.md` had listed — see the README.)
 
 One further assumption confirmed rather than discovered: `ownerOf` on a nonexistent token
 reverts with `ERC721NonexistentToken(uint256)` (`0x7e273289`), so Arc's identity registry is
@@ -1046,6 +1062,24 @@ of per-mandate caps, or to accept that concurrent delegates will occasionally re
 `spendableAcross(bytes32[])` view intersecting several mandates' headroom with the one
 allowance would make the constraint visible, and is on the v2 changelist — but it would not
 fix the race, only expose it.
+
+**Built in v2, and it needed three refusals and a clamp the changelist did not anticipate.**
+`spendableAcross(bytes32[] mandateIds)` now returns `min(Σ min(policyHeadroom(id), 2^96 - 1),
+allowance(payer, manager), balanceOf(payer))` for up to `MAX_JOINT = 8` mandates. The paragraph
+above still stands unaltered on the substance: it exposes the overlap and does not fix the
+race. What was not anticipated is how many ways a joint view can return a *plausible* wrong
+number, which is worse than reverting. Summing `policyHeadroom` naively **panics** on two
+expiry-only mandates from one payer, because that function correctly returns
+`type(uint256).max` when the payer set no amount bound while `spend` still refuses anything
+above `type(uint96).max` — so the fix is to clamp each term at the largest single spend that
+could actually occur, after which the sum provably cannot overflow (`8 × (2^96 − 1) < 2^99`).
+Mixed payers, duplicate ids and unknown ids all revert, by `MixedPayers`, `DuplicateMandate`
+and `UnknownMandate` — the first two are new errors, and they are the first in this contract to
+report a badly formed *question* rather than a refused action. Revoked and expired mandates
+contribute zero without reverting, because they are the ordinary contents of any real list. The
+divergence worth noting: `spendable` returns 0 for an unknown id and the joint view refuses
+one, deliberately, because a single zero is unambiguous while one bad id among eight is
+invisible inside a total that still looks right.
 
 #### `ref` carries a commitment for 240 gas, and needs no contract change
 
@@ -1117,8 +1151,20 @@ from the agent's own key. A third party is still refused: the vendor address get
 
 Which makes the error's *name* wrong. `NotPayer()` is thrown on a path the spender may
 legitimately take, so it describes the check inaccurately to anyone reading a decoded revert.
-`NotAuthorised()` would be truthful. It is on the v2 changelist and it is cosmetic — but a
-misleading error name is a real cost paid by whoever debugs against it.
+`NotAuthorised()` is truthful, and **v2 has renamed it** — the selector moves from
+**`0x1435e357`** to **`0x1648fd01`**, which is an ABI change, so a client that decodes v2's
+reverts must be rebuilt. The v1 figure above is not superseded by that: `0x1435e357` is what
+the live contract at `0x3744E93B9e796E05CB66311d897559B6F3860196` returns today and will
+return for as long as it runs, and this table is a record of v1's receipts.
+
+Two things about how that change got made are worth more than the change itself. The reason
+for keeping the wrong name was that it was already in a deployed ABI — a real reason, and one
+that **expired the moment the tag `v1.0.0-arc-testnet` existed**, because the tag pins v1's ABI
+at v1's address and v2 is a different contract at a different address. The blocker was
+bookkeeping, not compatibility, and one `git tag` dissolved it. And the fix was filed as
+"cosmetic" for weeks, which undersold it: a misleading error name is a real cost paid by
+whoever debugs against it at 3am, and the cheapness of a change is not the same as the
+smallness of its consequence.
 
 #### The evidence is a changed selector, not a changed balance
 
@@ -1416,7 +1462,8 @@ functions.**
 #### Why views read below the floor, and why that misled
 
 The report treats the two kinds of call differently, and the whole table shows it. Sort the
-fifteen reported functions by whether they change state:
+fifteen reported functions by whether they change state — fifteen is v1's surface; v2 adds a
+sixteenth, `spendableAcross`, which is unmeasured until the re-run and is a view:
 
 The five state-changing functions have **minima** of 23,773 (`revoke`), 23,979
 (`approveCosign`), 24,677 (`withdrawCosign`), 24,898 (`spend`) and 28,630 (`createMandate`) —
