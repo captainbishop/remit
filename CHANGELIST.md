@@ -693,6 +693,29 @@ document that discovers a hazard about the contract gets a line in `THREAT-MODEL
 same commit**, even when it handles the hazard correctly for its own reader. Nothing in the
 repository required that, which is precisely why it happened three times.
 
+**#16c added four more findings the same day — F23 to F26, taking the document to twenty-six —
+and not one of them belongs on this list.** That is the result, not an omission. The sweep read
+the three files that decide what a green suite is evidence *of* (`test/Base.t.sol` and both
+mocks) and then checked the other ten test files for vacuity, and what it found was two missing
+*trust boundaries* rather than two missing guards: §2 had never named the ERC-8004 registries as
+a dependency Circle can replace under a contract whose registry addresses are `immutable` (F23,
+fixed in `THREAT-MODEL.md` §2 in the same commit, as the corrective above now requires), and
+two mock divergences from Arc that are comments in `test/` rather than changes to
+`contracts/` (F25, F26). The one item with a code consequence is **F24**, and it has none yet:
+`createMandate`'s registry guard compares against `address(0)`, so a non-zero address with no
+code passes it, and whether the resulting decode failure inside `try` reaches the bare `catch`
+is not settleable by reading source. Both possible answers are denials, so nothing here risks
+funds; the four-line test that decides it belongs with **F13's** grant-time gate validation,
+which is already on this list, rather than as an entry of its own.
+
+**Worth recording because it is the one number on this list that got better by being
+re-derived.** The vacuity half of #16c found nothing: all 157 test functions assert something,
+no `vm.expectRevert()` anywhere in the suite is bare, and every one of the 31 custom errors
+`MandateManager` declares is expected by at least one test. The 157 was also counted from the
+source for the first time — `grep -cE '^    function (test|testFuzz|invariant)'` across the
+eleven files sums to exactly the 157 `forge test` reports, so the figure this repository quotes
+in a dozen places now has two independent derivations instead of one runner's word.
+
 ## What does not go in
 
 **No privacy mechanism inside `MandateManager` beyond the allowlist root.** This

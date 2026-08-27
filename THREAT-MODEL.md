@@ -30,6 +30,14 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > only safe while nothing edits the document, and *this* document exists in order to be
 > edited. Prefer the function name; when a line number is unavoidable, quote the line's
 > text beside it so a mismatch is self-announcing rather than silent.
+>
+> **The anchor was re-checked on 2026-08-26 when #16c added F23–F26, and it still holds:**
+> `git diff 92445dd -- contracts/MandateManager.sol` is empty, so the anchor blob and the
+> working tree are byte-identical and `v2:NNN` is unambiguous either way. Every number that
+> sweep added was printed out of `git show 92445dd:contracts/MandateManager.sol` before being
+> written down, which caught one wrong citation carried in from a working note — `v2:856-863`
+> for the 6-decimal truncation note, which actually lives at `v2:1077-1084`; 856-863 is the
+> credential `try`/`catch` body and has nothing to do with decimals.
 
 ## Why this document exists
 
@@ -93,6 +101,20 @@ matters because the L3 vault design in `L3-VAULT.md` makes a contract the payer.
 runtime-enforced blocklist and an upgradeable implementation. A blocklisted payer or
 recipient makes a spend revert. That is the correct outcome for Remit (nothing moves, no
 cap consumed, no nonce burned) but it is not something Remit controls.
+
+**Both ERC-8004 registries are in the trust boundary, and Remit can never be pointed at
+different ones.** `identityRegistry` and `validationRegistry` are `immutable`, set once in the
+constructor, in a contract with no upgrade path — while the live Arc Testnet ValidationRegistry
+was found on 2026-08-24 to sit behind an ERC-1967 proxy, so the code behind that fixed address
+can be replaced without Remit knowing. Arc publishes the three registry addresses in a tutorial
+rather than in its contract-address reference, with no stated stability or upgradeability
+policy. The bound on the damage is worth knowing precisely, because it is narrower than it
+sounds: the gates are conjunctive, so a replaced or hostile registry can only cause a gated
+mandate to behave like an **ungated** one. It cannot raise a cap, extend an expiry, add a
+recipient to the allowlist, or move one unit more than the amount bounds already allow. A payer
+who is unwilling to accept that should not set `F_IDENTITY` or `F_CREDENTIAL` at all; the caps,
+the allowlist, the expiry and `approve(usdc, remit, 0)` depend on no registry whatsoever. See
+F23.
 
 **The validator named in a credential gate is fully trusted, including about time.**
 `_checkCredential` checks that the attestation came from the payer-named validator and
@@ -171,17 +193,21 @@ false or overstated claims in comments and documents rather than defects in code
 for a primitive whose entire product is *legibility of authority* is not a lesser
 category.
 
-**Twenty-two findings, counted from the headings below rather than asserted** — `grep -c
-"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 22, which is the check, not the
+**Twenty-six findings, counted from the headings below rather than asserted** — `grep -c
+"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 26, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
 long the search ran. They partition exactly, which is more useful than the total: **two are
-already fixed in code** (F1, F5, both in #22); **one was fixed in this document as it was
-being written** (F22, a missing trust boundary); **eight have a fix that changes v2's
-behaviour** (F3, F9, F11, F13, F15, F16, F17, F19); **six are comment rewrites** inside the
-contract that change nothing it does (F4, F7, F8, F10, F14, F21); **three are documentation**
-(F2, F6, F18); **one needs a decision before it can be sized** (F20, whether the contract
-gains a sixth state-changing function, and its first that mutates a mandate after creation);
-and **one needs nothing** (F12). Triage:
+already fixed in code** (F1, F5, both in #22); **two were fixed in this document as it was
+being written** (F22 and F23, both missing trust boundaries — §2 gained its sixth and seventh
+in one day); **eight have a fix that changes v2's behaviour** (F3, F9, F11, F13, F15, F16,
+F17, F19); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F10,
+F14, F21 in the contract, F25 and F26 in the mocks — and the last two are in `test/`, so they
+are free of the frozen-metadata constraint that governs `contracts/`); **three are
+documentation** (F2, F6, F18); **one needs a decision before it can be sized** (F20, whether
+the contract gains a sixth state-changing function, and its first that mutates a mandate after
+creation); **one needs a four-line test before it can be sized at all**, because one of its two
+possible answers cannot be settled by reading source (F24); and **one needs nothing** (F12).
+Triage:
 
 | Fix before v2 freezes | Cost | Needs a decision first |
 | :--- | :--- | :--- |
@@ -203,15 +229,23 @@ and **one needs nothing** (F12). Triage:
 | F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
 | F21 `ZeroRecipient`'s Arc citation | comment only | — |
 | ✅ F22 §2's missing self-payment boundary | **DONE 2026-08-26**, in this document, in the commit that found it | — |
-| §5 coverage gaps | 9 tests, 1 testnet transaction | fold into #14, which needs the gas number anyway |
+| ✅ F23 §2's missing ERC-8004 registry boundary | **DONE 2026-08-26**, in this document — §2's seventh boundary; 0 lines of Solidity, and none available anyway since the addresses are `immutable` | — |
+| F24 codeless-but-non-zero registry | a 4-line test, which decides whether there is anything else to fix | **what Solidity 0.8.28 does with a decode failure inside `try` — not settleable by reading source, and both answers are denials** |
+| F25 `MockUSDC` self-transfer log | comment only, in `test/` | — |
+| F26 mock revert shapes vs. the bare `catch` | comment only, in `test/` | — |
+| §5 coverage gaps | **10 tests, 3 testnet transactions**, enumerated from §5 rather than summed from memory. This row previously said "9 tests, 1 testnet transaction" and undercounted the testnet side by two — the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list
 risks funds in the sense of letting a spend exceed a granted cap; the window search found
-no such case in 3.0M sequences. What this list is mostly about is the gap between what a
+no such case in 3.0M sequences. **F23 is the closest thing to a counterexample and it is not
+one** — a replaced ERC-8004 registry can make a gated mandate behave like an ungated one, which
+widens the mandate back out to its caps and cannot take it past them, because the gates only
+ever refuse. What this list is mostly about is the gap between what a
 payer is *shown* and what is *enforced*, which is the thing Remit sells — and F15 extends
 that gap to a second party, since the payer is not the only participant who is shown
 something, while F19 extends it to a second *reader*, since a reconciler diffing `Spend`
-events against Arc's system log is shown a discrepancy that is not one.
+events against Arc's system log is shown a discrepancy that is not one. F25 extends it once
+more, to the most credulous reader of all: a passing test.
 
 ---
 
@@ -1065,6 +1099,216 @@ time, at the payer's own expense, discoverably. And Arc's *"zero-value transfers
 log"* rule cannot bite, because `v2:617` refuses `amount == 0` before any transfer is
 reached.
 
+---
+
+### F23 — The two ERC-8004 registries are a trust boundary §2 never names, and Remit cannot re-point them
+
+**Severity: medium as documentation, none as code. Status: FIXED in this document, 2026-08-26. Confidence: certain about the omission, certain about the immutability, second-hand about the proxy.**
+
+`identityRegistry` and `validationRegistry` are `immutable` (`v2:168-169`, assigned once at
+`v2:361-362`). §2 names Circle as a trust boundary *because USDC has an upgradeable
+implementation*, and names a credential validator as a trust boundary *because it can lie,
+including about time*. Neither sentence covers the registries themselves, and until today the
+strings `registry`, `8004`, `proxy` and `1967` appeared **nowhere in §2**.
+
+They belong there, because the registries are the one dependency Remit calls that is neither
+Circle's asset nor the payer's chosen counterparty. `MockRegistries.sol`'s own header records
+that on 2026-08-24 the live Arc Testnet ValidationRegistry at
+`0x8004Cb1BF31DAf7788923b405b754f57acEB4272` was found sitting **behind an ERC-1967 proxy and
+can therefore be upgraded under us**. That fact was discovered by inspection, by us. It is not
+published: Arc documents the three registry addresses **only in a tutorial**
+(`/arc/tutorials/register-your-first-ai-agent`), and **not** in
+`/arc/references/contract-addresses`, which is the notes-bearing reference table that does
+carry USDC, the CREATE2 factory, Multicall3 and Permit2. There is no stability guarantee, no
+upgradeability statement, and no deprecation policy for these addresses anywhere in Arc's
+documentation. A payer relying on a gate is relying on a tutorial.
+
+**What a hostile or replaced registry can actually do, which is the part worth bounding.**
+Both gates are conjunctive and can only ever *refuse* a spend or *fail to refuse* one. So a
+compromised registry can make `ownerOf` return the spender and `getValidationStatus` return a
+fresh passing attestation about the expected agent, and the effect is that **a gated mandate
+degrades to an ungated one**. It cannot raise a cap, extend an expiry, reach the allowlist, or
+move a single unit beyond what the amount bounds already permit. That is a genuinely
+reassuring bound and it should be stated rather than left to be inferred: the ERC-8004 gates
+are a *narrowing* layer, and their failure mode is to widen back to the caps, never past them.
+
+**What makes it worth a finding anyway is that the address is immutable in a contract with no
+upgrade path.** If a registry is replaced with something adversarial, Remit cannot be pointed
+at a new one — there is no setter, by design (§3), and no proxy, by design
+(`IMMUTABILITY.md`). The payer's only remedies are the two they already have: never set a
+gate, or revoke. Both are real, and neither is discoverable from the current documentation.
+
+**Fixed by the new §2 paragraph above**, which is that section's **seventh** boundary — F22
+added the sixth an hour earlier, which is its own comment on how complete §2 felt before either
+sweep ran. The paragraph states the immutability, states the proxy, states that Arc documents
+these addresses in a tutorial rather than a reference, and states the bound: a hostile registry
+degrades a gated mandate to an ungated one and cannot do more. The residue is a
+`README.md`/`DESIGN.md` note that the two gate flags carry a dependency the other four do not,
+which folds into F18's documentation pass.
+
+---
+
+### F24 — The grant-time registry guard is an address check, not a code check
+
+**Severity: low. Status: open, and one of its two possible answers is not something this pass can settle. Confidence: certain about the guard, explicitly unresolved about the consequence.**
+
+`createMandate` refuses a gate whose registry is missing — `v2:447` for `F_CREDENTIAL`,
+`v2:448` for `F_IDENTITY`, both `BadConfig` — and `Creation.t.sol:498`
+(`test_createMandate_gateWithoutRegistry_reverts`) pins both halves against a manager
+constructed with `address(0), address(0)`. That is the right guard and it is tested.
+
+It compares against `address(0)`. A registry address that is **non-zero and has no code** —
+one digit wrong, an address from a different chain, a contract that was never deployed there —
+passes it, and the mandate is created looking healthy. Every gated spend then reaches
+`try validationRegistry.getValidationStatus(...)` or `try identityRegistry.ownerOf(...)` on a
+codeless address, where the `CALL` succeeds and returns nothing.
+
+**Whether the bare `catch` catches that, I do not know, and will not guess.** The external
+call does not revert, so what fails is the ABI decode of the expected return — a six-component
+tuple at `v2:852-854`, a single `address` at `v2:827` — and whether Solidity 0.8.28 routes a
+decode failure into the `catch` clause or reverts the calling frame uncaught decides which
+error the payer sees. Both outcomes are denials, so no funds are at risk either way; the
+difference is `CredentialMissing()` and `IdentityNotHeld()` versus an opaque revert with no
+selector. **No test covers it**, because `Base.t.sol:113` constructs the manager with two live
+mocks and `Creation.t.sol:499` is the only other construction, using zero.
+
+The test that settles it is four lines and belongs in #23:
+`new MandateManager(address(token), address(0xdead), address(0xdead))`, grant a gated mandate
+(which now succeeds, since `0xdead != address(0)`), spend, and assert whichever revert
+actually comes back. Note the same class applies to `_usdc`, which `v2:359` zero-checks and
+does not code-check — a codeless non-zero USDC makes every spend fail at `v2:713` instead.
+
+**Why this is only low severity, and why it is still worth writing down.** It is a deployment
+error, not an attack, and a deployment error that shows up on the first gated spend. But it
+composes with the two findings either side of it: F13 (no grant-time validation, so the typo
+survives until a spend) and F23 (the address is immutable, so the remedy is a redeploy). The
+three together are the argument for F13's fix being an *eager* check rather than a lazy one.
+
+---
+
+### F25 — `MockUSDC` emits a `Transfer` on a self-payment; Arc does not, and that is precisely the point F19 turns on
+
+**Severity: none as code, medium as a trap. Status: open, one comment in `test/mocks/MockUSDC.sol`. Confidence: certain.**
+
+`MockUSDC._move` emits `Transfer(from, to, amount)` **unconditionally** at
+`test/mocks/MockUSDC.sol:106` — including when `from == to`. Arc's `usdc-system-events`
+reference states the opposite for the system emitter:
+*"Self-transfers (`from == to`) emit no log."*
+
+Taken on its own that is an unremarkable mock simplification. It is a finding because of what
+F19 asks for next. F19's whole claim is that a self-payment is invisible in the transfer log
+and must be reconciled from `getMandate(mandateId).totalSpent` instead. The obvious way to pin
+that claim is a test — and **a test written against `MockUSDC` would pass while demonstrating
+the opposite of production.** It would observe a `Transfer` on a self-spend, and the mock
+would be answering a question about Arc with our own code.
+
+This is the sharpest instance in the repository of the limit §5 already states in general
+about `MockUSDC`, and unlike the general statement it names the exact test somebody is about
+to write. The fix is a comment in the mock's header, beside the existing note about the
+18-decimal dual view being unmodelled, saying that the unconditional emit diverges from Arc on
+self-transfers and that no log-counting assertion about a self-payment means anything here.
+`test/mocks/MockUSDC.sol` is not `contracts/`, so this costs nothing against the frozen
+metadata hash.
+
+---
+
+### F26 — The mocks' revert shapes do not match production's, and the bare `catch` arms are the only reason that is currently harmless
+
+**Severity: informational. Status: open, one comment. Confidence: certain, and this is the weakest finding in the document.**
+
+`MockRegistries.sol:88` declares `error NoSuchRequest(bytes32 requestHash)` and reverts with it
+for an unknown request. Its **own header** records that the live registry does something
+different: on 2026-08-24 three non-existent request hashes were queried directly and all three
+reverted with the standard `Error(string)` selector `0x08c379a0` and the string `"unknown"`.
+Two different revert encodings, one asserted-equivalent path.
+
+Every test passes because both arms are bare — `catch { }` at `v2:859` (revert
+`CredentialMissing`) and `v2:829-831` (set `owner = address(0)`, then deny at `v2:833`) — and a
+bare catch is indifferent to revert data. So **the bare catch is load-bearing for the mocks'
+fidelity, and nothing in either file says so.**
+
+Two things keep this informational rather than real, and both are worth stating because the
+first is the opposite of what I assumed before checking. Narrowing either arm to
+`catch Error(string memory)` — an obvious legibility improvement an auditor might well suggest
+— would **fail loudly**, not silently: the mock's custom error would no longer be caught, it
+would propagate, and the gate tests would report the wrong error. The suite defends itself
+here. And `tag` and `responseHash` are the two tuple components the mock invents
+(`tag: "compliance"` hardcoded, `responseHash` a `keccak256` of its own arguments), and
+`v2:853` discards both with unnamed placeholders, so their fidelity cannot matter.
+
+The residue is one comment in `MockRegistries.sol` recording that the divergence is deliberate
+and that the bare catch is what absorbs it — so the next person to tidy the catch knows what
+they are trading.
+
+---
+
+### What a green suite cannot mean, and four assumptions checked rather than assumed
+
+Derived by reading the three files that decide what 157 passing tests are evidence *of* —
+`test/Base.t.sol` (361 lines), `test/mocks/MockUSDC.sol` (108), `test/mocks/MockRegistries.sol`
+(129) — rather than by re-reading the tests themselves.
+
+Four limits are structural, and no amount of test-writing moves them:
+
+- **USDC is Arc's gas token and the mock has no gas coupling at all.** Foundry pays gas in
+  ETH from a balance the mock does not model, so the entire class *"a spend succeeds and leaves
+  the payer unable to fund their next transaction"*, and its mirror *"the delegate's own
+  balance is consumed by gas until it cannot submit"*, is unreachable in CI by construction —
+  not untested, untestable here.
+- **The native/ERC-20 dual view is deliberately unmodelled**, and the mock's header says so
+  with its reason (`MandateManager` only ever touches the ERC-20 interface). So the premise of
+  the ARC NOTE at `v2:1077-1084` — one underlying balance, viewed at 18 decimals natively and 6
+  through the façade, so `balanceOf` truncates — has no local counterexample and can only be
+  established on Arc. The same note bounds how much that costs, which is why this is a limit and
+  not a finding: the truncation is one-directional (`spendable` can under-report by up to
+  1e-6 USDC and never over-report, so an agent trusting it at worst skips a spend it could have
+  made), and `spendable` is **the only place the contract reads a balance at all** — the `spend`
+  path never does, so no amount of truncation can change what a policy permits. An earlier draft
+  of this bullet cited `v2:856-863` for that note, which is the credential `try`/`catch` body and
+  has nothing to do with decimals; the number came from a summary instead of from the file.
+- **No test stages a future-dated `lastUpdate`**, so §2's staleness boundary — the
+  `nowTs > lastUpdate &&` conjunct at `v2:880`, which makes a future-dated attestation fresh
+  forever — has no executing counterexample. Derived from all ten `setStatus` call sites: one
+  in `Base.t.sol` at `block.timestamp - 100` and nine in `Gates.t.sol` at `block.timestamp` or
+  a local `attestedAt` assigned from it. Every one is present or past.
+- **The ERC-8004 ValidationRegistry has a third state neither the mock nor the live probe
+  covers.** Arc documents a **two-step** flow — the agent owner calls `validationRequest`, then
+  the validator calls `validationResponse` — so a `requestHash` can be *requested and
+  unanswered*. `MockValidationRegistry` models a binary `set` flag, and the 2026-08-24 live
+  probe used three hashes that had never been requested at all. Neither is the pending state.
+
+And four assumptions that were checked and hold, recorded because a sweep that only reports
+defects gives no way to tell a verified assumption from an unexamined one:
+
+- **`getValidationStatus`'s return tuple matches Arc's published ABI exactly.** Six
+  components, same order, same types: `(address validatorAddress, uint256 agentId, uint8
+  response, bytes32 responseHash, string tag, uint256 lastUpdate)` in Arc's tutorial ABI, and
+  identically at `v2:151-156`, with `v2:853` skipping positions four and five as unnamed
+  placeholders in the right slots. **This is the assumption a mock is structurally incapable of
+  testing** — `MockRegistries` implements our own declaration, so a wrong order would agree
+  with itself and every gate test would pass while decoding garbage on Arc. It was the highest
+  consequence item in this sweep and it is correct.
+- **The pending state cannot pass the gate**, whichever way the live registry answers. A zero
+  validator denies at `v2:863`; the requested validator with `response = 0` denies at `v2:879`,
+  because `v2:563` refuses `minResponse == 0` at grant time. That guard is the one doing the
+  work here, and its stated reason — the comment on its own line, and
+  `Creation.t.sol:487`'s test name, both amount to *"0 would accept a failed attestation"* — is
+  correct and does not mention this second consequence. Worth adding to it: the same line also
+  makes an unanswered request unspendable.
+- **The infinite-approval divergence cannot be observed.** `MockUSDC:90-91` skips the allowance
+  decrement for `type(uint256).max`, claiming to match Circle's implementation, which is
+  unverified against Arc. It cannot matter: `2^256-1` minus any `uint96` still exceeds every
+  cap, so the allowance term in `spendable` and `policyHeadroom` is never the binding minimum
+  either way. Finite allowances *are* exercised — nine explicit `approve` sites across
+  `ArcParity`, `Idempotency` and `Views`, including two at `0`.
+- **The constructor's zero-address asymmetry is deliberate and right.** `_usdc` is refused at
+  zero (`v2:359`, pinned by `Creation.t.sol:514`); the registries are accepted at zero and
+  refused only when a gate needs one (`v2:447-448`). A manager with no registries is a
+  perfectly good manager for ungated mandates, and forcing two addresses on a deployment that
+  will never gate anything would be worse. Likewise `MockUSDC.burnFrom` emitting
+  `Transfer(from, address(0))` while bypassing `_move`'s zero-address refusal **matches** Arc,
+  where burns happen only through the precompile.
+
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
 Two kinds of gap are listed together because a reader deciding how much weight to put on
@@ -1131,6 +1375,51 @@ could still be hiding there.
   one gap in this document that **no test can close**: it needs one transaction on Arc
   Testnet against the real token, `cast send` plus `cast receipt --json`, counting logs.
   F19 holds either way; only the size of the audit hole moves.
+- **A future-dated `lastUpdate`, which no test stages** — so §2's sharpest statement about the
+  validator boundary, that an attestation dated in the future skips the freshness check at
+  `v2:880` and stays fresh forever, has no executing counterexample. Derived from all ten
+  `setStatus` call sites; every one is present or past. One ordinary Foundry test closes it,
+  and it should assert the surprising direction: warp *backwards* relative to the attestation
+  and watch `maxStaleness` stop applying.
+- **The ValidationRegistry's pending state.** Arc documents a two-step flow, so a `requestHash`
+  can be requested and unanswered — a state `MockValidationRegistry`'s binary `set` flag cannot
+  express, and one the 2026-08-24 live probe did not reach, since those three hashes had never
+  been requested at all. §4 argues it must deny whichever way the registry answers; that
+  argument is sound and it is still an argument. One `validationRequest` on Arc Testnet with no
+  response, then one `cast call`, converts it into an observation.
+
+**And one thing this pass looked for and did not find, which bounds how much the gaps above
+can be hiding.** The ten test files were swept for *vacuity* rather than for adversary surface,
+on the reasoning that a test body has no adversary — the only way it can hurt you is by
+passing without asserting anything. Four mechanical checks, all derived from the files:
+
+- **157 `test_*`/`testFuzz_*`/`invariant_*` declarations counted from source**, distributed
+  `Creation` 34, `Bounds` 26, `Views` 22, `Gates` 18, `Cosign` 17, `Windows` 14, `Idempotency`
+  13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4, `Base` 0. That total matches the
+  runner's reported 157 exactly, which is the first time the count has been established
+  **independently of `forge`'s own output** rather than quoted from it.
+- **Zero vacuous bodies.** Every one of the 157 contains at least one assertion or one denial
+  helper: 287 assertion calls (202 `assertEq`, 39 `assertTrue`, 27 `assertFalse`, 10
+  `assertGt`, 8 `assertLe`, 3 `assertLt`, 1 `assertApproxEqAbs`), 56 `payReverts`, 7
+  `trySpend`, 5 `assertRevertedWith`, 5 `expectEmit`.
+- **Zero bare `vm.expectRevert()`.** Of 69 textual occurrences, one is the shared helper's
+  parameterised form in `Base.t.sol:318` and one is inside a *comment*; the remaining 67 all
+  name a specific error — 56 as `MandateManager.<Error>.selector` and 11 via `abi.encode*`,
+  which pins the arguments too. The comment is `Cosign.t.sol:333-335`, and it is warning
+  against exactly this hazard in exactly these terms: without the expiry, that test *"would
+  still revert and would still pass a bare `vm.expectRevert()` — while proving nothing about
+  the cosign gate."* Somebody had already thought about this axis, in writing, before it was
+  swept.
+- **All 31 custom errors declared in `MandateManager.sol` are expected by at least one test.**
+  No orphan error, checked by enumerating the declarations and grepping each name across
+  `test/`.
+
+**The first version of that sweep reported nineteen false positives, and the reason is worth
+recording because it is the grep somebody will re-run.** Searching test bodies for
+`expectRevert` under-reports badly, because most denials in this suite route through
+`Base.t.sol`'s `payReverts` helper, which contains no such string. Nineteen perfectly
+well-asserted tests looked empty. A vacuity check has to know the harness's vocabulary, or it
+measures the harness instead of the tests.
 
 ## 6. Method, and the enumeration behind §3
 
@@ -1185,19 +1474,42 @@ the same commit, even when the discovering document handles it correctly for its
 Nothing in the repository currently requires that, which is why it has now happened three
 times.
 
-**What has not been swept:** the actor-versus-actor matrix is now complete for the delegate,
-for third parties, for the **co-signer** and for the **recipient**. None of the eleven test
-files or two mocks has been swept, and the plan is deliberately not to sweep them equally:
-`test/mocks/MockUSDC.sol`, `test/mocks/MockRegistries.sol` and `test/Base.t.sol` carry the
-trust assumptions that bound what a green suite is able to mean, while the other ten are test
-bodies where the question is vacuity — an assertion that cannot fail, an `expectRevert` with
-no selector — rather than adversary surface. **There is no deploy script and there never has
-been:**
+**What has not been swept:** the actor-versus-actor matrix is complete for the delegate, for
+third parties, for the **co-signer** and for the **recipient**, and as of 2026-08-26 the
+Solidity surface is complete too — all eleven test files and both mocks have now been read,
+deliberately not equally. `test/mocks/MockUSDC.sol`, `test/mocks/MockRegistries.sol` and
+`test/Base.t.sol` were read in full, because they carry the trust assumptions that bound what a
+green suite is able to mean; that produced F23, F24, F25, F26 and the two lists under *"What a
+green suite cannot mean"*. The other ten were swept for **vacuity** rather than adversary
+surface — a test body has no adversary, so the only way it can hurt you is by passing without
+asserting anything — and that produced no findings at all, which is reported in §5 as a result
+rather than omitted as a non-event. **There is no deploy script and there never has been:**
 `git log --all --diff-filter=A --name-only` shows no `.s.sol` path and no `script/`
 directory anywhere in the repository's history, because v1 was deployed by hand with
 `forge create`. An earlier version of this paragraph was wrong on both counts, saying "the
 four other Solidity files" when there are thirteen, and implying a deploy script existed to
 be swept.
+
+**How the trust-assumption sweep was run, and the two moves that produced everything in it.**
+Neither was a search for bugs in the mocks; a mock has no users. The question was *what does a
+passing test prove about Arc*, which turns every simplification in a mock into a claim, and
+`MockUSDC`'s own header is a model for the practice by naming the one it makes most loudly (the
+18-decimal dual view, unmodelled, with the reason). The first move was to **read each mock
+against the platform documentation rather than against the contract** — which is how the
+`getValidationStatus` tuple got checked against Arc's published ABI, an assumption no test in
+this repository can reach, since the mock implements our own declaration and would agree with a
+wrong one. The second was to ask, of every guard, *what the guard actually compares* — which
+turned `Creation.t.sol`'s well-tested `address(0)` registry check into F24 the moment the
+question became "and what about an address with no code".
+
+**The correction owed to the first attempt, since this document is about method.** The vacuity
+sweep was run once with a grep that under-reported nineteen tests as assertionless, because it
+did not know that `payReverts` is where 56 of the suite's 67 revert expectations live. It was
+caught by disbelief at the result rather than by rigour — the list contained
+`test_zeroAmount_reverts`, which cannot plausibly be assertionless — and that is a weaker
+control than it should be. The general lesson is the one §5 now records: an automated check over
+a codebase with a harness has to be told the harness's vocabulary, or it silently measures the
+wrong thing and reports a clean-looking number either way.
 
 ---
 
