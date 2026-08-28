@@ -79,6 +79,34 @@ const Denial = {
   CREDENTIAL_WRONG_AGENT: 'CREDENTIAL_WRONG_AGENT',
 };
 
+/**
+ * Refusal codes `approveCosignFor` can raise that `evaluate` cannot, and the reason they are
+ * NOT in `Denial`.
+ *
+ * NEW IN v2 (F17). `Denial` is the set of reasons a SPEND can be refused, mirrored 1:1 by the
+ * contract's errors, and every value in it is reachable from `evaluate`. None of these four is.
+ * Folding them in would put entries in an enum that the function the enum describes can never
+ * produce — the same "displayed but dead" defect that `createMandate` now refuses in three
+ * other places, so it is not a defect this model gets to commit itself.
+ *
+ * Every OTHER refusal `approveCosignFor` raises reuses a `Denial` value verbatim, and that
+ * reuse is load-bearing rather than cosmetic: it is what lets a test assert that a request
+ * with one permanent defect is refused with the SAME code by both functions.
+ */
+const ApprovalRefusal = {
+  // The contract's BadConfig(): F_COSIGN unset, so there is no gate to approve against.
+  BAD_CONFIG: 'BAD_CONFIG',
+  // The contract's NotCosigner().
+  NOT_COSIGNER: 'NOT_COSIGNER',
+  // The contract's BadDeadline(validUntil), covering all four bounds on `validUntil`: the two
+  // clock-relative ones from F16 and the two mandate-relative ones from F17. One code for all
+  // four because the fix is the same in every case — send a different deadline.
+  BAD_DEADLINE: 'BAD_DEADLINE',
+  // The contract's CosignNotRequired(amount, threshold). The one F17 refusal that is not about
+  // an approval being unconsumable; see the note in `approveCosignFor`.
+  COSIGN_NOT_REQUIRED: 'COSIGN_NOT_REQUIRED',
+};
+
 const DAY = 86_400;
 const WEEK = 7 * DAY;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -807,11 +835,44 @@ function revoke(mandate, caller) {
  *      deadline leaves F16 advisory — the agent that builds the transaction would simply
  *      pre-fill the maximum.
  *
- * Deliberately NOT here yet: F17's refusals (revoked or expired mandate, an amount at or
- * below the threshold, a zero amount or recipient). Those belong in both this function and
- * the contract's, in the same change, and the contract does not have them yet. Adding them
- * to the model first would make the model stricter than the thing it specifies, which is
- * the one direction a reference model must never drift.
+ * NEW IN v2 (F17): an approval that no spend could ever consume is refused rather than stored.
+ * The conditions were derived from `evaluate` rather than from the list of four this comment
+ * used to promise, because that list was wrong by omission — it missed a consumed nonce, both
+ * permanent caps, the uint96 ceiling and the allowlist. Deriving found twelve conditions where
+ * prose had found four, which is the argument for deriving.
+ *
+ * THE HARDER HALF WAS DECIDING WHAT NOT TO REFUSE. Three conditions that `evaluate` denies are
+ * RECOVERABLE, and mirroring them here would be a mistake in the one direction that actually
+ * hurts: an approval refused for a condition that later clears makes a legitimate large payment
+ * unapprovable until the cosigner is chased a second time, which for a payments primitive is a
+ * liveness failure of our own making. They are:
+ *
+ *   - `notBefore` in the future. Passes with the clock. Approving ahead of a start date is the
+ *     ordinary case for a scheduled payment, not an error.
+ *   - A full rolling window. The sharpest of the three, because the window arithmetic is the
+ *     most tempting to mirror and the least safe to: `windowUsage` FALLS as buckets age out, so
+ *     an amount refused now fits later with nothing else changed.
+ *   - The ERC-8004 identity and credential gates. Recoverable by a third party the cosigner does
+ *     not control. There is a second, structural reason visible only in this model: mirroring
+ *     them would force `approveCosignFor` to take `ctx.resolveIdentityOwner` and
+ *     `ctx.resolveCredential`, i.e. to consult live registry state before agreeing to store an
+ *     approval. The contract's shape says the same thing in gas — two external staticcalls on
+ *     the approval path.
+ *
+ * WHAT THE MIRRORED ORDER BUYS, stated exactly, because the obvious version of the claim is
+ * false. It is NOT "these two functions always agree on which refusal to raise": they cannot,
+ * since the recoverable conditions this one skips sit BETWEEN the permanent ones it keeps, so a
+ * request that is both over `perTxCap` and behind a missing credential gets CREDENTIAL_MISSING
+ * from `evaluate` and OVER_PER_TX_CAP from here. The true claim is narrower: FOR A REQUEST WHOSE
+ * ONLY DEFECT IS ONE OF THE MIRRORED PERMANENT CONDITIONS, BOTH FUNCTIONS RAISE THE SAME CODE.
+ * One defect at a time, which is also the only case a cosigner could act on. The nonce check
+ * sitting ahead of the caps is part of that and is not free to move.
+ *
+ * AND WHAT IT DOES NOT BUY. F17 stops dead approvals being CREATED. It cannot collect the ones
+ * already in the Map, and it cannot notice a live approval that goes dead afterwards — the
+ * mandate is revoked, or the nonce is consumed by some other spend. `evaluate` remains the only
+ * thing that decides whether an approval is honoured, and that is the correct division: this
+ * function refuses what is provably useless at approval time, and nothing more.
  *
  * @param {object} mandate  the mandate, mutated on success
  * @param {string} caller   must be the cosigner
@@ -820,10 +881,33 @@ function revoke(mandate, caller) {
  * @returns {string} the spend hash that was approved
  */
 function approveCosignFor(mandate, caller, request, ctx) {
-  if (!mandate) throw new Error('approveCosignFor(): unknown mandate');
-  if (!mandate.cosigner) throw new Error('approveCosignFor(): mandate has no cosigner');
+  // Refusals carry a `code` so a test can compare them against `evaluate`'s denial reasons.
+  // `ctx.now` is the one throw below with no code, and deliberately: it is a harness mistake,
+  // not a policy outcome, and the contract has no analogue because `block.timestamp` cannot be
+  // forgotten. Everything else the contract can revert with, this can name.
+  const refuse = (code, message) => {
+    const err = new Error(`approveCosignFor(): ${message}`);
+    err.code = code;
+    return err;
+  };
+
+  // Reuses `evaluate`'s code rather than getting its own, and unlike `ctx.now` this one is a
+  // real policy outcome: the contract reverts `UnknownMandate()` here, in this position, as its
+  // first check, because a typo'd id gives an empty struct whose cosigner is the zero address —
+  // and answering `NotCosigner` to that is true and useless. Carrying the code was missed on
+  // the first pass; a mutation run over this function caught it, because the guard beneath it
+  // refuses the same input for the wrong reason and so hid the omission.
+  if (!mandate) throw refuse(Denial.UNKNOWN_MANDATE, 'unknown mandate');
+  // Configuration before authorisation, matching the contract's `F_COSIGN == 0` check ahead of
+  // its `msg.sender != m.cosigner`. The order carries the whole answer: on a mandate with no
+  // cosign gate, NOT_COSIGNER would be technically true — nobody is null's cosigner — and would
+  // send the reader looking for a key that does not exist, when the truth is that nothing on
+  // this mandate is gated and no approval is needed by anyone.
+  if (!mandate.cosigner) {
+    throw refuse(ApprovalRefusal.BAD_CONFIG, 'mandate has no cosigner');
+  }
   if (normalizeAddr(caller) !== mandate.cosigner) {
-    throw new Error('approveCosignFor(): only the cosigner may approve');
+    throw refuse(ApprovalRefusal.NOT_COSIGNER, 'only the cosigner may approve');
   }
   if (!ctx || ctx.now === undefined) {
     throw new Error('approveCosignFor(): ctx.now is required to bound the deadline');
@@ -832,16 +916,125 @@ function approveCosignFor(mandate, caller, request, ctx) {
   const now = BigInt(ctx.now);
   const validUntil = BigInt(request.validUntil ?? 0);
   if (validUntil <= now || validUntil > now + MAX_COSIGN_TTL) {
-    throw new Error(
-      `approveCosignFor(): validUntil ${validUntil} must be strictly after ${now} and no ` +
-        `later than ${now + MAX_COSIGN_TTL} (now + MAX_COSIGN_TTL)`,
+    throw refuse(
+      ApprovalRefusal.BAD_DEADLINE,
+      `validUntil ${validUntil} must be strictly after ${now} and no later than ` +
+        `${now + MAX_COSIGN_TTL} (now + MAX_COSIGN_TTL)`,
+    );
+  }
+
+  // ---- F17: this must name a spend `evaluate` could accept ---------------------------------
+  // Order mirrors `evaluate` so identical arguments produce the identical code. Only PERMANENT
+  // refusals appear; the three recoverable ones and why they are absent are in the notes above.
+
+  // Liveness first, and ahead of the two mandate-relative deadline bounds added below on
+  // purpose: for a mandate that has already expired, any legal `validUntil` is necessarily past
+  // `expiresAt` too, so checking the deadline first would answer "your deadline is wrong" when
+  // the truth is "this mandate is dead". Sending the reader to fix the wrong thing is worse than
+  // not refusing at all.
+  //
+  // `revoked` is one-way — `revoke` only ever sets it true — so this can never stop holding.
+  // Same for `expiresAt`, which is fixed at creation and only recedes further into the past.
+  // Exclusive bound, matching `evaluate`.
+  if (mandate.revoked) throw refuse(Denial.REVOKED, 'the mandate is revoked');
+  if (mandate.expiresAt !== null && now >= mandate.expiresAt) {
+    throw refuse(Denial.EXPIRED, `the mandate expired at ${mandate.expiresAt}`);
+  }
+
+  const recipient = request.recipient;
+  if (!recipient || normalizeAddr(recipient) === ZERO_ADDRESS) {
+    throw refuse(Denial.ZERO_RECIPIENT, 'the recipient is the zero address');
+  }
+  // The allowlist is fixed at creation in the contract and has no mutator, so absence is
+  // permanent. F20 asks whether a payer-only REMOVE-only mutator should exist; it would not
+  // weaken this, since removal shrinks the set and a recipient absent today can never become
+  // present.
+  if (mandate.allowlist !== null && !mandate.allowlist.has(normalizeAddr(recipient))) {
+    throw refuse(Denial.RECIPIENT_NOT_ALLOWED, `${recipient} is not on the allowlist`);
+  }
+
+  const amount = BigInt(request.amount ?? 0);
+  if (amount <= 0n) throw refuse(Denial.ZERO_AMOUNT, 'the amount is zero');
+  if (amount > MAX_AMOUNT) {
+    throw refuse(Denial.AMOUNT_TOO_LARGE, `the amount ${amount} exceeds ${MAX_AMOUNT}`);
+  }
+
+  // A consumed nonce is consumed for good, so this approval could only ever meet
+  // NONCE_ALREADY_USED. Checked HERE, ahead of the caps, because that is where `evaluate` checks
+  // it — the position is not arbitrary and moving it would silently break the parity claimed
+  // above. This is also the condition a cosigner is least placed to notice: the agent supplies
+  // the nonce, and an agent that supplies a spent one is asking for a signature on a payment
+  // that cannot happen.
+  if (request.nonce === undefined || request.nonce === null || request.nonce === '') {
+    throw new Error('approveCosignFor(): nonce is required');
+  }
+  if (mandate.usedNonces.has(request.nonce)) {
+    throw refuse(Denial.NONCE_ALREADY_USED, `nonce ${request.nonce} is already used`);
+  }
+
+  // `perTxCap` is fixed at creation. `totalSpent` only ever grows, so headroom only ever
+  // shrinks and a shortfall now is a shortfall forever — which is exactly what makes these two
+  // safe to refuse and the rolling windows unsafe.
+  if (mandate.perTxCap !== null && amount > mandate.perTxCap) {
+    throw refuse(Denial.OVER_PER_TX_CAP, `${amount} exceeds the per-transaction cap`);
+  }
+  if (mandate.totalCap !== null && mandate.totalSpent + amount > mandate.totalCap) {
+    throw refuse(Denial.OVER_TOTAL_CAP, `${amount} exceeds the remaining lifetime cap`);
+  }
+  if (mandate.totalSpent + amount > MAX_AMOUNT) {
+    throw refuse(Denial.TOTAL_SPENT_CEILING, 'the lifetime total would exceed 2^96 - 1');
+  }
+
+  // ---- F17: and it must name a spend that NEEDS a co-signature ------------------------------
+  // The only refusal here that is not about consumability. `evaluate` consults the approval Map
+  // solely when `amount > cosignThreshold`, so at or below the threshold this approval would sit
+  // in the Map, cost the cosigner a transaction, and never be read — the payment goes through
+  // with or without it. Refused because of what it would let the cosigner believe: that they had
+  // gated something. Inclusive comparison, because the threshold itself needs no signature.
+  //
+  // Note this is guarded on `cosignThreshold !== null` for form only. `createMandate` forces the
+  // threshold non-null whenever a cosigner is named, and the absence of a cosigner was already
+  // refused at the top, so the null branch is unreachable — kept explicit rather than relying on
+  // that coupling holding.
+  if (mandate.cosignThreshold !== null && amount <= mandate.cosignThreshold) {
+    throw refuse(
+      ApprovalRefusal.COSIGN_NOT_REQUIRED,
+      `${amount} is at or below the threshold ${mandate.cosignThreshold}, so no signature is ` +
+        `required and this approval would never be read`,
+    );
+  }
+
+  // ---- F17: two deadline bounds relative to the mandate, not the clock ----------------------
+  // Refuse rather than clamp, for F16's reason: a deadline the model quietly moved is a deadline
+  // the cosigner did not agree to.
+  //
+  // An approval that dies at or before the mandate starts spans only the stretch in which
+  // `evaluate` denies NOT_YET_VALID, so it is unconsumable for its whole life. This is the
+  // mandate-relative twin of that condition and NOT a `notBefore` guard: approving ahead of a
+  // start date stays legal, it just has to outlive the start.
+  if (validUntil <= mandate.notBefore) {
+    throw refuse(
+      ApprovalRefusal.BAD_DEADLINE,
+      `validUntil ${validUntil} is at or before the mandate's notBefore ${mandate.notBefore}, ` +
+        `so no spend could ever fall inside it`,
+    );
+  }
+  // And the stretch of an approval that outlives the mandate is authority that cannot be
+  // exercised. Left unbounded, a 30-day approval on a mandate expiring tomorrow shows the
+  // cosigner a month of authority and means a day of it. The cost is that a cosigner cannot pass
+  // `now + MAX_COSIGN_TTL` blindly and has to read `expiresAt` first, which is the intended
+  // direction of travel for this whole finding.
+  if (mandate.expiresAt !== null && validUntil > mandate.expiresAt) {
+    throw refuse(
+      ApprovalRefusal.BAD_DEADLINE,
+      `validUntil ${validUntil} outlives the mandate's expiresAt ${mandate.expiresAt}`,
     );
   }
 
   const hash = spendHash({
     mandate,
-    recipient: request.recipient,
-    amount: request.amount,
+    recipient,
+    amount,
     ref: request.ref ?? '',
     nonce: request.nonce,
   });
@@ -1002,6 +1195,8 @@ module.exports = {
   MAX_COSIGN_TTL,
   MAX_AMOUNT,
   Denial,
+  // NEW IN v2 (F17). Kept out of Denial on purpose — see its own comment for why.
+  ApprovalRefusal,
   ZERO_ADDRESS,
   usdc,
   formatUsdc,

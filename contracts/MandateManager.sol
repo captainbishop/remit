@@ -405,6 +405,15 @@ contract MandateManager {
     /// silently moving a co-signer's deadline would make the value they signed and the value
     /// stored disagree, which is the defect this repository has now refused three times.
     error BadDeadline(uint40 validUntil);
+    /// NEW IN v2 (F17). The one refusal in `approveCosignFor` that is NOT about an approval
+    /// that can never be consumed — this approval is merely never CONSULTED, because `spend`
+    /// only reads the mapping when `amount > m.cosignThreshold`. The spend it names would go
+    /// through without it. That is refused because of what the co-signer believes they are
+    /// doing: they think they are gating a payment that is not gated, and a control someone
+    /// believes they exercised is worse than one they know they do not have. Carries both
+    /// numbers so the reply says which side of the line the amount fell on, rather than
+    /// leaving the co-signer to fetch the threshold themselves to find out.
+    error CosignNotRequired(uint256 amount, uint96 threshold);
     error IdentityNotHeld();
     error IdentityTransferred();
     error CredentialMissing();
@@ -1028,16 +1037,57 @@ contract MandateManager {
      *
      * @param validUntil The timestamp this approval dies AT, exclusive. The co-signer's
      * choice, bounded below by `block.timestamp` (a deadline already past would be born dead)
-     * and above by `MAX_COSIGN_TTL`. See F16 on that constant for why both bounds exist.
+     * and above by `MAX_COSIGN_TTL`. See F16 on that constant for why both bounds exist. F17
+     * adds two further bounds relative to the mandate itself: it may not die at or before
+     * `m.notBefore`, and it may not outlive `m.expiresAt`.
      * @return hash The spend hash now approved. Returned rather than only logged so a
      * co-signer's own transaction receipt carries the one value `withdrawCosign` needs — F12
      * is that neither party can enumerate outstanding approvals, and this is the cheap half.
      *
-     * What this deliberately does NOT do is refuse an approval that can never be consumed: a
-     * revoked or expired mandate, or an amount at or below the threshold, or a zero amount or
-     * recipient. Those are F17, they are next, and they are separable precisely because they
-     * add no parameters — the reason F15 and F16 had to land together is that both rewrote
-     * this signature, and F17 does not.
+     * F17 (BELOW) REFUSES AN APPROVAL THAT NO `spend` COULD EVER CONSUME. An earlier revision
+     * of this comment listed four such conditions — revoked mandate, expired mandate, amount
+     * at or below the threshold, zero amount or recipient — and said they were next. The list
+     * was wrong by omission, and the way it was wrong is the reason the guards below are
+     * derived from `spend` rather than from that sentence: the real set is every condition on
+     * which `spend` reverts *permanently*. Four more were found that way — a nonce already
+     * consumed, an amount over `perTxCap`, an amount over the remaining `totalCap` headroom,
+     * and the `uint96` audit-counter ceiling — and the allowlist makes five, since
+     * `_allowlist` is written only in `createMandate` and has no mutator, so a recipient
+     * absent from it now is absent forever.
+     *
+     * THE HARDER HALF WAS DECIDING WHAT NOT TO REFUSE, and it is a safety question rather
+     * than a scope one. A guard here that rejects an approval a `spend` could later have
+     * consumed does not fail safe: it makes a legitimate large payment unapprovable, which
+     * for a payments primitive is a liveness failure caused by our own caution. So a
+     * condition qualifies only if it can never stop holding. Three do not, and are
+     * deliberately absent:
+     *
+     * - `nowTs < m.notBefore` (`NotYetValid`). Time moves; the mandate starts later. Approving
+     *   ahead of a mandate's start is a legitimate thing for a co-signer to do.
+     * - The rolling window caps (`OverWindowCap`). A window's used total falls as buckets age
+     *   out, so an amount refused now can fit later. This is the sharpest of the three: the
+     *   window arithmetic is the most tempting to mirror and the least safe to.
+     * - The ERC-8004 identity and credential gates. A credential can be refreshed and a
+     *   validation response can be raised, so both are recoverable states.
+     *
+     * The cost is roughly three extra cold `SLOAD`s — `totalCap`'s slot, the allowlist entry
+     * and the nonce entry — on a call a human sends by hand, rarely, to authorise the largest
+     * payments the mandate allows. That is the right side of the trade.
+     *
+     * The ordering below mirrors `spend`'s, and the claim that buys has to be stated exactly,
+     * because the obvious version of it is false. It is NOT "these two functions always agree
+     * on which error to raise": they cannot, since the conditions this one skips sit *between*
+     * the ones it keeps, so a request that is both over `perTxCap` and behind a stale
+     * credential gets `CredentialStale` from `spend` and `OverPerTxCap` from here. The true
+     * claim is narrower and is what the parity test asserts: **for a request whose only defect
+     * is one of the mirrored permanent conditions, both functions raise the same error.** One
+     * defect at a time, which is also the only way a co-signer could act on the answer.
+     * The nonce check's position ahead of the caps is part of that and is not free to move.
+     *
+     * What F17 does NOT fix is the storage nobody is obliged to clean: an approval left
+     * unconsumed still sits in the mapping until `withdrawCosign` removes it. F17 stops new
+     * dead approvals being CREATED; it cannot collect the ones a passing spend never reached.
+     * See `withdrawCosign` for the same shape.
      *
      * This still requires the co-signer to send a transaction. An EIP-712 signature variant
      * would be better UX — the approver signs off-chain and the agent submits it — and it is
@@ -1067,6 +1117,76 @@ contract MandateManager {
         if (validUntil <= nowTs || uint256(validUntil) > nowTs + MAX_COSIGN_TTL) {
             revert BadDeadline(validUntil);
         }
+
+        // ---- F17: this must name a spend that `spend` could accept -------------------
+        // Order mirrors `spend` so identical arguments produce the identical error. Only
+        // PERMANENT refusals appear here; see the notes above this function for the three
+        // recoverable ones (notBefore, window caps, ERC-8004 gates) and why mirroring them
+        // would turn our caution into somebody's stuck payment.
+        //
+        // The mandate's liveness comes first, and it comes before the two deadline bounds
+        // added below, on purpose: for a mandate that has already expired, `validUntil` is
+        // necessarily past `m.expiresAt` too, so checking the deadline first would answer
+        // "your deadline is wrong" when the truth is "this mandate is dead". A revert that
+        // sends the reader to fix the wrong thing is a worse answer than no revert.
+        if (m.revoked) revert Revoked();
+        // `m.revoked` is one-way — `revoke` only ever writes true — so this can never stop
+        // holding. Same for expiry, which is fixed at creation and only recedes further into
+        // the past. Exclusive bound, matching `spend`.
+        if (m.flags & F_EXPIRY != 0 && nowTs >= m.expiresAt) revert Expired();
+
+        if (recipient == address(0)) revert ZeroRecipient();
+        // `_allowlist` is written only in `createMandate` and this contract has no mutator for
+        // it, so absence is permanent. F20 is an open question about adding a payer-only
+        // REMOVE-only mutator, which would not weaken this: removal shrinks the set, so a
+        // recipient absent today can never become present.
+        if (m.flags & F_ALLOWLIST != 0 && !_allowlist[mandateId][recipient]) revert RecipientNotAllowed();
+
+        if (amount == 0) revert ZeroAmount();
+        if (amount > type(uint96).max) revert AmountTooLarge();
+        uint96 amount96 = uint96(amount);
+
+        // `_usedNonce` is write-once-true, so a consumed nonce is consumed for good and this
+        // approval could only ever meet `NonceAlreadyUsed`. Checked HERE, ahead of the caps,
+        // because that is where `spend` checks it — this position is not arbitrary and moving
+        // it would silently break the error parity claimed above.
+        if (_usedNonce[mandateId][nonce]) revert NonceAlreadyUsed();
+
+        // `perTxCap` is fixed at creation. `totalSpent` only ever grows, so headroom only ever
+        // shrinks and a shortfall now is a shortfall forever — which is what makes both of
+        // these safe to refuse and the rolling windows unsafe.
+        if (m.flags & F_PER_TX != 0 && amount > m.perTxCap) revert OverPerTxCap();
+        if (m.flags & F_TOTAL != 0) {
+            if (amount96 > m.totalCap || m.totalSpent > m.totalCap - amount96) {
+                revert OverTotalCap();
+            }
+        }
+        if (m.totalSpent > type(uint96).max - amount96) revert TotalSpentCeiling();
+
+        // ---- F17: and it must name a spend that NEEDS a co-signature -----------------
+        // The only refusal here that is not about consumability. `spend` reads the approval
+        // mapping solely when `amount > m.cosignThreshold`, so at or below the threshold this
+        // approval would sit in storage, cost the co-signer gas, and never be consulted — the
+        // payment goes through with or without it. Refused because of what it would let the
+        // co-signer believe: that they had gated something. Inclusive comparison, because the
+        // threshold itself does not require a signature.
+        if (amount <= m.cosignThreshold) revert CosignNotRequired(amount, m.cosignThreshold);
+
+        // ---- F17: two deadline bounds relative to the mandate, not the clock ---------
+        // Refuse rather than clamp, for F16's reason: a deadline the contract quietly moved is
+        // a deadline the co-signer did not agree to.
+        //
+        // An approval that dies at or before the mandate starts spans only the window in which
+        // `spend` reverts `NotYetValid`, so it is unconsumable for its whole life. Note this is
+        // the mandate-relative twin of the check above and NOT a `notBefore` guard: approving
+        // ahead of a start date stays legal, it just has to outlive the start.
+        if (uint256(validUntil) <= m.notBefore) revert BadDeadline(validUntil);
+        // And the stretch of an approval that outlives the mandate is authority that cannot be
+        // exercised. Left unbounded, a 30-day approval on a mandate expiring tomorrow would
+        // show the co-signer a month of authority and mean a day of it. The cost is that a
+        // co-signer cannot pass `now + MAX_COSIGN_TTL` blindly and must read `m.expiresAt`
+        // first, which is the intended direction of travel for this whole finding.
+        if (m.flags & F_EXPIRY != 0 && uint256(validUntil) > m.expiresAt) revert BadDeadline(validUntil);
 
         hash = spendHash(mandateId, recipient, amount, ref, nonce);
         _cosignApproved[mandateId][hash] = validUntil;

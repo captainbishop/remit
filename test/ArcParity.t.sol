@@ -411,11 +411,26 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // A − B should be a few thousand. A different answer means the model is wrong about
         // which slots are cold, and every other figure derived from it is suspect.
         //
-        // v2 note: the 8,500 target quoted below was derived for the deleted two-argument
-        // function, which read three mandate slots. `approveCosignFor` reads a fourth
-        // (`spender`, slot 1, for the hash it now derives itself), so the expected A − B is
-        // 2,000 higher — around 10,500. It is PRINTED and not asserted, exactly as before,
-        // and the printed 8,500 label is corrected rather than silently reused.
+        // v2 note: the 8,500 target originally quoted below was derived for the deleted
+        // two-argument function, which read three mandate slots. F15 made `approveCosignFor`
+        // read a fourth (`spender`, slot 1, for the hash it now derives itself), and F17 added
+        // two MAPPING reads — the allowlist entry and the nonce entry — so the figure has moved
+        // twice and is re-derived here rather than nudged:
+        //
+        //   4 cold mandate slots x 2,000 surcharge      8,000
+        //   allowlist entry, cold in A and WARM in B    2,000   (same recipient both calls)
+        //   cold-account surcharge on the inner call    2,500
+        //   nonce entry                                     0   <- cold in BOTH, so it cancels
+        //   ------------------------------------------------
+        //   expected A - B                             12,500
+        //
+        // The nonce line is the one worth pausing on. It is not an omission: B deliberately
+        // uses a different nonce so that its `_cosignApproved` slot is virgin, and that same
+        // difference makes its `_usedNonce` slot cold too, so the surcharge appears on both
+        // sides of the subtraction and isolates nothing. A/B isolation can only ever see the
+        // reads whose KEYS the two calls share.
+        //
+        // Still PRINTED and not asserted, exactly as before.
         bytes32 secondHash = mm.spendHash(cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, bytes32(uint256(2)));
         assertTrue(secondHash != approvedHash, "second hash must be a genuinely different slot");
 
@@ -499,18 +514,26 @@ contract ArcParityApproveCosignTest is ArcParityBase {
             console.log("  A - B  SKIPPED: B >= A, so gasleft() is contaminated.");
             console.log("  Re-run without --gas-report for a meaningful A/B isolation.");
         } else {
-            console.log("  A - B  (model says ~10500) ", used - usedWarm);
+            console.log("  A - B  (model says ~12500) ", used - usedWarm);
         }
         console.log("");
-        console.log("hand decomposition, RE-DERIVED for the six-argument function:");
+        console.log("hand decomposition, RE-DERIVED for the six-argument function AFTER F17:");
         console.log("  4 cold SLOAD: payer s0, flags s3, cosigner s2, spender s1     8400");
+        console.log("  2 cold SLOAD added by F17: allowlist entry, nonce entry        4200");
         console.log("  1 warm SLOAD: payer s0 re-read inside spendHash                 100");
         console.log("  SSTORE_SET cold on a virgin _cosignApproved slot              22100");
         console.log("  LOG4: 375 + 4x375 topics + 8x96 for three data words           2643");
         console.log("  keccak256 over the 9-word (288 B) spendHash preimage              84");
-        console.log("  keccak256(64) per mapping slot, 3 or 4 of them            126 or 168");
-        console.log("  ---- accounted, 33453 or 33495 ----");
+        console.log("  keccak256(64) per mapping slot, 7 or 8 of them            294 or 336");
+        console.log("  ---- accounted, 37821 or 37863 ----");
         console.log("  execution a real tx would pay (test - adj)   ", used - COLD_ACCOUNT_ADJ);
+        console.log("");
+        console.log("  F17 costs six of those keccaks and two of those cold SLOADs: the caps it");
+        console.log("  checks live in mandate slots this function already loaded, but the");
+        console.log("  allowlist and nonce checks each address a two-level mapping. That is the");
+        console.log("  measured price of refusing an approval no spend could consume, on a call");
+        console.log("  a human sends by hand. It is stated so the trade is auditable, not to");
+        console.log("  argue it - see approveCosignFor's own notes for the argument.");
         console.log("");
         console.log("  Two honest caveats on that total. The mapping-keccak line is a RANGE");
         console.log("  because `_mandates[mandateId]` is addressed twice - once here, once in");

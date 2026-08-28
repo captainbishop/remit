@@ -54,6 +54,58 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > not been run since, so there is currently **no** green figure for the working tree — only a
 > source count. §5's four mechanical checks were re-derived against it and say so in place.
 > Nothing in this document should be read as claiming a v2 suite has passed; #14 owns that.
+>
+> **2026-08-28, F17: there are now THREE blobs, and this banner names only one of them.** F17 is
+> written but *not committed*, so a reader has to distinguish the anchor, `HEAD`, and the working
+> tree, and no two of the three agree:
+>
+> | | lines | `error` decls | `approveCosignFor` |
+> |---|---|---|---|
+> | `92445dd` — this banner's anchor | 1,204 | 31 | **absent** |
+> | `4661bad` — `HEAD`, F15+F16 | 1,381 | 33 | present |
+> | working tree — F17 on top | 1,501 | 34 | present |
+>
+> Three corrections fall out of that, and they are corrections *to the paragraphs above*, which is
+> the pattern this banner has now demonstrated three times. **(1)** "went 1,204 → 1,376" is 5 short
+> of the blob that actually landed; 1,376 was a working-tree reading taken before `4661bad` was
+> written, and the committed figure is 1,381. The five lines are unattributed and the discrepancy
+> is left visible rather than overwritten. **(2)** "from 31 to 33" was correct *for `HEAD`*; the
+> working tree is at 34, F17 having added `CosignNotRequired`. **(3)** "there is currently **no**
+> green figure for the working tree" has been retired: `forge test` was run on 2026-08-28 and the
+> tree is **green at 178/178**, a figure derived twice — as the sum of the thirteen per-suite lines
+> and again from the run's own summary — and matched by `grep -cE '^    function (test|invariant)'`
+> over `test/*.t.sol`. #14 still owns re-measurement; what it no longer owns is the existence of a
+> green run.
+>
+> **The F17 block below cites bare line numbers, and they are WORKING-TREE numbers, not `v2:NNN`.**
+> This is stated rather than fixed because the alternative was to describe a seventeen-guard
+> inventory without saying where the guards are. The rule the first paragraph states — prefer the
+> function name — is why the numbers appear *beside* quoted guard text everywhere they appear. The
+> danger is concrete, not theoretical: `approveCosignFor` does not exist in `92445dd` at all, so
+> the banner's own recovery command cannot reach any of them, and it fails **silently** rather than
+> landing on a blank line the way the `f2d3b35` breakage did. Checked one by one against the anchor
+> blob, **eight of the nine land on a comment line and the ninth (`1194`) on a blank one**: `763` is
+> `// any timestamp the chain can produce.`, `1101` and `1136` are `///` lines about the payer's
+> allowance and about `DuplicateMandate`, `1132` is a bare `///` with nothing on it at all, `1130` is
+> `///` prose about bounded terms, `1164` is a comment about which payer is read, `1173` is a comment
+> about the largest amount `spend` accepts, and `1189` is a comment about sorting by keccak hash.
+> Not one of them is code, and not one announces itself. `TotalSpentCeiling` is the single guard
+> that exists in both blobs, and even it has moved: `92445dd:682`, working tree `763`. To reach what
+> the F17 block read, use the working tree, or `4661bad` plus the F17 diff.
+>
+> **Do not "fix" the other bare-looking numbers — they are prefixed, and the prefix carries.** A
+> grep for four-digit citations also returns `` `713` `` in §4 and §6, which look unanchored on
+> their own line but are the tail of a `v2:`-prefixed run (`v2:614`, `615`, `690`, `713`) and are
+> correct against the anchor. This was written wrong here first, on exactly one grep hit and
+> without reading the line above it, which is the same mistake the document keeps recording in
+> other people's code: **a grep returns a match, not a meaning.** The unanchored citations are all
+> F17's and all inside §4 — **nine distinct numbers over eleven instances** (`763`, `1101`, `1130`,
+> `1132`, `1136`, `1164`×2, `1173`, `1189`×2, `1194`), eight of them in the F17 finding and three
+> in *"What a green suite cannot mean"*. That count is itself a correction: the first pass here
+> said "five", because it was derived with a pattern matching only `at NNN` and `lines NNN` and so
+> missed the parenthesised `(1132)`, `(1136)`, `(1173)` and the sentence-initial `1189`. Every one
+> of the nine carries its error name or its condition text alongside it, which is the mitigation
+> the first banner paragraph asks for.
 
 ## Why this document exists
 
@@ -214,18 +266,19 @@ category.
 **Twenty-six findings, counted from the headings below rather than asserted** — `grep -c
 "^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 26, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **four are
-already fixed in code** (F1, F5 in #22; F15, F16 in #28, 2026-08-27); **two were fixed in this
-document as it was being written** (F22 and F23, both missing trust boundaries — §2 gained its
-sixth and seventh in one day); **six have a fix that changes v2's behaviour** (F3, F9, F11,
-F13, F17, F19); **eight are comment rewrites** that change nothing any code does (F4, F7, F8,
-F10, F14, F21 in the contract, F25 and F26 in the mocks — and the last two are in `test/`, so
-they are free of the frozen-metadata constraint that governs `contracts/`); **three are
-documentation** (F2, F6, F18); **one needs a decision before it can be sized** (F20, whether
-the contract gains a sixth state-changing function, and its first that mutates a mandate after
-creation); **one needs a four-line test before it can be sized at all**, because one of its two
-possible answers cannot be settled by reading source (F24); and **one needs nothing** (F12).
-4 + 2 + 6 + 8 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
+long the search ran. They partition exactly, which is more useful than the total: **five are
+already fixed in code** (F1, F5 in #22; F15, F16, F17 in #28 — the first two on 2026-08-27, F17
+on 2026-08-28); **two were fixed in this document as it was being written** (F22 and F23, both
+missing trust boundaries — §2 gained its sixth and seventh in one day); **five have a fix that
+changes v2's behaviour** (F3, F9, F11, F13, F19); **eight are comment rewrites** that change
+nothing any code does (F4, F7, F8, F10, F14, F21 in the contract, F25 and F26 in the mocks — and
+the last two are in `test/`, so they are free of the frozen-metadata constraint that governs
+`contracts/`); **three are documentation** (F2, F6, F18); **one needs a decision before it can be
+sized** (F20, whether the contract gains a sixth state-changing function, and its first that
+mutates a mandate after creation); **one needs a four-line test before it can be sized at all**,
+because one of its two possible answers cannot be settled by reading source (F24); and **one
+needs nothing** (F12).
+5 + 2 + 5 + 8 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
 same number. Triage:
 
 | Fix before v2 freezes | Cost | Needs a decision first |
@@ -242,7 +295,7 @@ same number. Triage:
 | F13 gate pre-validation | 2 registry reads at grant + tests | **DECIDED 2026-08-26: validate at grant** |
 | ✅ F15 `approveCosignFor`, explicit fields | **DONE in #28, 2026-08-27.** Not additive as proposed — the opaque `approveCosign` was DELETED, and `spendHash` lost its `spender_` parameter. See F15 for what that cost | **DECIDED 2026-08-27: remove it.** The row's own open question, answered against the recommendation in this row |
 | ✅ F16 approval deadline | **DONE in #28, 2026-08-27.** `bool` → `uint40`, `MAX_COSIGN_TTL = 30 days`, 2 guards in `spend`, `isCosignApproved` re-meaninged, `cosignApprovalDeadline` added | **The "storage layout, so free now and not after v2 deploys" claim was DISPROVEN by `forge inspect` before the work started — a mapping occupies one slot whatever its value type. It was done for its own sake, not to beat a deadline that did not exist** |
-| F17 dead approvals refused | 2 lines for the revoked/expired half; the threshold half is now expressible, since F15 shipped and `approveCosignFor` knows the amount | — |
+| ✅ F17 dead approvals refused | **DONE in #28, 2026-08-28.** Not 2 lines — **17 guards**, derived from `spend`'s permanent refusals rather than from this row's list, plus 13 tests in `test/Cosign.t.sol` and a mutation gate that proves each guard is asserted. The hard half was deciding what NOT to refuse: `notBefore`, a full rolling window and an unfiled credential all recover, so refusing them would turn our caution into somebody's unapprovable payment | — |
 | F18 co-signer rotation | documentation only — `README.md`, that re-granting resets the lifetime counters | whether a rotation path is wanted at all, which needs a setter and this contract has none |
 | F19 refuse `recipient == m.payer` | 1 error + 1 line, beside `ZeroRecipient` | — |
 | F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
@@ -963,12 +1016,57 @@ failure mode and not the fix.
 
 ### F17 — The approval function accepts a revoked mandate and an amount below the threshold, writing approvals that can never be consumed
 
-**Severity: low (fail-closed). Status: OPEN, and it SURVIVED #28 unchanged. Confidence: certain.**
+**Severity: low (fail-closed). Status: FIXED in #28 on 2026-08-28. Confidence: certain.**
+
+**What shipped, and why it is seven times the size this finding predicted.** `approveCosignFor`
+now carries **17 guards**, counted from the file rather than from the two-line estimate in the
+triage table above: `grep -c` over lines 1101–1194 returns 18 and the 18th is the word `revert`
+inside a comment at 1130, which is one more reminder that a grep counts text and not guards. The
+list was not extended from the two shapes named below; it was **derived from `spend`** by
+partitioning every refusal `spend` can make into permanent and recoverable, and mirroring exactly
+the permanent ones. That method is what found the eleven this finding never mentioned —
+`RecipientNotAllowed`, `ZeroRecipient`, `ZeroAmount`, `AmountTooLarge`, `NonceAlreadyUsed`,
+`OverPerTxCap`, `OverTotalCap`, `TotalSpentCeiling`, `Expired`, and the two mandate-relative
+`BadDeadline` bounds. `reference/policy.js` has 17 `throw refuse(` in its twin, derived
+independently from that file: the model and the contract agree on the count without either being
+matched against the other.
+
+**The hard half was deciding what NOT to refuse.** `notBefore`, a full rolling window and an
+unfiled ERC-8004 credential all *recover*, so a shortfall in any of them says nothing about
+whether a spend will be legal when the co-signature is actually used. Refusing them would convert
+our caution into somebody's unapprovable payment, which is the failure mode this finding does not
+have a name for. Three tests assert those three must CLEAR, and the mutation gate injects each of
+them as a guard the function is required not to have — because removal-testing cannot reach a
+"must not refuse" claim at all.
+
+**Both halves named below are closed, and the second is closed by construction.** Approving on a
+revoked or expired mandate now reverts `Revoked` (1132) and `Expired` (1136), the latter ordered
+above the deadline checks on purpose so a dead mandate is not told its deadline is wrong. An
+amount at or below the threshold reverts `CosignNotRequired` (1173). And the third shape §5 named
+— an in-date approval outliving the mandate — is no longer *constructible*: 1189 refuses
+`validUntil > m.expiresAt`, and a mandate without `F_EXPIRY` has no expiry to outlive, since
+`createMandate` requires `F_TOTAL` in that case. That is a stronger closure than a test of the old
+shape would have been, and it is the one place F17 removed a possibility rather than adding a
+refusal.
+
+**The evidence is a command, not this paragraph.** `python3 reference/mutation-gate-sol.py`
+neuters each of the 17 guards in turn and injects the four guards the function must not have; on
+2026-08-28 all 21 mutants were caught by a named test against a baseline of 178 green, with 0
+survivors and 0 inconclusive. Its first run was **not** clean, and what it found is recorded under
+*"What a green suite cannot mean"* below: `TotalSpentCeiling` at 1164 survived a green 177,
+because every existing assertion of that guard exercised the identical line in `spend` instead.
+Twelve F17 tests covered eleven of its guards, and no reading of the test names would have said so.
+
+The rest of this finding is kept as written, because the gap between what it predicted and what
+the fix cost is the useful part.
 
 The heading used to name `approveCosign`, which no longer exists — F15 deleted it on 2026-08-27
 and `approveCosignFor` is now the only way to write an approval. The defect carried over verbatim,
 so this finding is re-pointed rather than closed: **the mechanism below is unchanged and the
-missing guard is still missing.** The three checks are the same three (`m.payer != 0`, `F_COSIGN`
+missing guard is still missing** [**as of 2026-08-27, which is when that sentence was true. It was
+still true one day and one commit later, at which point 17 guards landed rather than the 2 this
+finding sized — see the block above**]. The three checks are the same three (`m.payer != 0`,
+`F_COSIGN`
 set, caller is `m.cosigner`), in the same order, and #28 added only the two deadline bounds —
 which constrain *when* an approval dies, not *whether* it could ever have been used. Two
 sentences below are now too strong and are corrected in place with `[#28:` notes rather than
@@ -1420,8 +1518,40 @@ they are trading.
 Derived by reading the three files that decide what a green suite is evidence *of* —
 `test/Base.t.sol` (361 lines), `test/mocks/MockUSDC.sol` (108), `test/mocks/MockRegistries.sol`
 (129) — rather than by re-reading the tests themselves. The number of passing tests was 157 when
-this was written and is 165 declarations in source after #28; nothing in this section depends on
+this was written, 165 declarations in source after F15 and F16, and **178** after F17 — the last
+figure derived twice, from `grep -cE '^    function (test|invariant)' test/*.t.sol` and from the
+run log's `13 test suites … 178 tests passed`, which agree. Nothing in this section depends on
 which, because every limit below is a property of those three files.
+
+**One limit is no longer structural, and this is what closing it looked like.** The heading's
+subject used to be entirely a list of things a suite cannot reach. But the largest thing a green
+suite cannot tell you is not in the mocks at all: it is whether any assertion would *notice* a
+guard being removed. That question is answerable, and since 2026-08-28 it is answered by command
+rather than by argument. `reference/mutation-gate.js` and `reference/mutation-gate-sol.py` neuter
+one refusal at a time in a throwaway copy of the tree — `throw refuse(` → `void refuse(`,
+`revert X(…);` → `{}` — and require a **named test** to fail for each; a mutant that will not
+compile or will not run is reported INCONCLUSIVE and never "caught", because a gate that scored a
+broken mutant as a pass would manufacture exactly the confidence this section exists to withhold.
+Each also *injects* four guards the function is required NOT to have, since removal cannot reach
+a "must not refuse" claim.
+
+Both gates found real holes on their first run, which is the only reason to trust either. In the
+model, `BAD_CONFIG` survived a green 68 because neutering the no-cosigner check left the same
+input refused one line lower under `NOT_COSIGNER` — nobody is `null`'s cosigner, so **two guards
+that refuse the same input for different reasons hide each other**. In the contract,
+`TotalSpentCeiling` at 1164 survived a green 177 for a plainer reason: nothing asserted it.
+`grep -rn TotalSpentCeiling test/` returned two hits, both in `Bounds.t.sol`, both exercising the
+*identical* guard on the `spend` path at 763. Coverage of one path reads, from any distance, like
+coverage of both. Twelve F17 tests, eleven of F17's guards — and the twelve were green throughout.
+The gates also disagreed with each other, which is its own finding: the model already asserted
+that guard, so the JS gate scored 21/21 while its Solidity sibling scored 20/21. **When one gate
+is clean and its twin is not, the delta is a divergence report.** Both are 21/21 as of 2026-08-28.
+
+What the gates still cannot mean: neither performs operator swaps, so a `>` quietly becoming `>=`
+is invisible to both and only a boundary-tight assertion catches it. That is why the ceiling test
+refuses at one base unit over and approves at exactly the limit, and why the model's version —
+which sat ten units clear of the cliff and would have passed against an off-by-one — was tightened
+to match rather than left as the twin that agreed for the wrong reason.
 
 Four limits are structural, and no amount of test-writing moves them:
 
@@ -1530,6 +1660,17 @@ could still be hiding there.
   threshold**, so the mapping is written and never consulted. All three are ordinary
   Foundry tests. Re-derived on 2026-08-27 rather than carried forward, and the re-derivation
   changed the bullet twice.
+
+  **CLOSED 2026-08-28.** All three run now: `test_f17_approvingOnARevokedMandate_isRefused`,
+  `test_f17_approvingOnAnExpiredMandate_isRefused` and
+  `test_f17_approvingAtOrBelowTheThreshold_isRefused`. The second gap's other half — an in-date
+  approval outliving the mandate — is closed by construction instead of by a test, because line
+  1189 refuses `validUntil > m.expiresAt` and a mandate without `F_EXPIRY` has no expiry to
+  outlive; `test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry` pins both mandate-relative
+  bounds. The file now declares **37** tests (`grep -c '^    function test'`, cross-checked
+  against `Ran 37 tests for test/Cosign.t.sol` in the run log), of which **13** are `test_f17_*`.
+  Read the following bullet before treating that as coverage: twelve of those thirteen were
+  green while one of F17's seventeen guards was asserted by nothing at all.
 
   **This bullet said "four" and said "seventeen tests", and both were wrong.** The count is
   now **25** — `grep -c '^    function test'` — of which eight are new in #28 and two are the

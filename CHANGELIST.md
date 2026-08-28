@@ -735,11 +735,37 @@ is wrong about the blast radius: `spend` DID change (it reads a deadline and gai
 *deadline*-bound. The public `spendHash` also lost its `spender_` parameter, so a hash naming a
 spender the mandate does not have is no longer constructible through this contract.
 
-**F17 is unblocked and still open.** Its dependency on F15 is discharged; the three tests it
-owes are named in `THREAT-MODEL.md` — approving on a revoked mandate, approving on an expired
-one (or an in-date approval outliving the mandate's `expiresAt`, which nothing currently
-bounds), and approving an amount at or below the threshold. All three are confirmed absent from
-`test/Cosign.t.sol`.
+**F17 is DONE in v2, 2026-08-28, and "the three tests it owes" undercounted the work by a
+factor of four.** What shipped is **17 guards** in `approveCosignFor` and **13** `test_f17_*`
+tests, not 2 lines and 3 tests. The estimate was wrong because it was derived from this
+paragraph's own list of shapes instead of from `spend`: the method that produced the real list
+was partitioning every refusal `spend` can make into permanent and recoverable, then mirroring
+the permanent ones. Eleven guards nobody had named fell out of that — `RecipientNotAllowed`,
+`ZeroRecipient`, `ZeroAmount`, `AmountTooLarge`, `NonceAlreadyUsed`, `OverPerTxCap`,
+`OverTotalCap`, `TotalSpentCeiling`, `Expired`, and two mandate-relative `BadDeadline` bounds.
+`reference/policy.js` carries 17 `throw refuse(` in its twin, counted from that file
+independently, so the two languages agree without either having been matched to the other.
+
+The parenthetical above — "an in-date approval outliving the mandate's `expiresAt`, which
+nothing currently bounds" — is now **unconstructible** rather than untested: line 1189 refuses
+`validUntil > m.expiresAt`, and a mandate without `F_EXPIRY` has no expiry to outlive because
+`createMandate` requires `F_TOTAL` in that case.
+
+The harder half of F17 was never the refusing. It was deciding what must **not** be refused:
+`notBefore`, a full rolling window and an unfiled ERC-8004 credential all recover, so a
+shortfall in any of them predicts nothing about the spend the co-signature is for, and refusing
+them would turn our caution into somebody's unapprovable payment. Three tests assert those must
+clear, and `reference/mutation-gate-sol.py` injects each as a guard the function is required not
+to have — because neutering guards can only ever test the refusals, never the permissions.
+
+**Read the gate's first run before reading the test count as coverage.** It neutered
+`TotalSpentCeiling` at 1164 and the whole suite stayed green at 177: every assertion of that
+guard was exercising the identical line in `spend` at 763 instead. Twelve tests, eleven of
+seventeen guards, and the twelve had been green the entire time. The fix is
+`test_f17_approvingPastTheUint96AuditCeiling_isRefused`, which refuses one base unit over the
+ceiling and approves at exactly the ceiling, because neither gate does operator swaps and only a
+boundary-tight assertion catches a `>` that becomes `>=`. Second run: 21 mutants — 17 removals,
+4 injections — all caught by a named test, baseline 178 green, 0 survivors, 0 inconclusive.
 
 **F19 is one line and closes a hole in the audit trail, not in the caps.** `recipient ==
 m.payer` is a legal spend: it consumes `perTxCap`, the window ring and the lifetime cap, burns

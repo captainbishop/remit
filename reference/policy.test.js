@@ -30,6 +30,10 @@ const {
   MAX_AMOUNT,
   MAX_COSIGN_TTL,
   Denial,
+  // NEW IN v2 (F17). The four refusal codes `approveCosignFor` can raise that `evaluate`
+  // cannot. Imported separately rather than merged into Denial, which is the point of it.
+  ApprovalRefusal,
+  ZERO_ADDRESS,
   DAY,
   WEEK,
 } = P;
@@ -809,6 +813,308 @@ test('ATTACK (F15): an approval cannot be steered to a spender the mandate does 
 
   // And it is a live approval for the real spender's spend, rather than a dead entry.
   assert.equal(spend(m, r, { now: 1 }).allowed, true);
+});
+
+// ---------------------------------------------------------------------------
+// F17: an approval no spend could ever consume is refused rather than stored.
+//
+// The refusal codes are asserted, not the messages, because the codes are the claim: every
+// mirrored condition reuses the SAME `Denial` value `evaluate` would return, and the parity
+// test at the end of this block is what that reuse is for. `assert.throws` with a predicate
+// rather than a regex, so a test cannot pass on a coincidentally-matching message.
+const refusedWith = (code) => (err) => {
+  assert.equal(err.code, code, `expected refusal code ${code}, got ${err.code}: ${err.message}`);
+  return true;
+};
+
+const cosignMandate = (over = {}) =>
+  simpleMandate({ cosigner: BOSS, cosignThreshold: usdc('10'), ...over });
+
+test('cosign (F17): the prologue answers WHY nobody may approve, not just that you may not', () => {
+  // This test exists because a mutation run over `approveCosignFor` found all fifteen other
+  // guards and lost this one: neutering the no-cosigner check still refused the same input,
+  // one line lower, under the wrong code. Two guards that refuse the same call for different
+  // reasons hide each other, so the codes need asserting even where the refusal is certain.
+  const at = { validUntil: DAY };
+
+  assert.throws(
+    () => approveCosignFor(null, BOSS, { ...req(usdc('50')), ...at }, { now: 1 }),
+    refusedWith(Denial.UNKNOWN_MANDATE),
+  );
+
+  // A mandate with no cosign gate at all — the ordinary ungated grant, and the most likely
+  // way for a caller to arrive here by mistake. BAD_CONFIG, not NOT_COSIGNER: the second is
+  // technically true (nobody is null's cosigner) and would send whoever reads it hunting for
+  // a signing key that does not exist, when nothing on this mandate is gated.
+  const ungated = simpleMandate();
+  assert.equal(ungated.cosigner, null);
+  assert.throws(
+    () => approveCosignFor(ungated, BOSS, { ...req(usdc('50')), ...at }, { now: 1 }),
+    refusedWith(ApprovalRefusal.BAD_CONFIG),
+  );
+
+  // And with a gate present, the wrong caller gets NOT_COSIGNER — so the two codes are
+  // distinguishing the two situations rather than one of them shadowing the other.
+  assert.throws(
+    () => approveCosignFor(cosignMandate(), AGENT, { ...req(usdc('50')), ...at }, { now: 1 }),
+    refusedWith(ApprovalRefusal.NOT_COSIGNER),
+  );
+});
+
+test('cosign (F17): a revoked or expired mandate cannot be approved against', () => {
+  const dead = cosignMandate();
+  revoke(dead, PAYER);
+  assert.throws(
+    () => approveCosignFor(dead, BOSS, { ...req(usdc('50')), validUntil: DAY }, { now: 1 }),
+    refusedWith(Denial.REVOKED),
+  );
+
+  // `revoked` is one-way and `expiresAt` is fixed at creation, which is what makes both of
+  // these permanent and therefore safe to refuse.
+  const expired = cosignMandate({ expiresAt: DAY });
+  assert.throws(
+    () => approveCosignFor(expired, BOSS, { ...req(usdc('50')), validUntil: DAY + 1 }, { now: DAY }),
+    // EXPIRED, not BAD_DEADLINE, and that ordering is the point of this assertion. At the
+    // instant a mandate dies, every legal `validUntil` is necessarily past `expiresAt` too, so
+    // a version that checked the deadline first would tell the cosigner to send a different
+    // deadline when no deadline can work. Sending the reader to fix the wrong thing is worse
+    // than not refusing at all, so liveness is checked first and this pins it.
+    refusedWith(Denial.EXPIRED),
+  );
+  assert.equal(evaluate(expired, req(usdc('50')), { now: DAY }).reason, Denial.EXPIRED);
+});
+
+test('cosign (F17): an approval at or below the threshold is refused', () => {
+  const m = cosignMandate();
+
+  // The one F17 refusal that is not about consumability. `evaluate` reads the approval Map
+  // solely when `amount > cosignThreshold`, so at or below the threshold this approval would
+  // sit in the Map, cost the cosigner a transaction, and never be read. Refused because of
+  // what it would let them believe: that they had gated a payment that is not gated.
+  for (const amount of [usdc('10'), usdc('1'), 1n]) {
+    assert.throws(
+      () => approveCosignFor(m, BOSS, { ...req(amount), validUntil: DAY }, { now: 1 }),
+      refusedWith(ApprovalRefusal.COSIGN_NOT_REQUIRED),
+      `${amount} should need no signature`,
+    );
+  }
+
+  // One unit above the threshold is approvable, so both functions read the same boundary the
+  // same way — `evaluate`'s comparison is a strict `>` and this one is its exact complement.
+  const r = req(usdc('10') + 1n);
+  assert.equal(evaluate(m, r, { now: 1 }).reason, Denial.COSIGN_REQUIRED);
+  approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1 });
+  assert.equal(spend(m, r, { now: 1 }).allowed, true);
+});
+
+test('cosign (F17): a malformed recipient, amount or nonce is refused', () => {
+  const m = cosignMandate();
+  const at = { validUntil: DAY };
+
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('50')), recipient: ZERO_ADDRESS, ...at }, { now: 1 }),
+    refusedWith(Denial.ZERO_RECIPIENT),
+  );
+
+  // ZERO_AMOUNT, not COSIGN_NOT_REQUIRED, even though zero is also at-or-below every
+  // threshold. Both statements are true and only one is useful, so the ordering decides —
+  // and it decides the same way `evaluate` does.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(0n), ...at }, { now: 1 }),
+    refusedWith(Denial.ZERO_AMOUNT),
+  );
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(MAX_AMOUNT + 1n), ...at }, { now: 1 }),
+    refusedWith(Denial.AMOUNT_TOO_LARGE),
+  );
+
+  // A used nonce is used for good. This is the condition a cosigner is least placed to
+  // notice, because the agent supplies the nonce — and an agent that supplies a spent one is
+  // asking for a signature on a payment that cannot happen.
+  const consumed = req(usdc('5')); // at or below the threshold, so it needs no signature
+  assert.equal(spend(m, consumed, { now: 1 }).allowed, true);
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...consumed, amount: usdc('50'), ...at }, { now: 1 }),
+    refusedWith(Denial.NONCE_ALREADY_USED),
+  );
+
+  const gated = cosignMandate({ allowlist: [VENDOR] });
+  assert.throws(
+    () => approveCosignFor(gated, BOSS, { ...req(usdc('50')), recipient: OTHER, ...at }, { now: 1 }),
+    refusedWith(Denial.RECIPIENT_NOT_ALLOWED),
+  );
+  // The allowlisted recipient is unaffected, which is what makes the line above a guard
+  // rather than a break.
+  approveCosignFor(gated, BOSS, { ...req(usdc('50')), recipient: VENDOR, ...at }, { now: 1 });
+});
+
+test('cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not', () => {
+  const m = cosignMandate({ perTxCap: usdc('100'), totalCap: usdc('100') });
+  const at = { validUntil: DAY };
+
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('100') + 1n), ...at }, { now: 1 }),
+    refusedWith(Denial.OVER_PER_TX_CAP),
+  );
+
+  // Five spends at exactly the threshold need no signature, which is what lets this consume
+  // the lifetime cap without first solving the problem it is trying to pose.
+  for (let i = 0; i < 5; i++) {
+    assert.equal(spend(m, req(usdc('10')), { now: 1 }).allowed, true);
+  }
+  assert.equal(m.totalSpent, usdc('50'));
+
+  // `totalSpent` only grows, so headroom only shrinks and a shortfall now is a shortfall
+  // forever. That is exactly what makes this safe to refuse and the rolling windows not.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('60')), ...at }, { now: 1 }),
+    refusedWith(Denial.OVER_TOTAL_CAP),
+  );
+
+  // Precisely the remaining headroom must still be approvable, or the guard would be
+  // refusing on a partly spent mandate rather than reading it.
+  const fits = req(usdc('50'));
+  approveCosignFor(m, BOSS, { ...fits, ...at }, { now: 1 });
+  assert.equal(spend(m, fits, { now: 1 }).allowed, true);
+  assert.equal(m.totalSpent, usdc('100'));
+
+  // The uint96 audit ceiling, reachable only with no lifetime cap — see TOTAL_SPENT_CEILING.
+  //
+  // Asserted one base unit either side of the boundary, which the first version of this block
+  // did not do: it sat `totalSpent` at MAX_AMOUNT - 10n and approved 100n, well past the cliff.
+  // That refuses, but so would a guard off by one in either direction, and so would a guard
+  // that refused any mandate whose counter was merely large. `cosignThreshold: 0n` is what
+  // makes the tight version expressible — the model documents 0 as "require a signature for
+  // every amount" — because at the inherited threshold of 10 USDC an approval for 1n or 2n
+  // would come back COSIGN_NOT_REQUIRED and the test would be measuring guard ORDER instead of
+  // the width of the counter. The contract's twin,
+  // `test_f17_approvingPastTheUint96AuditCeiling_isRefused`, is built the same way for the same
+  // reason, and exists because the Solidity mutation gate found this guard unasserted there
+  // while it was already asserted here.
+  const uncapped = cosignMandate({ perTxCap: null, windows: [], cosignThreshold: 0n });
+  uncapped.totalSpent = MAX_AMOUNT - 1n;
+  assert.throws(
+    () => approveCosignFor(uncapped, BOSS, { ...req(2n), ...at }, { now: 1 }),
+    refusedWith(Denial.TOTAL_SPENT_CEILING),
+  );
+
+  // And the last base unit the counter can hold is approvable, and spendable.
+  const lastUnit = req(1n);
+  approveCosignFor(uncapped, BOSS, { ...lastUnit, ...at }, { now: 1 });
+  assert.equal(spend(uncapped, lastUnit, { now: 1 }).allowed, true);
+  assert.equal(uncapped.totalSpent, MAX_AMOUNT);
+});
+
+test('cosign (F17): the deadline must outlive notBefore and die by the expiry', () => {
+  // Both bounds refuse rather than clamp, for F16's reason: a deadline the model quietly
+  // moved is a deadline the cosigner did not agree to.
+  const late = cosignMandate({ notBefore: 2 * DAY });
+
+  // An approval whose whole life sits inside the not-yet-valid window is unconsumable for
+  // every second of it.
+  for (const bad of [DAY, 2 * DAY]) {
+    assert.throws(
+      () => approveCosignFor(late, BOSS, { ...req(usdc('50')), validUntil: bad }, { now: 1 }),
+      refusedWith(ApprovalRefusal.BAD_DEADLINE),
+      `validUntil=${bad} against notBefore=${2 * DAY}`,
+    );
+  }
+  // AT notBefore is refused because `validUntil` is exclusive and `notBefore` inclusive, so
+  // an approval ending at T and a mandate starting at T share no instant. One second of
+  // overlap is enough, and has to be.
+  const usable = req(usdc('50'));
+  approveCosignFor(late, BOSS, { ...usable, validUntil: 2 * DAY + 1 }, { now: 1 });
+  assert.equal(spend(late, usable, { now: 2 * DAY }).allowed, true);
+
+  // The other direction: the stretch of an approval that outlives the mandate is authority
+  // that cannot be exercised. Unbounded, a 30-day approval on a mandate expiring tomorrow
+  // shows the cosigner a month and means a day.
+  const short = cosignMandate({ expiresAt: DAY });
+  assert.throws(
+    () => approveCosignFor(short, BOSS, { ...req(usdc('50')), validUntil: DAY + 1 }, { now: 1 }),
+    refusedWith(ApprovalRefusal.BAD_DEADLINE),
+  );
+  // Exactly AT expiresAt is legal, and that is the correct boundary rather than an
+  // off-by-one: both values are exclusive, so an approval dying at T grants nothing on a
+  // mandate that is also dead at T.
+  const hash = approveCosignFor(short, BOSS, { ...req(usdc('50')), validUntil: DAY }, { now: 1 });
+  assert.equal(short.cosignApprovals.get(hash), BigInt(DAY));
+});
+
+test('cosign (F17): what must NOT be refused — notBefore, a full window, a missing credential', () => {
+  // The hard half of the finding. Each of these three is a condition `evaluate` denies and
+  // this function must NOT, because each one CLEARS: refusing here would make a legitimate
+  // large payment unapprovable until the cosigner is chased a second time, which for a
+  // payments primitive is a liveness failure of our own making. Each case therefore proves
+  // the approval was genuinely usable once the condition passed, not merely that it stored.
+
+  // (a) A start date in the future. The ordinary case for a scheduled payment.
+  const later = cosignMandate({ notBefore: DAY });
+  const r1 = req(usdc('50'));
+  assert.equal(evaluate(later, r1, { now: 1 }).reason, Denial.NOT_YET_VALID);
+  approveCosignFor(later, BOSS, { ...r1, validUntil: 3 * DAY }, { now: 1 });
+  assert.equal(spend(later, r1, { now: DAY }).allowed, true);
+
+  // (b) A full rolling window — the sharpest of the three, because the window arithmetic is
+  // the most tempting to mirror and the least safe to. `windowUsage` FALLS as buckets age
+  // out, so an amount refused now fits later with nothing else changed.
+  const S = DAY / 12;
+  const t0 = 100 * S; // aligned, so the five spends share one bucket and age out together
+  const full = cosignMandate({ windows: [win(DAY, usdc('50'), 12)] });
+  for (let i = 0; i < 5; i++) {
+    assert.equal(spend(full, req(usdc('10')), { now: t0 }).allowed, true);
+  }
+  const r2 = req(usdc('50'));
+  assert.equal(evaluate(full, r2, { now: t0 }).reason, Denial.OVER_WINDOW_CAP);
+  approveCosignFor(full, BOSS, { ...r2, validUntil: t0 + 3 * DAY }, { now: t0 });
+  // One bucket past the window: `oldest` has moved beyond the bucket the five spends landed
+  // in, so usage is back to zero and the approved amount fits exactly.
+  assert.equal(spend(full, r2, { now: t0 + DAY + S }).allowed, true);
+
+  // (c) An ERC-8004 credential not yet filed. Recoverable by a third party the cosigner does
+  // not control — and note what mirroring it would have cost, visible here in a way it is not
+  // in the contract: `approveCosignFor` takes no ctx beyond `now`. To refuse on this it would
+  // have to accept `resolveCredential` and consult live registry state before agreeing to
+  // store an approval. The contract says the same thing in gas: two external staticcalls on
+  // the approval path.
+  const unattested = cosignMandate({
+    identity: { agentId: 42n, expectedOwner: AGENT },
+    credential: { validator: BOSS, requestHash: '0xkyc-f17', minResponse: 100n, maxStaleness: 30n * BigInt(DAY) },
+  });
+  const r3 = req(usdc('50'));
+  assert.equal(evaluate(unattested, r3, withCred(() => null)).reason, Denial.CREDENTIAL_MISSING);
+  approveCosignFor(unattested, BOSS, { ...r3, validUntil: 1_000_000 + DAY }, { now: 1_000_000 });
+  assert.equal(spend(unattested, r3, withCred(attestation())).allowed, true);
+});
+
+test('cosign (F17): a single-defect request is refused with the SAME code by both functions', () => {
+  // The claim stated exactly, because the obvious version of it is false. These two cannot
+  // always agree: the recoverable conditions `approveCosignFor` skips sit BETWEEN the
+  // permanent ones it keeps, so a request that is both over `perTxCap` and behind a missing
+  // credential gets CREDENTIAL_MISSING from `evaluate` and OVER_PER_TX_CAP from the approval.
+  // With ONE defect they must agree — which is also the only case a cosigner could act on.
+  const m = cosignMandate({ perTxCap: usdc('100'), allowlist: [VENDOR] });
+  const spent = req(usdc('5'), { recipient: VENDOR });
+  assert.equal(spend(m, spent, { now: 1 }).allowed, true);
+
+  const cases = [
+    ['zero recipient', { ...req(usdc('50')), recipient: ZERO_ADDRESS }],
+    ['recipient not allowlisted', { ...req(usdc('50')), recipient: OTHER }],
+    ['zero amount', { ...req(0n), recipient: VENDOR }],
+    ['amount above 2^96 - 1', { ...req(MAX_AMOUNT + 1n), recipient: VENDOR }],
+    ['over perTxCap', { ...req(usdc('100') + 1n), recipient: VENDOR }],
+    ['nonce already used', { ...spent, amount: usdc('50') }],
+  ];
+
+  for (const [what, request] of cases) {
+    const denial = evaluate(m, request, { now: 1 });
+    assert.equal(denial.allowed, false, `evaluate must refuse: ${what}`);
+    assert.throws(
+      () => approveCosignFor(m, BOSS, { ...request, validUntil: DAY }, { now: 1 }),
+      refusedWith(denial.reason),
+      `approveCosignFor must refuse ${what} with evaluate's code (${denial.reason})`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

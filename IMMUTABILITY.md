@@ -162,10 +162,20 @@ This is the honest bill, and it is not small.
 also nobody who can pause the flawed contract, freeze new grants, or push users off it. Each
 payer has to act for themselves. Anyone who does not notice, or does not bother, keeps using
 the flawed version — and it keeps working for them indefinitely. In a system with an admin
-key, a critical bug is met with a pause; here it is met with an announcement and a hope. If
-Remit ever has users who are not you, that difference is the single largest operational risk
-in this document, and the mitigation is entirely social: a disclosure channel people actually
-read, and integrators who can be reached.
+key, a critical bug is met with a pause; here it is met with an announcement and a hope.
+
+That difference is the single largest operational risk in this document, and it is **not
+conditional on Remit becoming popular.** It applies in full to the first payer who is not the
+author. Remit is a primitive meant to be granted by anyone — an unpermissioned contract at a
+published address, with no allowlist of who may call `createMandate` — so "no third parties
+yet" is a fact about the calendar, not a property of the design, and it stops being true the
+first time someone reads the address off this repo.
+
+The mitigation is entirely social: a disclosure channel people actually read, and integrators
+who can be reached. Which means it has to exist **before** the first third-party grant, not
+after the first bug — a channel announced in response to an incident reaches nobody, because
+the people who need it are the ones who already stopped looking. As of this writing no such
+channel exists. This paragraph records that gap; it does not close it.
 
 **Anyone integrating has to redeploy or reconfigure.** The address appears in this repo's
 scripts, in `evidence/`, and in anything anyone builds. All of it has to move.
