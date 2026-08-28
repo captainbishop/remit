@@ -1166,6 +1166,13 @@ contract MandateManager {
 
         if (amount == 0) revert ZeroAmount();
         if (amount > type(uint96).max) revert AmountTooLarge();
+        // The bound is on the line directly above, which is closer than `spend`'s
+        // equivalent and sound for the same reason: the guard is unconditional and
+        // nothing between it and the cast can change `amount`. Narrowing here rather
+        // than at the two uses below keeps one line to audit, and keeps the local the
+        // same width as the one `spend` hashes, which is what makes the two spend hashes
+        // agree. If the guard above is ever made conditional this becomes unsound.
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint96 amount96 = uint96(amount);
 
         // `_usedNonce` is write-once-true, so a consumed nonce is consumed for good and this
@@ -1285,6 +1292,13 @@ contract MandateManager {
     /// Use `cosignApprovalDeadline` to see the stored value, including a dead one.
     function isCosignApproved(bytes32 mandateId, bytes32 hash) external view returns (bool) {
         uint40 validUntil = _cosignApproved[mandateId][hash];
+        // Reading the clock is the point of the function, so the lint's objection is
+        // answered the same way as in `isLive` below. This view has to draw the boundary
+        // exactly where `spend` draws it — same exclusive `<`, same clock — because a
+        // helper that reported an approval as live one second past the deadline `spend`
+        // enforces would recreate F16 in the opposite direction. `cosignApprovalDeadline`
+        // is there for anyone who wants the stored value without the comparison.
+        // forge-lint: disable-next-line(block-timestamp)
         return validUntil != 0 && block.timestamp < validUntil;
     }
 

@@ -242,6 +242,41 @@ contract CreationTest is Base {
     }
 
     /**
+     * The same requirement, arranged so that only the intended guard can satisfy it.
+     *
+     * The test above passed for two reasons at once, which is one too many. Removing the
+     * zero-spender check at the top of `createMandate` leaves it green, because a mandate
+     * with no spender and no cosigner has `cosigner == spender` — both are the zero
+     * address — so the self-cosigner rule further down refuses it under the same
+     * `BadConfig` selector. The mutation gate is what surfaced that: 20 of the 21
+     * refusals in `createMandate` failed a named test when removed, and this was the one
+     * that did not.
+     *
+     * The contract states the dependency itself, in the comment above the self-cosigner
+     * rule: that rule is written unconditionally because `spender == address(0)` "was
+     * refused at the top". The two guards lean on each other, and a test that cannot
+     * tell them apart is not holding either one in place.
+     *
+     * Naming a real cosigner separates them. Now `cosigner != spender`, the self-cosigner
+     * rule has nothing to say, and the only thing left that can refuse a zero spender is
+     * the guard this test is about.
+     *
+     * Worth being clear about what the guard prevents, since a mandate with no spender is
+     * unspendable either way — `msg.sender` is never the zero address. It prevents a
+     * grant that reads as live and can never be used: `isLive` returns true, `getMandate`
+     * shows caps and a window, and every spend refuses. That is the shape this contract
+     * rejects everywhere else rather than documenting.
+     */
+    function test_createMandate_zeroSpenderWithACosigner_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p = withCosign(p, boss, usd(10)); // a cosigner who is not the spender
+        p.spender = address(0);
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("z2"), p);
+    }
+
+    /**
      * Each flag must agree with the value it describes, in BOTH directions. A flag
      * set with a zero value would be a bound that never binds; a value set with no
      * flag would be a limit that is silently ignored. Both are the failure mode
@@ -292,6 +327,43 @@ contract CreationTest is Base {
         vm.prank(payer);
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("e"), p);
+    }
+
+    /**
+     * The credential mirror of the two tests above, and the one agreement rule in
+     * `createMandate` that had no revert test at all.
+     *
+     * How that was found is worth recording, because reading the suite would not have
+     * shown it. `forge coverage` reports the contract at 100% of lines and 99.10% of
+     * branches, and the single unreached branch in the whole file was the revert arm of
+     * the credential rule. Its four neighbours — per-tx, total, cosigner, allowlist —
+     * each had at least one test that fired them; this one had none. A missing negative
+     * test is invisible to a green suite by construction, since nothing fails.
+     *
+     * It also mattered more than the other four, because Gates.t.sol argues that the
+     * documented no-agent-binding weakness stays bounded partly on the strength of
+     * "F_CREDENTIAL without a validator is refused at grant time". That claim was true
+     * and unpinned. Now it is pinned.
+     *
+     * Both directions are checked. A flag with no validator would be a gate that never
+     * runs while `getMandate` shows one. A validator with no flag is the shape that
+     * misleads a reader in the other direction: an address sits in the struct, and
+     * `spend` never consults it.
+     */
+    function test_createMandate_credentialFlagWithoutValidator_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p = withCredential(p, address(0), KYC_HASH, AGENT_ID, 1 days);
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("cr1"), p);
+    }
+
+    function test_createMandate_validatorWithoutTheFlag_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.credential.validator = boss; // ...and F_CREDENTIAL stays unset
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("cr2"), p);
     }
 
     // ------------------------------------------- the cosign gate as a whole
