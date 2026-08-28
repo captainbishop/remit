@@ -162,6 +162,22 @@ interface IValidationRegistry {
         );
 }
 
+/**
+ * @title MandateManager — bounded, revocable spending authority over a payer's USDC
+ *
+ * @notice A payer writes a spending policy once, stores it here, and this contract
+ * applies it to every payment their delegate attempts. Money never enters this
+ * contract: the payer holds their own USDC and grants an ERC-20 allowance, and a spend
+ * is `transferFrom(payer -> recipient)` straight through. So the allowance is the outer
+ * bound on everything below, and `approve(this, 0)` is a stop the payer applies alone,
+ * enforced by USDC rather than by anything here.
+ *
+ * What a payer can bound is in `createMandate`, and the order those bounds are checked
+ * in is in `spend`. The rationale, the Arc integration and the known limitations are in
+ * the file header above this declaration — it is deliberately not a doc comment,
+ * because three interfaces sit between it and this line and solc would attach it to the
+ * first of them.
+ */
 contract MandateManager {
     // ---------------------------------------------------------------------
     // Immutable wiring. Arc Testnet addresses are in the deploy script; they
@@ -307,6 +323,20 @@ contract MandateManager {
     // wrapper being usable, because 4337 accounts cannot use it.
     // ---------------------------------------------------------------------
 
+    /// @notice One grant. Carries the scalar policy, and deliberately not all of it: the
+    /// window specifications, the allowlist entries and the two ERC-8004 gates are absent,
+    /// so `flags` and `windowCount` tell an indexer which of them exist while `getWindow`,
+    /// `isAllowedRecipient` and the grant calldata are where the contents live.
+    /// @param mandateId The id, derived from (domain, chainid, this, payer, salt).
+    /// @param payer The account whose USDC this authorises, and whose allowance bounds it.
+    /// @param spender The delegate permitted to call `spend`.
+    /// @param perTxCap Per-transaction cap, meaningful only when `F_PER_TX` is in `flags`.
+    /// @param totalCap Lifetime cap, meaningful only when `F_TOTAL` is in `flags`.
+    /// @param notBefore Inclusive start. A spend at exactly this timestamp is allowed.
+    /// @param expiresAt Exclusive end, meaningful only when `F_EXPIRY` is in `flags`. A
+    /// mandate expiring at T is already dead at T.
+    /// @param flags The bit set naming which bounds apply.
+    /// @param windowCount How many rolling windows were configured, 0 to `MAX_WINDOWS`.
     event MandateCreated(
         bytes32 indexed mandateId,
         address indexed payer,
@@ -319,6 +349,18 @@ contract MandateManager {
         uint8 windowCount
     );
 
+    /// @notice One payment that cleared. This is the reconcilable record: it names the
+    /// business reference the payer supplied alongside the money that moved, so a ledger can
+    /// be rebuilt from logs alone without decoding calldata.
+    /// @param mandateId The mandate the payment was made under.
+    /// @param spender The delegate that called `spend`.
+    /// @param recipient Who received the USDC.
+    /// @param amount How much moved, in USDC base units.
+    /// @param ref The payer's own business reference, never interpreted by this contract.
+    /// @param nonce The idempotency key, now permanently consumed on this mandate.
+    /// @param spendHash The hash a co-signature would have bound, logged whether or not one
+    /// was required, so every payment is addressable by the same identifier.
+    /// @param totalSpent The mandate's lifetime total AFTER this payment, not before.
     event Spend(
         bytes32 indexed mandateId,
         address indexed spender,
@@ -330,8 +372,16 @@ contract MandateManager {
         uint96 totalSpent
     );
 
+    /// @notice A mandate was killed, permanently. Revocation is a latch rather than a toggle,
+    /// so this can be emitted more than once for the same mandate and only the first one
+    /// changed anything.
+    /// @param mandateId The mandate.
+    /// @param by Whoever called `revoke` — the payer or the spender, both of which are
+    /// permitted.
     event MandateRevoked(bytes32 indexed mandateId, address indexed by);
 
+    /// @notice A co-signer pre-approved exactly one spend, named by its fields.
+    ///
     /// CHANGED IN v2 (F15/F16), and its topic0 with it, so a v1 indexer must be rebuilt.
     ///
     /// v1 emitted the mandate, the hash and the co-signer and nothing else, which made the
@@ -346,6 +396,15 @@ contract MandateManager {
     /// outstanding; they can now RECONSTRUCT that from logs, by pairing each
     /// `CosignApproved` with the `Spend` or `CosignWithdrawn` that consumed it and treating
     /// anything past `validUntil` as dead. That is an indexer's job, not a view's.
+    ///
+    /// @param mandateId The mandate the approval is scoped to.
+    /// @param spendHash The exact spend approved. One hash, one spend — the nonce is inside it.
+    /// @param cosigner The account that approved, which is the mandate's configured co-signer.
+    /// @param recipient Who the approved spend may pay.
+    /// @param amount The approved amount, in USDC base units.
+    /// @param validUntil The timestamp the approval dies at, exclusive. An approval further
+    /// out than `MAX_COSIGN_TTL` from approval time is refused rather than clamped, so this
+    /// value is always one the co-signer chose deliberately.
     event CosignApproved(
         bytes32 indexed mandateId,
         bytes32 indexed spendHash,
@@ -354,6 +413,19 @@ contract MandateManager {
         uint256 amount,
         uint40 validUntil
     );
+
+    /// @notice An approval was taken back.
+    ///
+    /// Emitted whenever the co-signer calls `withdrawCosign`, whether or not an approval was
+    /// outstanding — the delete is unconditional, so this can appear for a hash that was
+    /// never approved, or one a `Spend` already consumed. An indexer must not read it as
+    /// proof that an approval existed. That asymmetry with `approveCosignFor` is F11 in
+    /// THREAT-MODEL.md, still open, and its cost is exactly this: event pairs that do not
+    /// reconcile, in a contract whose product is a reconcilable record.
+    ///
+    /// @param mandateId The mandate.
+    /// @param spendHash The spend that is not approved after this call.
+    /// @param cosigner The caller, which is the co-signer alone — the payer cannot withdraw.
     event CosignWithdrawn(bytes32 indexed mandateId, bytes32 indexed spendHash, address indexed cosigner);
 
     // ---------------------------------------------------------------------
@@ -445,6 +517,25 @@ contract MandateManager {
     error DuplicateMandate();
     error TooManyMandates();
 
+    /**
+     * @notice Wire the contract to USDC and to the two ERC-8004 registries.
+     *
+     * All three become `immutable` and there is no upgrade path, so a wrong address here
+     * is permanent and the only remedy is a fresh deployment. A mistyped USDC address
+     * produces a contract that verifies, answers every view, and moves the wrong token
+     * or none. `script/Deploy.s.sol` pins all three per chain id and reads them back off
+     * the deployed contract for that reason.
+     *
+     * Only USDC is required. Either registry may be zero, and a mandate that names a gate
+     * whose registry is missing is then refused at grant time by `createMandate` rather
+     * than failing later — so a missing registry cannot produce a mandate that grants
+     * cleanly and then refuses every spend.
+     *
+     * @param _usdc The ERC-20 a spend moves. Every cap in this contract is denominated in
+     * its smallest unit, not in whole tokens.
+     * @param _identityRegistry ERC-8004 IdentityRegistry, read by the `F_IDENTITY` gate.
+     * @param _validationRegistry ERC-8004 ValidationRegistry, read by the `F_CREDENTIAL` gate.
+     */
     constructor(address _usdc, address _identityRegistry, address _validationRegistry) {
         if (_usdc == address(0)) revert BadConfig();
         usdc = IERC20(_usdc);
@@ -480,6 +571,15 @@ contract MandateManager {
     /// @notice Grant a mandate. The id is derived from (this, chainid, payer,
     /// salt) so the payer can compute it off-chain before the transaction lands
     /// and two payers can never collide.
+    ///
+    /// @param salt Any value this payer has not used before. The pair (payer, salt) is
+    /// consumed permanently — the slot is never cleared, not even by `revoke` — so a
+    /// second grant on the same salt reverts `MandateExists` forever, and anything
+    /// pinned off-chain to a revoked id has to be re-issued against a new salt.
+    /// @param p The policy. At least one of `F_TOTAL` or `F_EXPIRY` is required, so every
+    /// mandate has a horizon; every other bound is opt-in through `flags`.
+    /// @return mandateId The id every later call names. Nothing in the derivation reads
+    /// chain state, so the payer can compute it before broadcasting.
     function createMandate(bytes32 salt, MandateParams calldata p) external returns (bytes32 mandateId) {
         mandateId = keccak256(abi.encode(DOMAIN, block.chainid, address(this), msg.sender, salt));
         if (_mandates[mandateId].payer != address(0)) revert MandateExists();
@@ -679,6 +779,21 @@ contract MandateManager {
      * unwinds every prior write in the transaction — so a later check failing
      * cannot leave an earlier window incremented. Do not port this fusion back
      * into any context lacking transactional rollback.
+     *
+     * @param mandateId The mandate to spend against.
+     * @param recipient Who receives the USDC. Three separate rules apply: it may not be
+     * the zero address, it may not be the payer, and when `F_ALLOWLIST` is set it must be
+     * on the list.
+     * @param amount In USDC base units. Strictly above `cosignThreshold` the spend also
+     * needs a live co-signature, which is the last thing checked.
+     * @param ref The payer's own business reference — an invoice id, a job id. Never read
+     * by this contract, only logged, and it is bound into the spend hash so a co-signature
+     * approves the reference too.
+     * @param nonce The idempotency key, unique per mandate, so a retried transaction
+     * cannot pay twice.
+     * @return hash The spend hash, computed by calling `spendHash` rather than re-encoding,
+     * so the two can never drift apart. Returned as well as logged, so a caller arranging
+     * a co-signature does not have to recompute it.
      */
     function spend(bytes32 mandateId, address recipient, uint256 amount, bytes32 ref, bytes32 nonce)
         external
@@ -1011,6 +1126,7 @@ contract MandateManager {
      * expired with the tag v1.0.0-arc-testnet: v1's ABI is pinned at v1's address
      * and this is a different contract, so the selector changes here from
      * 0x1435e357 to 0x1648fd01 and clients decoding v2 must be rebuilt.
+     * @param mandateId The mandate to kill.
      */
     function revoke(bytes32 mandateId) external {
         Mandate storage m = _mandates[mandateId];
@@ -1050,6 +1166,16 @@ contract MandateManager {
      * a co-signer then approve — a hash that no spend could ever match. The preimage is
      * unchanged: same nine fields in the same order, with `m.spender` where `spender_` stood.
      *
+     * @param mandateId The mandate being spent against. Its `cosigner` is the only permitted
+     * caller, and a mandate without `F_COSIGN` is refused with `BadConfig` — there would be
+     * nothing for the approval to unlock.
+     * @param recipient The payee this approval covers, and only this one.
+     * @param amount The exact amount, in USDC base units. Not a ceiling: a spend of one unit
+     * less has a different hash and is not approved.
+     * @param ref The payer's business reference for the payment, so the approval covers what
+     * the spend claims to be for.
+     * @param nonce The idempotency key the spend will carry. Checked for prior use here as
+     * well, because a nonce already consumed can never be consumed again.
      * @param validUntil The timestamp this approval dies AT, exclusive. The co-signer's
      * choice, bounded below by `block.timestamp` (a deadline already past would be born dead)
      * and above by `MAX_COSIGN_TTL`. See F16 on that constant for why both bounds exist. F17
@@ -1235,6 +1361,13 @@ contract MandateManager {
     /// `cosignApprovalDeadline` until someone calls this. That is inert (`spend` refuses it
     /// on every future block) but it is storage nobody is obliged to clean, which is the same
     /// shape as F17's unconsumable approvals and is noted there.
+    ///
+    /// The delete is unconditional, and so is the event: passing a hash that was never
+    /// approved changes no storage but still emits `CosignWithdrawn`. F11 in THREAT-MODEL.md,
+    /// open, and the reconciliation cost is written up on the event itself.
+    ///
+    /// @param mandateId The mandate the approval belongs to.
+    /// @param hash The spend hash to un-approve, as returned by `spendHash`.
     function withdrawCosign(bytes32 mandateId, bytes32 hash) external {
         Mandate storage m = _mandates[mandateId];
         if (msg.sender != m.cosigner) revert NotCosigner();
@@ -1257,6 +1390,16 @@ contract MandateManager {
     /// Reverts on an unknown mandate rather than hashing `address(0)` as the spender. A view
     /// that answers a meaningless question with a plausible 32 bytes is the same defect one
     /// layer down.
+    ///
+    /// @param mandateId The mandate. Its stored `spender` goes into the preimage, so the
+    /// caller cannot influence that field.
+    /// @param recipient The payee the hash commits to.
+    /// @param amount The exact amount, in USDC base units. A co-signature approves one
+    /// amount, not a ceiling.
+    /// @param ref The payer's business reference, bound in so the approval covers it too.
+    /// @param nonce The idempotency key the spend will carry.
+    /// @return The hash, over `DOMAIN`, `block.chainid`, this contract, and the six fields
+    /// above — so it cannot be replayed onto another chain or another deployment.
     function spendHash(bytes32 mandateId, address recipient, uint256 amount, bytes32 ref, bytes32 nonce)
         public
         view
@@ -1269,14 +1412,43 @@ contract MandateManager {
         );
     }
 
+    /// @notice The whole stored policy, including how much has already been spent.
+    ///
+    /// An unknown id returns a zeroed struct rather than reverting, so read `payer` first:
+    /// `payer == address(0)` means there is no mandate, and every other field is then
+    /// meaningless rather than merely zero.
+    ///
+    /// @param mandateId The id `createMandate` returned.
+    /// @return The mandate. `windowCount` is the bound for `getWindow`; `totalSpent` and
+    /// `spendCount` are the running totals.
     function getMandate(bytes32 mandateId) external view returns (Mandate memory) {
         return _mandates[mandateId];
     }
 
+    /// @notice One rolling window's specification, as configured at grant time.
+    ///
+    /// Windows are held in a mapping rather than an array, so an index at or past
+    /// `windowCount` returns a zeroed `WindowSpec` instead of reverting — and a zeroed spec
+    /// reads exactly like a configured one until you compare the index against
+    /// `getMandate(mandateId).windowCount`. This returns the policy, not the consumption;
+    /// `windowRemaining` answers how much of the window is left.
+    ///
+    /// @param mandateId The mandate.
+    /// @param index Window position, from 0 to `windowCount - 1`.
+    /// @return The window's length, sub-period length, cap and bucket count.
     function getWindow(bytes32 mandateId, uint256 index) external view returns (WindowSpec memory) {
         return _windows[mandateId][index];
     }
 
+    /// @notice Whether a nonce has already been spent on this mandate.
+    ///
+    /// Nonces are scoped to one mandate, so the same value is still free on another. An
+    /// unknown mandate reports `false` for every nonce, which is the same answer a live
+    /// mandate gives for one it has never seen.
+    ///
+    /// @param mandateId The mandate.
+    /// @param nonce The idempotency key a `spend` would carry.
+    /// @return True if a spend has already consumed it.
     function isNonceUsed(bytes32 mandateId, bytes32 nonce) external view returns (bool) {
         return _usedNonce[mandateId][nonce];
     }
@@ -1290,6 +1462,11 @@ contract MandateManager {
     /// shipping it in a view would make the doctrine a preference about two fields.
     ///
     /// Use `cosignApprovalDeadline` to see the stored value, including a dead one.
+    ///
+    /// @param mandateId The mandate.
+    /// @param hash The spend hash, as returned by `spendHash`.
+    /// @return True only if an approval is stored AND still live at this block. False covers
+    /// both "never approved" and "approved, then lapsed".
     function isCosignApproved(bytes32 mandateId, bytes32 hash) external view returns (bool) {
         uint40 validUntil = _cosignApproved[mandateId][hash];
         // Reading the clock is the point of the function, so the lint's objection is
@@ -1308,16 +1485,46 @@ contract MandateManager {
     /// timestamp it dies at, which may already be past — that is the point of exposing it. A
     /// payer or co-signer auditing a mandate wants to distinguish "never approved" from
     /// "approved and it lapsed", and `isCosignApproved` returns `false` for both.
+    ///
+    /// @param mandateId The mandate.
+    /// @param hash The spend hash, as returned by `spendHash`.
+    /// @return The stored deadline, exclusive. 0 means no approval was ever written.
     function cosignApprovalDeadline(bytes32 mandateId, bytes32 hash) external view returns (uint40) {
         return _cosignApproved[mandateId][hash];
     }
 
+    /// @notice Whether the allowlist would admit this recipient.
+    ///
+    /// This answers the allowlist question alone, and `spend` applies two further recipient
+    /// rules that this function does not: the payer may never be the recipient
+    /// (`SelfPayment`), and neither may the zero address (`ZeroRecipient`). A `true` here is
+    /// therefore not a prediction that the spend clears.
+    ///
+    /// When `F_ALLOWLIST` is unset there is no list to consult and the answer is
+    /// `recipient != address(0)`, because the mandate admits anyone. An unknown mandate has
+    /// no flags set, so it takes that same branch and reports `true` for any non-zero
+    /// address — read `getMandate(mandateId).payer` if you need to tell "admits everyone"
+    /// apart from "does not exist".
+    ///
+    /// @param mandateId The mandate.
+    /// @param recipient The address to test.
+    /// @return True if the allowlist admits it, or if the mandate keeps no allowlist.
     function isAllowedRecipient(bytes32 mandateId, address recipient) external view returns (bool) {
         Mandate storage m = _mandates[mandateId];
         if (m.flags & F_ALLOWLIST == 0) return recipient != address(0);
         return _allowlist[mandateId][recipient];
     }
 
+    /// @notice Whether the mandate exists, has not been revoked, and is inside its own time
+    /// window right now.
+    ///
+    /// Liveness only. It says nothing about the caps, the allowlist, nonces, the co-signature
+    /// requirement or the two ERC-8004 gates, every one of which `spend` also checks and any
+    /// one of which can refuse a payment against a mandate this reports as live. `spendable`
+    /// is the question "how much can actually move".
+    ///
+    /// @param mandateId The mandate.
+    /// @return True if a spend would pass the existence, revocation and timing checks.
     function isLive(bytes32 mandateId) public view returns (bool) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0) || m.revoked) return false;
@@ -1347,6 +1554,19 @@ contract MandateManager {
     }
 
     /// @notice Remaining headroom in one rolling window right now.
+    ///
+    /// Counts what the ring holds for the buckets still inside the window and subtracts it
+    /// from the cap. Consumption ages out as the clock moves, so the answer rises again on
+    /// its own without anyone calling anything.
+    ///
+    /// An index at or past `windowCount` reads a zeroed spec, whose `subLength` is 0, and
+    /// this returns 0 — the same answer a real window that is fully consumed gives. Compare
+    /// the index against `getMandate(mandateId).windowCount` before reading 0 as "spent".
+    ///
+    /// @param mandateId The mandate.
+    /// @param wi Window position, from 0 to `windowCount - 1`.
+    /// @return How much more this one window would currently admit, in USDC base units.
+    /// Every other bound is ignored; `spendable` intersects them all.
     function windowRemaining(bytes32 mandateId, uint256 wi) public view returns (uint256) {
         WindowSpec memory w = _windows[mandateId][wi];
         if (w.subLength == 0) return 0;
@@ -1385,6 +1605,11 @@ contract MandateManager {
     /// mandate genuinely has no amount limit, and reporting 0 would tell a
     /// pre-flighting agent it cannot spend when it can. `spendable` clamps this
     /// down to the allowance and balance, which is where the real number comes from.
+    ///
+    /// @param mandateId The mandate.
+    /// @return The largest single amount the policy's amount bounds admit, in USDC base
+    /// units. 0 for a mandate `isLive` rejects, and `type(uint256).max` for a live mandate
+    /// with no amount bound at all.
     function policyHeadroom(bytes32 mandateId) public view returns (uint256) {
         Mandate storage m = _mandates[mandateId];
         if (!isLive(mandateId)) return 0;
@@ -1415,6 +1640,12 @@ contract MandateManager {
     /// worst skip a spend it could have made. This is also the only place the
     /// contract reads a balance at all; the `spend` path never does, so the
     /// truncation cannot affect what a policy permits.
+    ///
+    /// @param mandateId The mandate.
+    /// @return The largest single spend that would actually go through right now, in USDC
+    /// base units — `policyHeadroom` clamped by the payer's allowance to this contract and
+    /// their USDC balance. Still silent on the allowlist, the co-signature threshold, the two
+    /// ERC-8004 gates and nonce reuse, all of which `spend` also applies.
     function spendable(bytes32 mandateId) external view returns (uint256) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) return 0;
@@ -1486,6 +1717,15 @@ contract MandateManager {
     /// that constrain the state machine are mirrored there because they change which
     /// spends are legal, while a bound that only rations a read has nothing
     /// downstream depending on it, and JavaScript has no gas budget to ration.
+    ///
+    /// @param mandateIds Between 0 and `MAX_JOINT` ids, all belonging to the same payer, with
+    /// no repeats. An empty array is answered with 0 rather than refused. More than
+    /// `MAX_JOINT` reverts `TooManyMandates`, an id nobody owns reverts `UnknownMandate`, two
+    /// payers reverts `MixedPayers`, and a repeated id reverts `DuplicateMandate`.
+    /// @return What the whole set could move in total right now, in USDC base units: each
+    /// mandate's `policyHeadroom` clamped at `type(uint96).max`, summed, then clamped by the
+    /// one shared allowance and balance. Below the sum of the parts whenever the allowance is
+    /// the binding constraint, which is the number worth knowing.
     function spendableAcross(bytes32[] calldata mandateIds) external view returns (uint256) {
         uint256 n = mandateIds.length;
         // Answered, not refused. Nothing can move nothing, and reading `mandateIds[0]`
