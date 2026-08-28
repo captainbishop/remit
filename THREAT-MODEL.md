@@ -107,8 +107,9 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > of the nine carries its error name or its condition text alongside it, which is the mitigation
 > the first banner paragraph asks for.
 >
-> **2026-08-28, F19+F25: the three blobs are still three, but they are not the same three, and
-> F17's nine numbers are now ANCHORED rather than floating.** F17 committed as `088813d`, which is
+> **2026-08-28, F19+F25: the three blobs are still three, they are not the same three, and after
+> `65f05d8` all three are actually blobs — none of them is a working tree any more.** F17 committed
+> as `088813d`, which is
 > the single most useful consequence of that commit for this document: the nine bare numbers
 > described two paragraphs above as "WORKING-TREE numbers" have stopped being working-tree numbers
 > and become citations into a blob. All nine were re-checked against it one at a time and all nine
@@ -121,9 +122,14 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 >
 > | | lines | `error` decls | `SelfPayment` |
 > |---|---|---|---|
-> | `92445dd` — this banner's anchor | 1,204 | 31 | absent |
-> | `088813d` — `HEAD`, F15+F16+F17 | 1,501 | 34 | absent |
-> | working tree — F19+F25 on top | 1,523 | 35 | present |
+> | `92445dd` — this banner's original anchor | 1,204 | 31 | absent |
+> | `088813d` — F15+F16+F17 | 1,501 | 34 | absent |
+> | `65f05d8` — `HEAD`, F19+F25, **byte-identical to the working tree** | 1,523 | 35 | present |
+>
+> **The third row is why this table exists at all.** It started as three rows with the working tree
+> as the last one; F19+F25 committing turned that row into a named blob, which is the only form a
+> citation survives in. Read the table top to bottom as a history of what this file's numbers have
+> meant, and cite `65f05d8` for anything about today's code.
 >
 > **What that costs: the nine no longer match the working tree either.** F19 inserted its error
 > declaration above them and its two guards among them, so every one of the nine has moved — by
@@ -135,12 +141,16 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > to give the working-tree bounds `1116–1216` for the guard count**, which is the one place a
 > reader needs today's tree rather than yesterday's blob.
 >
-> **F19's own citations — `710` and `1160` — are working-tree numbers, and they are the only ones
-> in this file that are.** They will resolve against the F19 commit once it exists; until then
-> `grep -n 'revert SelfPayment' contracts/MandateManager.sol` is the recovery command, and it is a
-> better one than any line number because the guard is a single distinctive line in each function:
-> `if (recipient == m.payer) revert SelfPayment();`, identical text in both places. Per the first
-> paragraph's rule, the function names are `spend` and `approveCosignFor` and those do not move.
+> **F19's own citations — `710` and `1160` — are ANCHORED as of `65f05d8`, so this file has no
+> floating line numbers left.** `git show 65f05d8:contracts/MandateManager.sol` is 1,523 lines and
+> 35 `error` declarations, and both numbers were checked against it one at a time rather than
+> assumed to have survived the commit. The blob table above is therefore four rows now, not three,
+> and `65f05d8` is the row that agrees with the working tree. **`grep -n 'revert SelfPayment'
+> contracts/MandateManager.sol` remains the better recovery command** than either number, because
+> the guard is a single distinctive line in each function — `if (recipient == m.payer) revert
+> SelfPayment();`, identical text in both places — and per the first paragraph's rule the function
+> names are `spend` and `approveCosignFor`, which do not move at all. The next commit that touches
+> the contract makes `710` and `1160` stale again; the grep will not go stale.
 >
 > **The green figure is now 182/182, not 178/178.** Derived the same two ways as before — the run's
 > own summary line and the sum of the thirteen per-suite lines — and matched by
