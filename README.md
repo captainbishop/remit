@@ -2,11 +2,107 @@
 
 Bounded, revocable, non-custodial spending authority for autonomous agents on Arc.
 
-A payer grants an agent capped, rate-limited, allowlisted, expiring authority to
-spend the payer's USDC. Funds never leave the payer's wallet. Every spend carries an
-idempotency nonce and emits a reconcilable event. The payer can revoke instantly.
+A payer grants an agent capped, rate-limited, allowlisted, expiring authority to spend
+the payer's USDC. Funds stay in the payer's wallet. Every spend carries an idempotency
+nonce and emits a reconcilable event, and the payer can revoke at any time.
 
-**On naming.** The protocol is Remit; the object it issues is a **mandate**. That
+## The problem
+
+Companies are handing software agents the ability to move money, and each of the controls
+available to them fails in a different way.
+
+A **private key** in the agent's possession reaches the entire balance. Whatever limit
+exists is a line in the agent's own code, which is the software you are trying to
+constrain in the first place.
+
+An **ERC-20 allowance** is the reflexive answer, and it is a budget the agent can spend
+down to zero rather than a cap. It carries one number, with no rate, no recipient list,
+no expiry, and no record of why any particular payment cleared. On Arc it is weaker
+again, because USDC is the native asset: the same balance can leave a smart account as
+`msg.value`, and `allowance` is never consulted on that path. Arc's own wallet
+documentation carries this as a warning.
+
+**Unified Balance delegation** is binary. A delegate either can move the balance or
+cannot, and there is nothing in it that expresses how much, how fast, or to whom.
+
+**Per-job escrow** does stop the attack, and it stops it by asking a person to approve
+every payment. Across two hundred invoices a month that hands back the work the agent
+was hired to do.
+
+A **custodial vendor with a monthly cap** enforces a real limit, and you learn what
+happened from that vendor's dashboard, from records only they can produce and only they
+can vouch for.
+
+What makes this urgent rather than interesting is the shape of the failure. An agent has
+to read text from outside your company to do its job, and reading text from outside your
+company is how it gets talked into a payment. Prompt injection has no fix today, the
+number of organisations pointing an agent at a payment rail rises every month, and the
+person who used to hesitate at a familiar vendor with an unfamiliar account number is
+the person the agent replaced.
+
+## The solution
+
+A **mandate**: a spending policy the payer writes once, stored on-chain, that the
+contract applies to every payment the agent attempts.
+
+The payer calls `createMandate`, names the agent, and sets whichever of these apply.
+
+| Bound | What it does |
+|---|---|
+| per-transaction cap | the largest single payment allowed |
+| rolling windows | one to four, each with its own length and cap — a day, a week, a month |
+| lifetime total | the most this mandate can ever spend |
+| recipient allowlist | the only addresses permitted to receive money |
+| start time and expiry | when the authority begins, and when it dies |
+| co-signature threshold | above this amount, a second party must approve the exact payment before it can go through |
+| ERC-8004 identity or credential | the agent must hold a named on-chain identity, or a fresh attestation from a validator the payer names |
+
+At least one of the lifetime total or the expiry is required, so every mandate has a
+horizon.
+
+The agent then calls `spend`. The contract applies every rule the mandate sets and either
+moves the money or refuses with a named error saying which rule stopped it.
+
+Three properties separate this from the controls above.
+
+**The payer keeps custody.** Funds never enter this contract. The payer holds their own
+USDC and grants an ERC-20 allowance; a spend is `transferFrom(payer → recipient)`
+straight through. The allowance is the outer bound, so a bug in this contract can never
+cost more than it, and `approve(usdc, remit, 0)` is a hard stop the payer applies alone,
+enforced by USDC rather than by anything here.
+
+**The record is public and reads the same for everyone.** Every spend emits an event
+carrying the amount, the recipient, a reference and an idempotency nonce, and every
+refusal is a named error rather than a generic failure. The payer, the agent, the
+recipient and an auditor each read the same history without having to trust one another.
+
+**Revocation settles in one confirmation.** The payer or the agent may call `revoke`, and
+Arc has deterministic finality, so once the revocation is included it cannot be undone. A
+spend already sitting in the mempool can still be included ahead of it, which makes
+revocation immediate on inclusion rather than on submission.
+
+## The limits
+
+A payer who does not know these will over-trust the primitive.
+[THREAT-MODEL.md](THREAT-MODEL.md) §2 states all seven in full, with the reasoning.
+
+Remit bounds what the *agent* can do through *this contract*. It cannot bound what the
+payer's own account does. If the payer is a smart account, any module with execution
+rights on it can move the same USDC without consulting Remit at all.
+
+A mandate names an address, so whoever holds that key is the agent. Without an allowlist,
+the agent can pay itself, up to the caps.
+
+Circle can freeze either side of a payment, and both ERC-8004 registry addresses are
+fixed at deployment and can never be changed.
+
+Everything is public: every cap, every recipient, every payment.
+
+**This has not been audited.** [scope.md](scope.md) states what an auditor would read.
+
+## On naming
+
+The protocol is Remit; the object it issues is a **mandate**. That
 split is deliberate. "Mandate" is the existing term of art for standing, bounded
 authority to take money from someone else's account — SEPA direct debit runs on
 mandates — so the on-chain type keeps a name that a payments person already
@@ -17,17 +113,19 @@ hidden: *to remit* also means to send payment, which is the one thing this proto
 does not do — it never holds or moves money on its own behalf, it bounds someone
 else's ability to move yours.
 
+## Where to start
+
 **New to this?** Read **[START-HERE.md](START-HERE.md)** — it assumes no development
 experience, explains what state each piece of the project is in, and gives the exact
 commands for getting from here to a working testnet deployment.
 
-Otherwise read **[DESIGN.md](DESIGN.md)** first — it covers why the four existing
-options (allowance, unified-balance delegate, per-job escrow, custodial off-chain
-policy) are all inadequate, and what this does *not* bound.
+Otherwise read **[DESIGN.md](DESIGN.md)** first. It argues the four alternatives above at
+length, works a full attack through a configured mandate step by step, and records the
+decisions behind each field.
 
 Two documents are about the limits rather than the capabilities, and they are the ones to
 read before trusting anything here with money. **[THREAT-MODEL.md](THREAT-MODEL.md)** is the
-adversarial review — what Remit protects, what it does not, and twenty-six findings against the
+adversarial review — what Remit protects, what it does not, and twenty-eight findings against the
 current surface. **[IMMUTABILITY.md](IMMUTABILITY.md)** answers the question a payer should
 ask second: the deployed contract has no admin, no pause and no upgrade path, so what happens
 when something is wrong with it? It includes the migration runbook and the two kill switches,
@@ -37,17 +135,22 @@ one of which lives in USDC rather than in this codebase.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   57 tests, including boundary-aiming fuzzers
-contracts/MandateManager.sol   on-chain implementation (140 tests pass; live on Arc Testnet)
-test/                      140 Forge tests against the real storage layout
+reference/policy.test.js   76 tests, including boundary-aiming fuzzers
+contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
+test/                      185 Forge tests in 11 files, against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
+script/Deploy.s.sol        deploys with the constructor arguments pinned per chain
 demo/playground.html       browser simulation with 7 scripted attacks
+scope.md                   what an auditor is being asked to read, and what they are not
 DESIGN.md                  rationale, worked examples, verification worksheet
-THREAT-MODEL.md            the adversarial review: assets, boundaries, 26 findings
+THREAT-MODEL.md            the adversarial review: assets, boundaries, 28 findings
 IMMUTABILITY.md            what "no upgrade path" means for a payer, and the migration runbook
 FORGE.md                   how to run the Forge suite, and what to expect
 START-HERE.md              the on-ramp, if this is your first project
 ```
+
+The tree here is v2 in progress. The contract deployed on Arc Testnet is the tag
+`v1.0.0-arc-testnet`, and `main` no longer reproduces its bytecode.
 
 ## Run the tests
 
@@ -65,12 +168,14 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-There is now a second suite, in Solidity: 140 Forge tests in `test/`, covering the
+There is now a second suite, in Solidity: 185 Forge tests in `test/`, covering the
 same ground plus the three properties a JavaScript model structurally cannot express —
 that a failed spend consumes nothing (real transaction rollback), that rewinding onto
 the same physical ring slot accumulates rather than overwrites (real storage aliasing),
 and that `totalSpent` panics rather than wrapping near 2^96 (real packed arithmetic).
-All 140 pass, under `solc` 0.8.28 — 2,048 fuzz runs and 49,152 invariant calls.
+All 185 pass, under `solc` 0.8.28 — 2,048 fuzz runs and 49,152 invariant calls, and
+coverage of `contracts/MandateManager.sol` stands at 100% of lines, statements, branches
+and functions.
 **[FORGE.md](FORGE.md)** covers setup, the two commands that check the suite is not
 passing vacuously, and what the first build and the first run actually found.
 
@@ -108,7 +213,7 @@ encrypted keystore instead: the key is never printed and never written in plaint
 
 ```
 forge build                                    # clean; forge-std 1.9.6 is vendored in lib/
-forge test                                     # 140 tests, all passing
+forge test                                     # 185 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;
                                                     # prints the address, never the key
@@ -157,7 +262,7 @@ by `createMandate(salt, params)`, and then the delegate can `spend`.
 
 ## Status, honestly
 
-**Verified.** The reference model runs and passes 57 tests. It found six real
+**Verified.** The reference model runs and passes 76 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
 collision at low timestamps) and two in the credential gate (unchecked validator,
@@ -275,10 +380,12 @@ test's 24,816 for `createMandate`, a 12-gas gap caused by a single byte of the s
 address. Deployment reconciled to **0.009%**: 2,557,681 predicted against 2,557,453 charged.
 
 Two numbers here were wrong in earlier drafts of this file and are worth naming. The
-contract is **11,572 bytes** of runtime code, not the 11,964 published for weeks — the
-real figure is confirmed twice, by `forge build --sizes` and by the on-chain code length,
-whereas 11,964 came from a single unverified source and matches neither the runtime nor
-the initcode (11,868). And Arc's 20 Gwei base fee is a *floor*, not a price: every
+deployed v1 contract is **11,572 bytes** of runtime code, against the 11,964 this file
+published for weeks — 11,572 is confirmed twice, by `forge build --sizes` at the v1 tag
+and by the contract's own on-chain code length, whereas 11,964 came from a single
+unverified source and matches neither the runtime nor the initcode (11,868). The v2 tree
+on `main` measures 14,458 runtime and 14,768 initcode, so an unqualified 11,572 anywhere
+in this repository means v1. And Arc's 20 Gwei base fee is a *floor*, not a price: every
 transaction so far settled at 21 Gwei, so every cost figure computed at the floor ran ~5%
 low. Deployment cost **0.0537 USDC**, not the 0.051 published.
 
@@ -439,7 +546,7 @@ The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 140 tests, including exact-ledger property tests and
+The Forge port is written and runs — 185 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence. All pass. Gas is
 measured against Arc's real USDC, `K=24` is settled as affordable, and the contract is
 deployed and exercised on testnet.
