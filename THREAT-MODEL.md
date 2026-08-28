@@ -199,6 +199,21 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > right answer; a crash-kill proves only that it would not stay green. Both are kills; only the
 > first is what a gate is for, so the figure to quote is "31/31, two of them crash-only" rather
 > than a bare 31/31.
+>
+> **2026-08-28, F27+F28 ANCHORED as of `d4f15ac`, and for once nothing had to be re-checked.**
+> That commit carries `THREAT-MODEL.md`, `CHANGELIST.md`, `reference/mutation-gate.js` and
+> `reference/policy.test.js` — and **neither of the two files F27 and F28 cite is among them.**
+> `git diff --stat 01541e7 d4f15ac -- reference/policy.js` is empty and so is the same command for
+> `contracts/`, so both findings' citations resolve against **`65f05d8`**, which is already the
+> blob table's last row and is the commit that last touched *both* cited files. F28's `:578` was
+> printed out of `git show d4f15ac:reference/policy.js` and reads
+> `mandate.identity.expectedOwner &&`, which is the bare-truthiness test the finding is about.
+>
+> **The general rule this instance illustrates, since the last three commits each paid for it:** a
+> finding's line numbers are floating until a commit exists, and anchoring them is a separate step.
+> What made it free this time is that the commit changed **no cited file** — so the cheapest way to
+> keep citations anchored is to keep evidence and subject in different commits, which is what
+> "no `.sol` file is touched" bought here beyond sparing a `forge` run.
 
 ## Why this document exists
 
