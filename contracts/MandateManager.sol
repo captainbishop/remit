@@ -18,16 +18,21 @@ pragma solidity 0.8.28;
  * │  WHAT V1 ESTABLISHED - evidence for the design, not proof of these        │
  * │  bytes. Thirty-one live transactions, every one status 1: five mandates,  │
  * │  five spends, three revocations, two cosign approvals, two withdrawals.   │
- * │  That is all five state-changing paths with receipts - createMandate,     │
- * │  spend, revoke, approveCosign, withdrawCosign - and the five is           │
- * │  enumerated from this file rather than recalled. Every spend emitted two  │
- * │  Transfer logs, one from USDC's ERC-20 view and one from Arc's native     │
- * │  emitter, and all ten carry the PAYER as sender, never this contract, so  │
- * │  non-custody is observable rather than argued. Both ERC-8004 gates fired  │
- * │  against Arc's real registries. Gas against real Arc USDC at the 21 Gwei  │
- * │  charged: a first-ever policed spend cost 216,458 and the steady state    │
- * │  is 177,429, of which ~103,500 is the policy machinery and ~13,100 is     │
- * │  Arc's own native-USDC accounting.                                        │
+ * │  That is all five state-changing paths V1 EXPOSED, with receipts -        │
+ * │  createMandate, spend, revoke, approveCosign, withdrawCosign - and that   │
+ * │  list is enumerated from the TAGGED source, because it is a claim about   │
+ * │  v1. Do not read it as a list of THIS file's paths. #28 deleted           │
+ * │  approveCosign outright and put approveCosignFor in its place, and        │
+ * │  approveCosignFor has never run on any chain. So four of this file's five │
+ * │  paths have a v1 receipt for the same signature, the cosign approval path │
+ * │  has none at all, and even the four are v1's bytes and not these.         │
+ * │  Every spend emitted two Transfer logs, one from USDC's ERC-20 view and   │
+ * │  one from Arc's native emitter, and all ten carry the PAYER as sender,    │
+ * │  never this contract, so non-custody is observable rather than argued.    │
+ * │  Both ERC-8004 gates fired against Arc's real registries. Gas against     │
+ * │  real Arc USDC at the 21 Gwei charged: a first-ever policed spend cost    │
+ * │  216,458 and the steady state is 177,429, of which ~103,500 is the        │
+ * │  policy machinery and ~13,100 is Arc's own native-USDC accounting.        │
  * │                                                                           │
  * │  WHAT NONE OF THAT ESTABLISHES ABOUT THIS FILE. Every figure above is a   │
  * │  property of v1's bytecode. v2 changes the ABI, adds a grant-time         │
@@ -188,6 +193,29 @@ contract MandateManager {
     /// fits one `eth_call` at every default node gas cap.
     uint256 public constant MAX_JOINT = 8;
 
+    /// NEW IN v2 (F16). The furthest ahead a co-signer may set an approval's deadline.
+    ///
+    /// v1 approvals never decayed: `_cosignApproved` held a `bool` and the only ways out
+    /// were consumption and withdrawal, so an approval was good for the whole life of the
+    /// mandate. `Cosign.t.sol` still holds the receipt for why that tail is dangerous — it
+    /// approves a spend, has it refused by a window cap, warps a day forward and settles it
+    /// — which is *correct* on its own terms (burning a signature on a transient failure
+    /// pushes a human into pre-approving in bulk, and the control stops meaning anything)
+    /// but composes badly with #22's requirement that every mandate carry a lifetime bound,
+    /// since the recommended way to keep an open-ended arrangement creatable is a distant
+    /// `expiresAt`. "Until used or withdrawn" then means years.
+    ///
+    /// So the deadline is the co-signer's to choose and this is the ceiling on it. Thirty
+    /// days is picked from both directions: the floor is that same test, which needs an
+    /// approval to survive `DAY + DAY/12` — about 26 hours — so any ceiling near a day
+    /// would contradict reasoning this contract deliberately keeps; the reason not to go
+    /// further is that a co-signer who genuinely needs longer can approve again, and that
+    /// is the gate firing a second time rather than a gate that stopped existing. An
+    /// uncapped `validUntil` would leave F16 advisory, because an agent that constructs the
+    /// transaction can pre-fill `type(uint40).max` and a co-signer who does not read the
+    /// field is back to a multi-year approval.
+    uint40 public constant MAX_COSIGN_TTL = 30 days;
+
     // Feature flags. Explicit rather than inferred from zero values, because
     // some zeros are meaningful: a cosignThreshold of 0 means "every spend needs
     // a co-signature", which is very different from "no co-signature required".
@@ -263,7 +291,16 @@ contract MandateManager {
     mapping(bytes32 => CredentialGate) private _credential;
     mapping(bytes32 => mapping(address => bool)) private _allowlist;
     mapping(bytes32 => mapping(bytes32 => bool)) private _usedNonce;
-    mapping(bytes32 => mapping(bytes32 => bool)) private _cosignApproved;
+    /// mandateId => spendHash => the timestamp the approval dies AT, exclusive.
+    ///
+    /// CHANGED IN v2 (F16) from `bool`. Zero keeps meaning "no approval exists", which is
+    /// the same one-directional rule #22 applied to `expiresAt`: a field whose zero is
+    /// "absent" must never be writable as a meaningful value, so `approveCosignFor` refuses
+    /// any `validUntil` at or below `block.timestamp`. Widening the value costs nothing in
+    /// layout — `forge inspect MandateManager storage-layout` puts all eight of these
+    /// mappings at 32 bytes in slots 0-7 regardless of value type, and this one is last, so
+    /// nothing follows it to shift.
+    mapping(bytes32 => mapping(bytes32 => uint40)) private _cosignApproved;
 
     // ---------------------------------------------------------------------
     // Events. The audit trail lives here and does not depend on the Memo
@@ -294,7 +331,29 @@ contract MandateManager {
     );
 
     event MandateRevoked(bytes32 indexed mandateId, address indexed by);
-    event CosignApproved(bytes32 indexed mandateId, bytes32 indexed spendHash, address indexed cosigner);
+
+    /// CHANGED IN v2 (F15/F16), and its topic0 with it, so a v1 indexer must be rebuilt.
+    ///
+    /// v1 emitted the mandate, the hash and the co-signer and nothing else, which made the
+    /// audit trail exactly as illegible as the transaction that produced it: an indexer had
+    /// to decode calldata to learn what had been approved, and a payer reading events could
+    /// not tell a 5,000 approval from a 5,000,000 one. The contract now knows the recipient
+    /// and the amount at approval time — that is the whole point of `approveCosignFor` — so
+    /// withholding them from the log would move the illegibility rather than remove it.
+    /// Three words of data, about 768 gas.
+    ///
+    /// It does NOT close F12. A payer still cannot ask the contract which approvals are
+    /// outstanding; they can now RECONSTRUCT that from logs, by pairing each
+    /// `CosignApproved` with the `Spend` or `CosignWithdrawn` that consumed it and treating
+    /// anything past `validUntil` as dead. That is an indexer's job, not a view's.
+    event CosignApproved(
+        bytes32 indexed mandateId,
+        bytes32 indexed spendHash,
+        address indexed cosigner,
+        address recipient,
+        uint256 amount,
+        uint40 validUntil
+    );
     event CosignWithdrawn(bytes32 indexed mandateId, bytes32 indexed spendHash, address indexed cosigner);
 
     // ---------------------------------------------------------------------
@@ -333,6 +392,19 @@ contract MandateManager {
     error TotalSpentCeiling();
     error NonceAlreadyUsed();
     error CosignRequired(bytes32 spendHash);
+    /// NEW IN v2 (F16). Deliberately NOT folded into `CosignRequired`. The two conditions
+    /// need different actions from whoever reads the revert: `CosignRequired` means nobody
+    /// has approved this spend, `CosignExpired` means somebody did and the window closed, so
+    /// the agent should ask the same human again rather than wonder whether the request ever
+    /// reached them. Carrying the deadline says WHEN it died, which is the fact an operator
+    /// reconstructing a failed run actually needs. Same reason #23 splits
+    /// `CredentialMissing`.
+    error CosignExpired(bytes32 spendHash, uint40 validUntil);
+    /// NEW IN v2 (F16). A `validUntil` at or below `block.timestamp` would be born dead, and
+    /// one past `MAX_COSIGN_TTL` is the tail F16 exists to end. Refused rather than clamped:
+    /// silently moving a co-signer's deadline would make the value they signed and the value
+    /// stored disagree, which is the defect this repository has now refused three times.
+    error BadDeadline(uint40 validUntil);
     error IdentityNotHeld();
     error IdentityTransferred();
     error CredentialMissing();
@@ -464,7 +536,7 @@ contract MandateManager {
         // a one-directional rule rather than an iff.
         if (flags & F_COSIGN == 0 && p.cosignThreshold != 0) revert BadConfig();
 
-        // (2) The agent may not be its own cosigner. `approveCosign` requires
+        // (2) The agent may not be its own cosigner. `approveCosignFor` requires
         // msg.sender == m.cosigner and nothing else, so a mandate whose cosigner is its
         // spender lets the agent approve its own spend hash and then spend it: two
         // transactions instead of one, and no second party anywhere. That is not a weaker
@@ -687,9 +759,21 @@ contract MandateManager {
 
         _checkAndCommitWindows(mandateId, m.windowCount, amount96, nowTs);
 
-        hash = spendHash(mandateId, msg.sender, recipient, amount, ref, nonce);
+        // `msg.sender == m.spender` was proven above, so reading the spender back out of
+        // storage here is the same hash v1 computed from `msg.sender` — the change is to the
+        // INTERFACE, not to the preimage. Calling the public view rather than inlining
+        // `keccak256` keeps exactly one implementation of the encoding in the contract, which
+        // is worth one warm SLOAD: two copies of a nine-field `abi.encode` is precisely the
+        // kind of pair that drifts.
+        hash = spendHash(mandateId, recipient, amount, ref, nonce);
         if (m.flags & F_COSIGN != 0 && amount > m.cosignThreshold) {
-            if (!_cosignApproved[mandateId][hash]) revert CosignRequired(hash);
+            uint40 validUntil = _cosignApproved[mandateId][hash];
+            if (validUntil == 0) revert CosignRequired(hash);
+            // Exclusive, exactly like `m.expiresAt` above and for the same reason: Arc's
+            // sub-second blocks can share a timestamp, so an inclusive bound would leave an
+            // ambiguous final second where liveness depends on which block within that
+            // second included the transaction.
+            if (nowTs >= validUntil) revert CosignExpired(hash, validUntil);
             delete _cosignApproved[mandateId][hash]; // one signature authorises one spend
         }
 
@@ -913,32 +997,95 @@ contract MandateManager {
     }
 
     /**
-     * @notice Pre-approve exactly one spend above the co-sign threshold.
+     * @notice Pre-approve exactly one spend above the co-sign threshold, by its fields.
      *
-     * The hash binds mandate, spender, recipient, amount, reference and nonce,
-     * so an approval cannot be redirected to a different recipient or inflated
-     * to a different amount. It also binds chainid and this contract's address,
-     * so it cannot be replayed against another deployment.
+     * REPLACES v1's `approveCosign(bytes32 mandateId, bytes32 hash)`, which is gone rather
+     * than kept alongside this (F15). The old function took a hash and nothing else, so it
+     * never learned the recipient, the amount, the reference or the nonce — a hash is not
+     * invertible and this contract keeps no reverse index. The transaction a co-signer signed
+     * therefore carried two 32-byte words and no readable fact about the payment. On a
+     * hardware wallet it read `approveCosign(0x…, 0x…)`; behind a Safe it was worse, because
+     * the second and third signers were approving a hash of a claim made to somebody else.
      *
-     * This requires the co-signer to send a transaction. An EIP-712 signature
-     * variant would be better UX — the approver signs off-chain and the agent
-     * submits it — and it is a deliberate omission rather than an oversight. It
-     * was originally left out because this file was written with no compiler
-     * available and unverifiable signature-recovery code is the worst possible
-     * thing to ship on trust. That reason has expired; the remaining one is
-     * scope. If it is added, it needs its own malleability, replay and
-     * chain-binding tests, not a green suite inherited from this path.
+     * That is blind signing, and it mattered here more than it would anywhere else in this
+     * contract. Every other control is enforced by the contract — caps, allowlist, expiry,
+     * nonce, spender — and the co-signature gate is the one whose entire value is a human
+     * judgment. It handed that human the least legible object it had.
+     *
+     * Deleting the old entry point rather than adding this one beside it is the part worth
+     * defending, because it cost real work and one piece of evidence. Keeping both would have
+     * left the choice of path with whoever asks for the signature, and the party most likely
+     * to ask is the agent: an agent that wants a co-signer to approve something they have not
+     * read would simply keep using the illegible call. A legibility control that the
+     * adversary can opt out of on the victim's behalf is not a control. The evidence cost is
+     * named in `test/ArcParity.t.sol`, where measurement 4 could compare a local
+     * `approveCosign` against a real Arc receipt for the identical function, and now cannot.
+     *
+     * Deriving the hash from `m.spender` rather than a parameter also retires a footgun in
+     * the public `spendHash`, whose `spender_` argument let an off-chain caller compute — and
+     * a co-signer then approve — a hash that no spend could ever match. The preimage is
+     * unchanged: same nine fields in the same order, with `m.spender` where `spender_` stood.
+     *
+     * @param validUntil The timestamp this approval dies AT, exclusive. The co-signer's
+     * choice, bounded below by `block.timestamp` (a deadline already past would be born dead)
+     * and above by `MAX_COSIGN_TTL`. See F16 on that constant for why both bounds exist.
+     * @return hash The spend hash now approved. Returned rather than only logged so a
+     * co-signer's own transaction receipt carries the one value `withdrawCosign` needs — F12
+     * is that neither party can enumerate outstanding approvals, and this is the cheap half.
+     *
+     * What this deliberately does NOT do is refuse an approval that can never be consumed: a
+     * revoked or expired mandate, or an amount at or below the threshold, or a zero amount or
+     * recipient. Those are F17, they are next, and they are separable precisely because they
+     * add no parameters — the reason F15 and F16 had to land together is that both rewrote
+     * this signature, and F17 does not.
+     *
+     * This still requires the co-signer to send a transaction. An EIP-712 signature variant
+     * would be better UX — the approver signs off-chain and the agent submits it — and it is
+     * a deliberate omission rather than an oversight. It was originally left out because this
+     * file was written with no compiler available and unverifiable signature-recovery code is
+     * the worst possible thing to ship on trust. That reason has expired; the remaining one
+     * is scope. If it is added, it needs its own malleability, replay and chain-binding
+     * tests, not a green suite inherited from this path. Note it would also have to carry
+     * these explicit fields rather than a bare hash, for the reason above.
      */
-    function approveCosign(bytes32 mandateId, bytes32 hash) external {
+    function approveCosignFor(
+        bytes32 mandateId,
+        address recipient,
+        uint256 amount,
+        bytes32 ref,
+        bytes32 nonce,
+        uint40 validUntil
+    ) external returns (bytes32 hash) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) revert UnknownMandate();
         if (m.flags & F_COSIGN == 0) revert BadConfig();
         if (msg.sender != m.cosigner) revert NotCosigner();
-        _cosignApproved[mandateId][hash] = true;
-        emit CosignApproved(mandateId, hash, msg.sender);
+
+        uint256 nowTs = block.timestamp;
+        // Both bounds refuse rather than clamp, and the lower one is why zero can keep
+        // meaning "no approval" in the mapping.
+        if (validUntil <= nowTs || uint256(validUntil) > nowTs + MAX_COSIGN_TTL) {
+            revert BadDeadline(validUntil);
+        }
+
+        hash = spendHash(mandateId, recipient, amount, ref, nonce);
+        _cosignApproved[mandateId][hash] = validUntil;
+        emit CosignApproved(mandateId, hash, msg.sender, recipient, amount, validUntil);
     }
 
     /// @notice Withdraw an approval that has not been used yet.
+    ///
+    /// Still keyed by hash, and that is deliberate rather than an oversight of F15's
+    /// argument. The hazard F15 removes is a co-signer GRANTING authority they cannot read;
+    /// withdrawing only ever removes authority, so the worst outcome of passing the wrong
+    /// hash here is that nothing happens. `approveCosignFor` returns the hash and
+    /// `CosignApproved` logs it, so a co-signer who approved through this contract has it.
+    ///
+    /// An expired approval is not cleared by the spend that trips over it — `spend` reverts,
+    /// which rolls back any write — so it sits in storage reported by
+    /// `cosignApprovalDeadline` until someone calls this. That is inert (`spend` refuses it
+    /// on every future block) but it is storage nobody is obliged to clean, which is the same
+    /// shape as F17's unconsumable approvals and is noted there.
     function withdrawCosign(bytes32 mandateId, bytes32 hash) external {
         Mandate storage m = _mandates[mandateId];
         if (msg.sender != m.cosigner) revert NotCosigner();
@@ -950,16 +1097,26 @@ contract MandateManager {
     // Views — pre-flight checks so an agent does not waste gas on a doomed call
     // =====================================================================
 
-    function spendHash(
-        bytes32 mandateId,
-        address spender_,
-        address recipient,
-        uint256 amount,
-        bytes32 ref,
-        bytes32 nonce
-    ) public view returns (bytes32) {
+    /// @notice The hash a co-signature binds, and the idempotency key of a spend.
+    ///
+    /// CHANGED IN v2 (F15): the `spender_` parameter is gone and the spender is read from the
+    /// mandate. The preimage is identical — same nine fields, same order — so this returns
+    /// what v1 returned for the same mandate; what is no longer expressible is a hash naming
+    /// a spender the mandate does not have, which nothing could ever match and which a
+    /// co-signer could nonetheless have been handed and approved.
+    ///
+    /// Reverts on an unknown mandate rather than hashing `address(0)` as the spender. A view
+    /// that answers a meaningless question with a plausible 32 bytes is the same defect one
+    /// layer down.
+    function spendHash(bytes32 mandateId, address recipient, uint256 amount, bytes32 ref, bytes32 nonce)
+        public
+        view
+        returns (bytes32)
+    {
+        Mandate storage m = _mandates[mandateId];
+        if (m.payer == address(0)) revert UnknownMandate();
         return keccak256(
-            abi.encode(DOMAIN, block.chainid, address(this), mandateId, spender_, recipient, amount, ref, nonce)
+            abi.encode(DOMAIN, block.chainid, address(this), mandateId, m.spender, recipient, amount, ref, nonce)
         );
     }
 
@@ -975,7 +1132,27 @@ contract MandateManager {
         return _usedNonce[mandateId][nonce];
     }
 
+    /// @notice Whether this spend hash would be honoured RIGHT NOW.
+    ///
+    /// CHANGED IN v2 (F16). The signature is v1's, the meaning is not: it was a bare read of
+    /// the mapping, so under a `uint40` value it would report `true` for an approval that
+    /// expired months ago. That is the exact defect #11 and #22 each refused at grant time —
+    /// state whose display and whose enforcement disagree — and refusing it there while
+    /// shipping it in a view would make the doctrine a preference about two fields.
+    ///
+    /// Use `cosignApprovalDeadline` to see the stored value, including a dead one.
     function isCosignApproved(bytes32 mandateId, bytes32 hash) external view returns (bool) {
+        uint40 validUntil = _cosignApproved[mandateId][hash];
+        return validUntil != 0 && block.timestamp < validUntil;
+    }
+
+    /// @notice The raw deadline stored against a spend hash, exclusive.
+    ///
+    /// NEW IN v2 (F16). Zero means no approval was ever written. Any other value is the
+    /// timestamp it dies at, which may already be past — that is the point of exposing it. A
+    /// payer or co-signer auditing a mandate wants to distinguish "never approved" from
+    /// "approved and it lapsed", and `isCosignApproved` returns `false` for both.
+    function cosignApprovalDeadline(bytes32 mandateId, bytes32 hash) external view returns (uint40) {
         return _cosignApproved[mandateId][hash];
     }
 
@@ -1038,7 +1215,7 @@ contract MandateManager {
     /// v1 comment here named only the first two. The allowlist is a property of the
     /// recipient rather than the amount. The co-signature requirement gates spends
     /// ABOVE a threshold instead of capping them, so a large number here may still
-    /// need an `approveCosign` first. BOTH ERC-8004 GATES ARE ALSO INVISIBLE HERE:
+    /// need an `approveCosignFor` first. BOTH ERC-8004 GATES ARE ALSO INVISIBLE HERE:
     /// `isLive` covers revocation, `notBefore` and expiry and stops there, making no
     /// external calls, while the identity and credential gates read the registries
     /// during `spend` — so a mandate whose agent has transferred its identity NFT,

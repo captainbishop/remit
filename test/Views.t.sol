@@ -443,30 +443,65 @@ contract ViewsTest is Base {
 
         assertFalse(mm.isNonceUsed(bytes32("nope"), bytes32("n")));
         assertFalse(mm.isCosignApproved(bytes32("nope"), bytes32("h")));
+        assertEq(mm.cosignApprovalDeadline(bytes32("nope"), bytes32("h")), 0, "zero means absent");
     }
 
-    /// `spendHash` is a pure function of its arguments and must be stable across
-    /// calls — an agent computes it, shows it to a human, and submits it later.
+    /// `spendHash` is the ONE view that reverts on an unknown mandate rather than reading as
+    /// empty, and the asymmetry is deliberate rather than an oversight in the list above.
+    ///
+    /// v2 (F15) made it read the mandate's spender instead of taking one as an argument, so on
+    /// an absent mandate it would otherwise return the hash of a spend by the zero address —
+    /// a well-formed 32 bytes that no `spend` can ever match. Every other view here answers a
+    /// question about state and "there is none" is a true answer; this one manufactures a
+    /// value a caller would then hand to a cosigner, so silence is the wrong output.
+    function test_spendHash_onUnknownMandate_reverts() public {
+        vm.expectRevert(MandateManager.UnknownMandate.selector);
+        mm.spendHash(bytes32("nope"), vendor, usd(10), REF, bytes32("n"));
+    }
+
+    /// `spendHash` is a pure function of its arguments and the mandate's spender, and must be
+    /// stable across calls — an agent computes it, shows it to a human, and submits it later.
+    ///
+    /// v2 (F15) turned it from `pure`-in-spirit into a storage read, which is exactly why this
+    /// test is worth more than it was: a spend and a 5,000-second warp both happen between the
+    /// two calls, so the assertion now says the hash ignores the clock, the nonce counter, and
+    /// every spend-mutated field of the mandate it reads — not merely that keccak is a function.
     function test_spendHash_isDeterministic() public {
         bytes32 id = grant(simpleParams());
-        bytes32 a = mm.spendHash(id, agent, vendor, usd(10), REF, bytes32("n"));
+        bytes32 a = mm.spendHash(id, vendor, usd(10), REF, bytes32("n"));
         vm.warp(block.timestamp + 5000);
         pay(id, usd(1));
-        bytes32 b = mm.spendHash(id, agent, vendor, usd(10), REF, bytes32("n"));
+        bytes32 b = mm.spendHash(id, vendor, usd(10), REF, bytes32("n"));
         assertEq(a, b, "no state and no clock in the hash");
     }
 
     /// Every field is inside the hash. If any one of these collides, a co-signature
     /// for one payment authorises a different one.
+    ///
+    /// Two of the six fields moved out of the argument list in v2 and are varied through a
+    /// second mandate instead. That is a stronger test than the old one, not a weaker one:
+    /// `spender` and `mandateId` used to be varied as free arguments, so the old assertions
+    /// could be satisfied by a hash that no caller could ever actually obtain. Here both
+    /// mandates exist, both hashes are obtainable, and they still differ.
     function test_spendHash_dependsOnEveryField() public {
         bytes32 id = grant(simpleParams());
-        bytes32 base = mm.spendHash(id, agent, vendor, usd(10), REF, bytes32("n"));
+        bytes32 base = mm.spendHash(id, vendor, usd(10), REF, bytes32("n"));
 
-        assertTrue(base != mm.spendHash(id, other, vendor, usd(10), REF, bytes32("n")), "spender");
-        assertTrue(base != mm.spendHash(id, agent, other, usd(10), REF, bytes32("n")), "recipient");
-        assertTrue(base != mm.spendHash(id, agent, vendor, usd(11), REF, bytes32("n")), "amount");
-        assertTrue(base != mm.spendHash(id, agent, vendor, usd(10), bytes32("x"), bytes32("n")), "reference");
-        assertTrue(base != mm.spendHash(id, agent, vendor, usd(10), REF, bytes32("m")), "nonce");
-        assertTrue(base != mm.spendHash(bytes32("other-id"), agent, vendor, usd(10), REF, bytes32("n")), "mandate");
+        assertTrue(base != mm.spendHash(id, other, usd(10), REF, bytes32("n")), "recipient");
+        assertTrue(base != mm.spendHash(id, vendor, usd(11), REF, bytes32("n")), "amount");
+        assertTrue(base != mm.spendHash(id, vendor, usd(10), bytes32("x"), bytes32("n")), "reference");
+        assertTrue(base != mm.spendHash(id, vendor, usd(10), REF, bytes32("m")), "nonce");
+
+        // Same payer, same salt-free everything, different SPENDER.
+        MandateManager.MandateParams memory p = simpleParams();
+        p.spender = other;
+        vm.prank(payer);
+        bytes32 otherSpender = mm.createMandate(bytes32("vh-spender"), p);
+        assertTrue(base != mm.spendHash(otherSpender, vendor, usd(10), REF, bytes32("n")), "spender");
+
+        // Same spender, different MANDATE. `grant` bumps the salt, so this is a distinct id
+        // with identical policy — which isolates the id itself as the varying field.
+        bytes32 otherId = grant(simpleParams());
+        assertTrue(base != mm.spendHash(otherId, vendor, usd(10), REF, bytes32("n")), "mandate");
     }
 }

@@ -177,6 +177,16 @@ declaration in the contract for `external` or `public` without `view` or `pure` 
 `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`, and the count beside
 that list had been wrong for weeks. All five now have live transactions.
 
+**Everything in this directory is v1 evidence, so every `approveCosign` in this file is correct
+and must stay.** #28 deleted that function from the source tree and replaced it with
+`approveCosignFor`; the receipts here were produced by v1's bytecode at
+`0x3744E93B9e796E05CB66311d897559B6F3860196`, which still holds the old function and always
+will. Two consequences. The parse described above returns `approveCosignFor` if you run it on
+the working tree, so run it on `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to
+reproduce the five names. And "all five now have live transactions" is true of v1 and **false of
+v2** — four of v2's five paths have a receipt for the same signature, and the cosign approval
+path has none.
+
 A third correction came out of these logs a day later, and it reverses a published finding.
 Compare each receipt above against the corresponding row of `gas.log`, subtracting each
 transaction's own intrinsic cost from both:
@@ -195,6 +205,13 @@ top of this file was wrong for state-changing functions, and task #31's "coincid
 never a coincidence. The practical upside: `forge test --gas-report` now predicts an Arc
 receipt to the gas for anything that does not touch USDC, which is how v2's `createMandate`,
 `revoke`, `approveCosign` and `withdrawCosign` costs can be known before deploying.
+
+*Three of those four, strictly.* The agreement is a property of the *report* — it includes
+intrinsic gas — so the method transfers to any function. The demonstration does not:
+`approveCosign` is gone, and `approveCosignFor` encodes 196 calldata bytes against 68, takes an
+extra cold SLOAD, computes an extra keccak and logs three data words instead of none. Its
+gas-report row is a prediction with no receipt to check it against, and there will not be one
+until v2 is deployed.
 
 ## Toolchain
 

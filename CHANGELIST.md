@@ -100,9 +100,17 @@ known to be harness error outright.
 **One consequence for this changelist.** Every v2 gas estimate for a function that
 does not touch USDC can be read straight off `forge test --gas-report` and will
 match the eventual Arc receipt to within a calldata byte. That covers
-`createMandate`, `revoke`, `approveCosign` and `withdrawCosign`; only `spend`
+`createMandate`, `revoke`, `approveCosignFor` and `withdrawCosign`; only `spend`
 needs Arc's measured `transferFrom` premium of 13,110 added. Cost the changes
 below before redeploying rather than after.
+
+*One qualification on that list, added 2026-08-27.* The agreement was demonstrated on
+four functions, and the one it was demonstrated on was v1's `approveCosign` — which #28
+deleted. `approveCosignFor` is a different computation (196 calldata bytes against 68, an
+extra cold SLOAD, an extra keccak, a log with three data words against none), so its
+gas-report figure inherits the *method* but not the confirmation. It is a prediction with
+no matching receipt, and there is no way to get one short of deploying v2. Treat the other
+three as validated and this one as untested.
 
 *The pre-audit gate is also now green, which unblocks the "re-run" half of the plan
 above.* `FOUNDRY_PROFILE=deep forge test` was run on 2026-08-25: 140 passed, 0 failed,
@@ -141,6 +149,19 @@ not six. The list has always been `createMandate`, `spend`, `revoke`, `approveCo
 `withdrawCosign`; the count beside it said six for weeks because nobody parsed the source.
 The test count is now 140. The unaudited / no-real-money half of the warning stays exactly
 as it is.
+
+**This instruction went stale and the banner it produced went false, 2026-08-27.** #28 deleted
+`approveCosign` and added `approveCosignFor`, so "every state-changing path has run live" is no
+longer true of v2 — the list above is v1's, and four of its five names survive into v2 while the
+fifth has no receipt on any chain. The banner had already been rewritten with
+`approveCosignFor` substituted *into this v1 sentence*, which claimed a receipt for a function
+that has never executed; it now names `approveCosign`, says explicitly that the list is v1's,
+and states that the cosign approval path is uncovered. **Do not re-apply the paragraph above
+verbatim.** The failure is worth more than the fix: the sentence defended itself with "the five
+is enumerated from this file rather than recalled", and that is exactly what broke it. The
+count was a property of the current file; the *names* were a property of the deployed one. A
+rule that makes one half of a claim right can make the other half wrong, so enumerate from the
+artefact the claim is *about* — here `git show v1.0.0-arc-testnet:contracts/MandateManager.sol`.
 
 The spend count in that paragraph said **four** until 2026-08-26, in the same sentence as
 the correct total of thirty-one, which is how it was caught: a figure that moves with the
@@ -247,6 +268,9 @@ serious one. `approveCosign` authorises on `msg.sender == m.cosigner` and nothin
 mandate whose cosigner is its own spender lets the agent approve its own spend hash and then
 spend it — the gate becomes two transactions and no second party, which is not a weaker
 control but the absence of one wearing its clothes. v2 refuses (c), (d) and (e).
+(The name here is v1's, and the property is unchanged: #28's `approveCosignFor` also
+authorises on `msg.sender == m.cosigner` alone, which is why the grant-time guard rather than
+an approval-time one is what closes (e).)
 
 Three things about (d) and (e) are worth recording. Neither is a divergence between the
 contract and `reference/policy.js` — **the model accepted both as well**, so they are design
@@ -551,7 +575,8 @@ oversight — this is the pre-flight path, and it should neither cost two extern
 working when a registry is unreachable. Enumerating the surface properly turned up **four**
 blind spots where the v1 comment named two: the allowlist (a property of the recipient, not the
 amount), the co-signature requirement (which gates spends *above* a threshold rather than
-capping them, so a large headroom figure may still need an `approveCosign` first), both gates
+capping them, so a large headroom figure may still need an `approveCosignFor` first — and since
+#28's F16, may need one that has not lapsed), both gates
 together, and the spend nonce — which is per-call rather than per-mandate, so replay is not
 knowable from a mandate id alone. "Complete the comment" was filed as one missing clause and
 was actually two.
@@ -631,12 +656,23 @@ guard asymmetry is defensible on the same reasoning that lets a spender revoke,
 since giving up authority cannot harm the payer — and neither justifies gas on the
 common path.
 
+*Still true of v2 after #28, verified against the source rather than assumed.*
+`approveCosignFor` checks `m.payer == address(0)` and `m.flags & F_COSIGN` before the cosigner
+comparison; `withdrawCosign` still checks only `msg.sender != m.cosigner`. So both properties
+above survive the rename, F11 in #24 is still the open item, and the two live receipts
+(`0x6515918e…`, `0x7e10b4bd…`) remain the evidence for behaviour v2 has not changed.
+
 The same run re-measured `approveCosign` and the result retires a question this
 file used to track. A second live approval cost **53,102** against the first one's
 **53,114**, and the twelve-gas gap is entirely calldata: the new hash carries one
 zero byte, which is priced at 4 rather than 16. Subtracting each transaction's
 intrinsic cost leaves **31,026 gas of execution in both**, a day apart, to the
 unit — so the 53,114 was representative and not an accident of one block.
+
+*That pair is now terminal.* #28 deleted the function, so 53,102 / 53,114 / 31,026 are the
+complete and final measurement history of `approveCosign` and no further receipt for it can
+ever exist. They are kept as v1 evidence and must not be reused as an `approveCosignFor`
+baseline; `test/ArcParity.t.sol` carries the same warning where the constant lives.
 
 And 31,026 is also what the mock gas report's 53,114 reduces to under the same
 subtraction, which is how the "coincidence" verdict came apart the next day. Same
@@ -662,6 +698,22 @@ docstring that argues persistence is *correct*, which it is, for the failure it 
 about. Persistence across a revert and persistence across a day are different properties and
 the test only establishes the first.
 
+**DONE in v2, and the "deadline" above is WITHDRAWN — the compiler disagreed with it.**
+`forge inspect MandateManager storage-layout` puts all eight variables in slots 0–7, every one
+32 bytes at offset 0, with `_cosignApproved` last; `_allowlist` and `_usedNonce` have `bool`
+values and occupy 32 bytes too, because a mapping's own footprint is one slot whatever it
+holds. Changing the value type shifts nothing, and v2 has no proxy in any case, so this was
+never the only time-bound item — F15, F17 and F19 are equally bound by "before v2 deploys",
+which is a weaker constraint than the one this paragraph claimed. **The lesson is the one that
+matters:** "storage layout change" was reasoned from the phrase rather than from the layout, and
+a single command settled it. What shipped: `MAX_COSIGN_TTL = 30 days` as a ceiling, a required
+`validUntil` argument, `BadDeadline` refusing both a past deadline and one beyond the ceiling
+rather than clamping either, and `CosignExpired` split from `CosignRequired` so a delegate can
+tell "never authorised" from "too slow". `test_approval_survivesAnUnrelatedFailure` was kept,
+not repaired: it warps `DAY + DAY/12`, which is inside any deadline a co-signer would choose
+under a 30-day ceiling, so the property it establishes and the property F16 adds no longer
+compete.
+
 **F15 and F17 are additive and can wait, but they are ordered.** F15 adds
 `approveCosignFor(mandateId, recipient, amount, ref, nonce)`, computing the spend hash
 internally from `m.spender` so a co-signer approving from a hardware wallet sees the payment
@@ -670,6 +722,24 @@ so the second signature is not a second opinion. F17 refuses approvals that can 
 consumed (a revoked mandate, an amount at or below the threshold); its threshold half needs
 F15's explicit fields to be checkable at all, so F15 lands first or F17 lands half-done.
 Neither changes `spend`, the mapping, or any event, so neither is deadline-bound.
+
+**F15 is DONE in v2, and "additive" was wrong in three ways.** The user chose replacement over
+addition, so `approveCosign(bytes32,bytes32)` is **deleted** rather than left beside the new
+function. The reason is the residual F15's own write-up did not name: while the opaque path
+stays callable, a hostile agent simply asks the co-signer to use it, and an optional control is
+not a control. The signature also gained a sixth parameter, `validUntil`, because F15 and F16
+landed as one redesign — done apart, that signature gets written twice. And the paragraph above
+is wrong about the blast radius: `spend` DID change (it reads a deadline and gained
+`CosignExpired`), the mapping DID change (`bool` → `uint40`), and `CosignApproved` DID change
+(it now carries recipient, amount and deadline). What is true is that none of that was
+*deadline*-bound. The public `spendHash` also lost its `spender_` parameter, so a hash naming a
+spender the mandate does not have is no longer constructible through this contract.
+
+**F17 is unblocked and still open.** Its dependency on F15 is discharged; the three tests it
+owes are named in `THREAT-MODEL.md` — approving on a revoked mandate, approving on an expired
+one (or an in-date approval outliving the mandate's `expiresAt`, which nothing currently
+bounds), and approving an amount at or below the threshold. All three are confirmed absent from
+`test/Cosign.t.sol`.
 
 **F19 is one line and closes a hole in the audit trail, not in the caps.** `recipient ==
 m.payer` is a legal spend: it consumes `perTxCap`, the window ring and the lifetime cap, burns

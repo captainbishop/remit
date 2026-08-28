@@ -552,7 +552,16 @@ earlier draft of this table priced everything at 20, which made every published 
 | **`spend` median / max** | **105,935 / 201,786** | **0.0022 / 0.0042** |
 | `spend` min (simplest mandate) | 24,898 | 0.0005 |
 | `revoke` max | 32,945 | 0.0007 |
-| `approveCosign` max | 53,114 | 0.0011 |
+| `approveCosign` max — **v1 only, see note** | 53,114 | 0.0011 |
+
+**The last row measures a function this source tree no longer has.** #28 deleted
+`approveCosign(bytes32,bytes32)` and replaced it with `approveCosignFor(mandateId, recipient,
+amount, ref, nonce, validUntil)`. Every figure in the row, and every 53,114 elsewhere in this
+document, is a property of v1's bytecode and stays as v1 evidence — but **v2's cosign approval
+path is unmeasured**, and nothing here may be read as its cost. The new function encodes 196
+calldata bytes against 68, takes an extra cold SLOAD, computes an extra keccak, and emits a log
+with three data words instead of none, so it is a different computation and not a revision of
+this one. #14 owns the re-measurement.
 
 **These rows are now generated with a pinned fuzz seed, and two of them moved when that
 happened.** `evidence/gas.log` was regenerated on 2026-08-25 with
@@ -956,6 +965,10 @@ revert alone — no follow-up call, no indexer, no event subscription.
 
 **A delegate cannot approve its own spend.** `approveCosign` from the agent and from the
 vendor both reverted `NotCosigner()` (`0x1cf89d6f`). Only the named cosigner succeeded.
+(v1's name and v1's receipts. `approveCosignFor` guards this identically — `msg.sender !=
+m.cosigner` — but has no live evidence of its own, and #11 closed the harder version of this
+hole at grant time by refusing `cosigner == spender` outright, which no approval-time check
+could reach.)
 
 **One signature authorises exactly one payment, locked twice over.** After the cosigned spend
 `isCosignApproved` reads false — the approval was consumed. And re-submitting the same
@@ -1334,6 +1347,19 @@ There is no `receive`, no `fallback`, and the constructor is not a function that
 again. Ten public views make up the rest of the surface. Both errors survived several passes,
 which is the argument for deriving counts from the artefacts rather than restating them.
 
+**And the same trap caught the same document a second time, 2026-08-27 — this paragraph is where
+it was aimed.** The parse named above is a rule about *the source file you run it on*, and after
+#28 running it on the working tree returns `approveCosignFor`, not `approveCosign`, plus twelve
+views rather than ten. The names above are v1's and stay v1's, because the thirty-one receipts
+they explain came from v1's bytecode; run the parse against
+`git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to reproduce them. The banner in
+`MandateManager.sol` was **not** so lucky: #28 substituted `approveCosignFor` into its version of
+this same sentence, and so claimed a live receipt for a function that has never executed on any
+chain. It was corrected the same day. The lesson refines the one this paragraph already draws —
+deriving a count from the artefact is necessary but not sufficient, because the *right* artefact
+is the one the claim is about, and "the current file" is the wrong one for a claim about a
+deployment. A derivation can be executed perfectly against the wrong input.
+
 #### An approval can be taken back, and the hash is discoverable rather than guessed
 
 The gap was awkward to close honestly, because `withdrawCosign` takes a `bytes32` that has to
@@ -1537,6 +1563,15 @@ touch USDC, `forge test --gas-report` predicts an Arc receipt to the gas, adjust
 zero-byte count of the real calldata. Three functions confirm it. That makes v2's cost knowable
 before it is deployed for `createMandate`, `revoke`, `approveCosign` and `withdrawCosign`;
 `spend` still needs Arc's 13,110 `transferFrom` premium added on top.
+
+*One name in that list is v1's, and the substitution is not free.* #28 replaced
+`approveCosign` with `approveCosignFor`, so of the four functions this agreement was
+*demonstrated* on, three still exist. The method carries over — the gas report includes
+intrinsic gas, which is why it predicts a receipt at all, and that reasoning is about the
+report rather than about any one function. The confirmation does not: `approveCosignFor` has
+196 calldata bytes against 68, an extra cold SLOAD, an extra keccak and three log data words
+against none. Its gas-report row is a prediction whose matching receipt cannot exist until v2
+deploys, so do not cite it with the same confidence as the other three.
 
 #### How this was found, since the method is the reusable part
 

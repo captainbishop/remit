@@ -109,6 +109,10 @@ spends. Nothing in the suite failed for any of this beforehand. The lesson to ca
 next item is that a documented soft spot is a description of what somebody noticed, not a
 specification of the defect.
 
+(That function is now called `approveCosignFor` and takes explicit fields rather than a bare
+hash — #28 — and it authorises exactly the same way, on `msg.sender == m.cosigner` alone. The
+hole was closed at grant time instead, which is the only place it can be closed.)
+
 None of this changed stages 4 or 5, which were identical either way and are now both done.
 It changes what happens next.
 

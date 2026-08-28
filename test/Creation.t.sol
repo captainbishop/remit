@@ -371,7 +371,7 @@ contract CreationTest is Base {
         // above and this one, and the difference between them is the entire point.
         bytes32 id = grant(withCosign(simpleParams(), boss, usd(100) - 1));
         bytes32 nonce = nextNonce();
-        bytes32 hash = mm.spendHash(id, agent, vendor, usd(100), REF, nonce);
+        bytes32 hash = mm.spendHash(id, vendor, usd(100), REF, nonce);
         vm.prank(agent);
         vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, hash));
         mm.spend(id, vendor, usd(100), REF, nonce);

@@ -67,6 +67,10 @@ const Denial = {
   TOTAL_SPENT_CEILING: 'TOTAL_SPENT_CEILING',
   NONCE_ALREADY_USED: 'NONCE_ALREADY_USED',
   COSIGN_REQUIRED: 'COSIGN_REQUIRED',
+  // NEW IN v2 (F16). Split from COSIGN_REQUIRED rather than folded into it: the two need
+  // different actions from whoever reads the denial. COSIGN_REQUIRED means nobody approved
+  // this spend; COSIGN_EXPIRED means somebody did and the window closed.
+  COSIGN_EXPIRED: 'COSIGN_EXPIRED',
   IDENTITY_NOT_HELD: 'IDENTITY_NOT_HELD',
   IDENTITY_TRANSFERRED: 'IDENTITY_TRANSFERRED',
   CREDENTIAL_MISSING: 'CREDENTIAL_MISSING',
@@ -85,6 +89,12 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 // predictable rather than a function of untrusted grant-time input.
 const MAX_WINDOWS = 4;
 const MAX_BUCKETS = 32;
+
+// NEW IN v2 (F16). Furthest ahead a cosigner may set an approval's deadline, mirrored from
+// MandateManager.MAX_COSIGN_TTL. This one belongs in the model for the same reason the two
+// caps above do and MAX_JOINT does not: it changes which spends are legal, rather than only
+// rationing a read.
+const MAX_COSIGN_TTL = 30n * 86_400n;
 
 /**
  * Largest spendable amount: 2^96 - 1, about 7.9e22 USDC.
@@ -238,7 +248,7 @@ function createMandate(spec) {
         'signature for every spend, which is what the contract stores',
     );
   }
-  // The agent may not be its own cosigner. `approveCosign` authorises on
+  // The agent may not be its own cosigner. `approveCosignFor` authorises on
   // `caller === mandate.cosigner` alone, so this configuration lets the spender approve
   // its own spend hash and then spend it — the gate becomes two transactions and no
   // second party. Worth refusing rather than documenting, because it is invisible in the
@@ -377,7 +387,10 @@ function createMandate(spec) {
       Array.from({ length: Number(w.ringSize) }, () => ({ index: 0n, amount: 0n })),
     ),
     usedNonces: new Set(),
-    cosignApprovals: new Set(), // spend hashes pre-approved by the cosigner
+    // v2 (F16): a Map, not a Set. The key is still the spend hash; the value is the
+    // timestamp the approval dies AT, exclusive. Absent from the Map is the model's
+    // equivalent of the contract's stored zero.
+    cosignApprovals: new Map(),
   };
 }
 
@@ -420,12 +433,17 @@ function ringSlot(win, bucketIndex) {
  * Compute the spend hash used for co-signature approval and idempotency.
  * Binds every economically meaningful field, so an approval cannot be replayed
  * against a different recipient, amount, reference, or nonce.
+ *
+ * v2 (F15): takes the MANDATE rather than a free `spender`, mirroring the contract's
+ * `spendHash` after its `spender_` parameter was retired. A caller could previously ask for
+ * the hash of a spend by somebody who is not the mandate's spender — a hash no spend can
+ * ever match, and one a cosigner could nonetheless be handed and asked to approve.
  */
-function spendHash({ mandateId, spender, recipient, amount, ref, nonce }) {
+function spendHash({ mandate, recipient, amount, ref, nonce }) {
   return [
     'Remit:v1',
-    mandateId,
-    normalizeAddr(spender),
+    mandate.id,
+    normalizeAddr(mandate.spender),
     normalizeAddr(recipient),
     BigInt(amount).toString(),
     ref ?? '',
@@ -652,10 +670,23 @@ function evaluate(mandate, request, ctx) {
   // --- co-signature for large amounts ---
   // Checked last so a request failing a cheaper check reports that instead of
   // misleadingly demanding a co-signature.
-  const hash = spendHash({ mandateId: mandate.id, spender, recipient, amount, ref, nonce });
+  //
+  // v2 (F15): the hash is derived from `mandate.spender`, not from `request.spender`. The
+  // two are provably equal here because WRONG_SPENDER above already refused every other
+  // case, so this is not a behaviour change in `evaluate` — it is what lets `spendHash` be
+  // reachable ONLY with the mandate's own spender, closing the path where a cosigner is
+  // handed the hash of a spend nobody can perform.
+  const hash = spendHash({ mandate, recipient, amount, ref, nonce });
   if (mandate.cosignThreshold !== null && amount > mandate.cosignThreshold) {
-    if (!mandate.cosignApprovals.has(hash)) {
+    // v2 (F16): a Map keyed by hash whose value is the deadline. Absent and expired are
+    // distinct denials — see the note on Denial.COSIGN_EXPIRED.
+    const validUntil = mandate.cosignApprovals.get(hash);
+    if (validUntil === undefined) {
       return deny(Denial.COSIGN_REQUIRED, { amount, threshold: mandate.cosignThreshold, hash });
+    }
+    // `>=` because validUntil is EXCLUSIVE, matching expiresAt above and the contract.
+    if (now >= validUntil) {
+      return deny(Denial.COSIGN_EXPIRED, { amount, hash, now, validUntil });
     }
   }
 
@@ -752,21 +783,69 @@ function revoke(mandate, caller) {
   return mandate;
 }
 
-/** Pre-approve exactly one spend that exceeds the co-sign threshold. Cosigner only. */
-function approveCosign(mandate, caller, request) {
-  if (!mandate.cosigner) throw new Error('approveCosign(): mandate has no cosigner');
+/**
+ * Pre-approve exactly one spend that exceeds the co-sign threshold. Cosigner only.
+ *
+ * RENAMED AND RESHAPED IN v2 (F15 + F16), mirroring the contract, where the opaque
+ * two-argument `approveCosign(mandateId, hash)` was DELETED rather than kept alongside this
+ * one. The reasoning is in MandateManager.sol's docstring and is worth restating because it
+ * is the kind of thing a reader will otherwise try to "restore": whoever asks for the
+ * signature chooses the entry point, and that party is usually the agent, so a legibility
+ * control the adversary can opt out of on the victim's behalf is not a control.
+ *
+ * Two changes beyond the name:
+ *
+ *   1. There is no `request.spender ?? mandate.spender` escape any more. The old form let a
+ *      caller approve the hash of a spend by somebody who is not the mandate's spender —
+ *      a hash `evaluate` can never produce, so the approval was unspendable, and the
+ *      cosigner had no way to notice from the arguments they were shown. `spendHash` now
+ *      reads the spender off the mandate and there is nowhere to put a different one.
+ *
+ *   2. `validUntil` is required, and bounded. Zero still means "no approval" in the Map, so
+ *      a deadline in the past or at `now` is refused rather than stored as a live-forever
+ *      approval; `MAX_COSIGN_TTL` caps how far ahead it may sit, because an uncapped
+ *      deadline leaves F16 advisory — the agent that builds the transaction would simply
+ *      pre-fill the maximum.
+ *
+ * Deliberately NOT here yet: F17's refusals (revoked or expired mandate, an amount at or
+ * below the threshold, a zero amount or recipient). Those belong in both this function and
+ * the contract's, in the same change, and the contract does not have them yet. Adding them
+ * to the model first would make the model stricter than the thing it specifies, which is
+ * the one direction a reference model must never drift.
+ *
+ * @param {object} mandate  the mandate, mutated on success
+ * @param {string} caller   must be the cosigner
+ * @param {object} request  { recipient, amount, ref, nonce, validUntil }
+ * @param {object} ctx      { now } — required, because the deadline is checked against it
+ * @returns {string} the spend hash that was approved
+ */
+function approveCosignFor(mandate, caller, request, ctx) {
+  if (!mandate) throw new Error('approveCosignFor(): unknown mandate');
+  if (!mandate.cosigner) throw new Error('approveCosignFor(): mandate has no cosigner');
   if (normalizeAddr(caller) !== mandate.cosigner) {
-    throw new Error('approveCosign(): only the cosigner may approve');
+    throw new Error('approveCosignFor(): only the cosigner may approve');
   }
+  if (!ctx || ctx.now === undefined) {
+    throw new Error('approveCosignFor(): ctx.now is required to bound the deadline');
+  }
+
+  const now = BigInt(ctx.now);
+  const validUntil = BigInt(request.validUntil ?? 0);
+  if (validUntil <= now || validUntil > now + MAX_COSIGN_TTL) {
+    throw new Error(
+      `approveCosignFor(): validUntil ${validUntil} must be strictly after ${now} and no ` +
+        `later than ${now + MAX_COSIGN_TTL} (now + MAX_COSIGN_TTL)`,
+    );
+  }
+
   const hash = spendHash({
-    mandateId: mandate.id,
-    spender: request.spender ?? mandate.spender,
+    mandate,
     recipient: request.recipient,
     amount: request.amount,
     ref: request.ref ?? '',
     nonce: request.nonce,
   });
-  mandate.cosignApprovals.add(hash);
+  mandate.cosignApprovals.set(hash, validUntil);
   return hash;
 }
 
@@ -920,6 +999,7 @@ module.exports = {
   WEEK,
   MAX_WINDOWS,
   MAX_BUCKETS,
+  MAX_COSIGN_TTL,
   MAX_AMOUNT,
   Denial,
   ZERO_ADDRESS,
@@ -934,7 +1014,7 @@ module.exports = {
   commit,
   spend,
   revoke,
-  approveCosign,
+  approveCosignFor,
   headroom,
   headroomAcross,
 };

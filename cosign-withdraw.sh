@@ -1,5 +1,27 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
+# THIS SCRIPT TARGETS DEPLOYED v1 AND ITS SIGNATURES ARE DELIBERATELY STALE.
+#
+# Read this before "fixing" anything below. MM is 0x3744…0196, the immutable v1
+# deployment. v2 (F15/F16) deleted `approveCosign(bytes32,bytes32)` and narrowed
+# `spendHash` to five parameters IN THIS SOURCE TREE. It did not and cannot change
+# the bytecode at that address, which still exposes the six-parameter `spendHash`
+# and the two-parameter `approveCosign` this script calls.
+#
+# So the ABI strings at lines ~74 and ~176 are correct AS WRITTEN and must not be
+# modernised. Swapping them to the v2 spelling would send calldata whose selector
+# does not exist at that address: `approveCosignFor` would hit no function and
+# revert, and the run would prove nothing about either version.
+#
+# This script has already run to completion; its output is in evidence/ and the
+# live phase is closed. It is kept as the record of that run, not as a thing to
+# re-execute. Re-pointing it at a future v2 deployment is NOT a signature swap:
+# `approveCosignFor` needs a sixth argument, `validUntil`, which has no v1
+# analogue, and the gas predictions below were derived for a function with 68
+# calldata bytes and a log with no data words. Both would have to be re-derived.
+# See the banner in test/ArcParity.t.sol for why that is a new measurement rather
+# than a repair of this one.
+# ---------------------------------------------------------------------------
 # cosign-withdraw.sh — task #45. Exercise withdrawCosign() on the live chain.
 #
 # WHY THIS SCRIPT EXISTS. Writing up the revoke work, I claimed every function

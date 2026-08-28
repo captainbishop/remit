@@ -38,6 +38,22 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > written down, which caught one wrong citation carried in from a working note — `v2:856-863`
 > for the 6-decimal truncation note, which actually lives at `v2:1077-1084`; 856-863 is the
 > credential `try`/`catch` body and has nothing to do with decimals.
+>
+> **That byte-identity ENDED on 2026-08-27, when #28 landed F15 and F16.** The anchor itself
+> is unchanged and every `v2:NNN` in this file still resolves against `92445dd` exactly as it
+> always did — but it is no longer *also* the working tree, so the sentence above must be read
+> as history. `contracts/MandateManager.sol` went 1,204 → 1,376 lines, `approveCosign` was
+> deleted outright and `spendHash` lost a parameter, which means every citation into the
+> co-signature region now points at code that has been replaced. Those citations are kept
+> rather than repointed, because a finding's evidence is the code that had the defect. Where
+> this document describes what SHIPPED instead, it names functions and never lines, per the
+> rule the first banner paragraph already states and this is now the second demonstration of.
+>
+> **The test tree moved with it, so "green at 157/157" above is now also history.** #28 took the
+> source declaration count to 165 and the custom-error count from 31 to 33, and `forge test` has
+> not been run since, so there is currently **no** green figure for the working tree — only a
+> source count. §5's four mechanical checks were re-derived against it and say so in place.
+> Nothing in this document should be read as claiming a v2 suite has passed; #14 owns that.
 
 ## Why this document exists
 
@@ -166,7 +182,7 @@ it does not remove the mempool. See F4.
 ## 3. Properties the contract does enforce, and the guard for each
 
 Derived by walking the source, not by reading the test names. Five functions change
-state: `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`. There are
+state: `createMandate`, `spend`, `revoke`, `approveCosignFor`, `withdrawCosign`. There are
 no setters, no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade
 path.
 
@@ -181,6 +197,8 @@ path.
 | A rolling window is genuinely rolling | K+1 bucket summation. The proof in the source is valid but proves less than the code guarantees: eviction (`bucketIndex < oldest`) is the exact negation of inclusion (`bucketIndex >= oldest`) computed from the same `oldest` in the same call, and `oldest` is monotone, so nothing counted is ever discarded. `createMandate`'s `lengthSeconds % buckets != 0` check is load-bearing for cap soundness, not merely for uniformity |
 | A spend cannot be replayed | `_usedNonce[mandateId][nonce]`; a reverted spend does not consume its nonce |
 | One co-signature authorises exactly one spend | the hash binds mandate, spender, recipient, amount, ref and nonce plus `DOMAIN`, chainid and `address(this)`; consumed with `delete` on use |
+| A co-signature cannot name a spender the mandate does not have | #28/F15: `spendHash` reads `m.spender` from storage instead of taking it as an argument, so a hash naming any other spender is not constructible through this contract — and `approveCosignFor` derives the hash itself rather than accepting one, so a co-signer cannot be handed a hash that disagrees with the fields they were shown |
+| A co-signature expires | #28/F16: `approveCosignFor` refuses `validUntil <= block.timestamp` and `validUntil > block.timestamp + MAX_COSIGN_TTL` (30 days) with `BadDeadline`; `spend` refuses at or after the deadline with `CosignExpired`, distinct from `CosignRequired` for one never granted |
 | Revocation is immediate and permanent | `revoke` sets `revoked = true`; no un-revoke exists |
 | A compromised agent can shut itself off | `revoke` also accepts the spender |
 | Caps hold even if the token misbehaves | see F7 — this is stronger than the source claims |
@@ -196,18 +214,19 @@ category.
 **Twenty-six findings, counted from the headings below rather than asserted** — `grep -c
 "^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 26, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **two are
-already fixed in code** (F1, F5, both in #22); **two were fixed in this document as it was
-being written** (F22 and F23, both missing trust boundaries — §2 gained its sixth and seventh
-in one day); **eight have a fix that changes v2's behaviour** (F3, F9, F11, F13, F15, F16,
-F17, F19); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F10,
-F14, F21 in the contract, F25 and F26 in the mocks — and the last two are in `test/`, so they
-are free of the frozen-metadata constraint that governs `contracts/`); **three are
+long the search ran. They partition exactly, which is more useful than the total: **four are
+already fixed in code** (F1, F5 in #22; F15, F16 in #28, 2026-08-27); **two were fixed in this
+document as it was being written** (F22 and F23, both missing trust boundaries — §2 gained its
+sixth and seventh in one day); **six have a fix that changes v2's behaviour** (F3, F9, F11,
+F13, F17, F19); **eight are comment rewrites** that change nothing any code does (F4, F7, F8,
+F10, F14, F21 in the contract, F25 and F26 in the mocks — and the last two are in `test/`, so
+they are free of the frozen-metadata constraint that governs `contracts/`); **three are
 documentation** (F2, F6, F18); **one needs a decision before it can be sized** (F20, whether
 the contract gains a sixth state-changing function, and its first that mutates a mandate after
 creation); **one needs a four-line test before it can be sized at all**, because one of its two
 possible answers cannot be settled by reading source (F24); and **one needs nothing** (F12).
-Triage:
+4 + 2 + 6 + 8 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
+same number. Triage:
 
 | Fix before v2 freezes | Cost | Needs a decision first |
 | :--- | :--- | :--- |
@@ -221,9 +240,9 @@ Triage:
 | ✅ F5 `Unbounded()` scope | **DONE in #22.** 1 line, +1 model test, and a horizon threaded through both suites | **DECIDED 2026-08-26: refuse** |
 | F6 threshold splitting | doc + one composition test | **DECIDED: document, recommend pairing with a window** |
 | F13 gate pre-validation | 2 registry reads at grant + tests | **DECIDED 2026-08-26: validate at grant** |
-| F15 `approveCosignFor`, explicit fields | 1 new function, additive; no change to `spend`, the mapping or the events | whether the opaque `approveCosign` stays as well |
-| F16 approval deadline | mapping `bool` → `uint40`, 1 guard in `spend`, 1 view | **storage layout, so free now and not after v2 deploys** |
-| F17 dead approvals refused | 2 lines for the revoked/expired half; the threshold half needs F15 first | — |
+| ✅ F15 `approveCosignFor`, explicit fields | **DONE in #28, 2026-08-27.** Not additive as proposed — the opaque `approveCosign` was DELETED, and `spendHash` lost its `spender_` parameter. See F15 for what that cost | **DECIDED 2026-08-27: remove it.** The row's own open question, answered against the recommendation in this row |
+| ✅ F16 approval deadline | **DONE in #28, 2026-08-27.** `bool` → `uint40`, `MAX_COSIGN_TTL = 30 days`, 2 guards in `spend`, `isCosignApproved` re-meaninged, `cosignApprovalDeadline` added | **The "storage layout, so free now and not after v2 deploys" claim was DISPROVEN by `forge inspect` before the work started — a mapping occupies one slot whatever its value type. It was done for its own sake, not to beat a deadline that did not exist** |
+| F17 dead approvals refused | 2 lines for the revoked/expired half; the threshold half is now expressible, since F15 shipped and `approveCosignFor` knows the amount | — |
 | F18 co-signer rotation | documentation only — `README.md`, that re-granting resets the lifetime counters | whether a rotation path is wanted at all, which needs a setter and this contract has none |
 | F19 refuse `recipient == m.payer` | 1 error + 1 line, beside `ZeroRecipient` | — |
 | F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
@@ -617,15 +636,27 @@ because it is a *counted* claim in a comment. The #12 lesson was that the errors
 had asserted a one-to-one correspondence nobody had counted; the fix was to count it.
 Same discipline, same file, one comment over.
 
+[**#28:** the comment was edited on 2026-08-27 and the count was **not** fixed — F15 renamed
+the function it points at, so the sentence now reads "may still need an `approveCosignFor`
+first", and the word "Four" survived the edit that touched the line beside it. That is the
+sharpest available demonstration of why a counted claim in prose is a liability: the comment was
+open in an editor, being changed, and the stale number went straight past. The cosign item also
+gained a second failure mode in the same change — an approval can now be present but lapsed,
+denied with `CosignExpired` — which does not move F10's count, because it is a second way for
+the same listed item to deny, but does mean "needs an `approveCosignFor` first" is no longer the
+whole of what the co-signature requirement can do to a spend this function called affordable.]
+
 ---
 
 ### F11 — `withdrawCosign` is missing both guards its sibling has
 
 **Severity: low. Status: OPEN. Confidence: certain.**
 
-`approveCosign` checks `payer == address(0)` → `UnknownMandate`, then
+`approveCosignFor` checks `payer == address(0)` → `UnknownMandate`, then
 `F_COSIGN == 0` → `BadConfig`, then `msg.sender != m.cosigner` → `NotCosigner`.
-`withdrawCosign` checks only the third.
+`withdrawCosign` checks only the third. (The sibling was `approveCosign` when this was
+written; F15 replaced it on 2026-08-27 and the replacement carries the same three checks in
+the same order, so the asymmetry is unchanged.)
 
 Not exploitable: for an unknown mandate `m.cosigner` is `address(0)`, and `address(0)`
 cannot send a transaction, so the call still reverts. But it reverts with `NotCosigner`
@@ -653,6 +684,19 @@ precisely because the Memo wrapper cannot be relied on. So this is consistent wi
 design rather than an oversight. It is listed because "the payer can see what authority
 is outstanding" is a property a payer would reasonably assume of an oversight control,
 and it holds only with an indexer.
+
+**#28 improved the off-chain half substantially without touching the on-chain half, and the
+distinction is the whole finding.** Before F15, `CosignApproved` carried the mandate id, the
+hash and the cosigner — so an indexer could count outstanding approvals but could not say what
+any of them authorised without a side channel that supplied the preimage. It now carries
+`recipient`, `amount` and `validUntil` as data, so the log alone answers "what did this
+authorise, and until when". F16's `cosignApprovalDeadline` also lets a payer who *does* know a
+hash distinguish "never approved" from "approved and lapsed", which `isCosignApproved` reports
+identically. What is still absent is enumeration: nothing on chain lists the live approvals for
+a mandate, because a Solidity mapping has no iterator and adding an index would mean an array
+write on every approval. So the finding stands as written and its severity is unchanged — a
+payer with an indexer is now materially better served, and a payer without one is exactly as
+blind.
 
 ---
 
@@ -731,7 +775,9 @@ reading the prose against the code rather than either alone.
 
 ### F15 — The co-signer approves an opaque 32-byte hash, so what the payer buys is a second signature and not a second opinion
 
-**Severity: medium as a degraded control, low as a fund risk. Status: OPEN. Confidence: certain.**
+**Severity: medium as a degraded control, low as a fund risk. Status: FIXED in v2 (#28),
+2026-08-27, but NOT the way this finding recommended — see "What actually shipped" at the end
+of this section. Confidence: certain.**
 
 `approveCosign(bytes32 mandateId, bytes32 hash)` at `v2:932` takes the hash and nothing
 else. It checks that the mandate exists, that `F_COSIGN` is set and that the caller is the
@@ -786,11 +832,53 @@ Two secondary properties fall out of it, and the second is the one worth having:
   approval for an amount at or below the threshold, because it does not know the amount.
   `approveCosignFor` does.
 
+**What actually shipped, 2026-08-27, and where it departs from the paragraphs above.**
+
+The proposal was additive: a new entry point beside the old one, "so nothing that works today
+can break". That was rejected in favour of **deleting `approveCosign(bytes32,bytes32)`
+outright**, and `spendHash` lost its `spender_` parameter in the same change. The reasoning is
+worth keeping because it inverts the recommendation:
+
+- A safe path that sits *beside* an unsafe one does not remove the unsafe one. Anything that
+  can still be called still gets called — by an old integration, a copied snippet, or an agent
+  that finds the two-argument form shorter. Leaving it in place would have converted a defect
+  into a footgun and called it fixed, which is the same move as shipping a view whose display
+  and enforcement disagree, refused twice already in #11 and #22.
+- The `spender_` footgun in `spendHash` is a *removal*, not an addition. Widening the approval
+  surface while leaving the hash constructor able to name a spender the mandate does not have
+  would have left the social attack half-open: a co-signer could still be handed a hash nobody
+  could spend, and now with a legible-looking function to approve it through.
+
+Three consequences, none of them free:
+
+1. **The ABI broke.** Two functions changed shape and one vanished, so nothing written against
+   v1's ABI compiles or calls correctly against this tree. That is acceptable only because v1
+   is a testnet deployment with no third-party integrations; it would not be acceptable after
+   mainnet, and it is the strongest single argument in this document for finishing v2 before
+   anyone builds on v1.
+2. **`CosignApproved`'s topic0 changed**, because the event gained `recipient`, `amount` and
+   `validUntil`. Any indexer filtering on the old topic silently sees nothing — not an error, no
+   log, just an empty result, which is the worst failure mode an indexer has.
+3. **The repository lost its only same-function gas anchor.** `approveCosign` was the one live
+   Remit transaction that never touched USDC, which made it the cleanest control in
+   `test/ArcParity.t.sol` for separating Arc's USDC premium from Remit's own cost — 53,114 gas,
+   tx `0x29eb5c24…`. `approveCosignFor` is a different computation (196 calldata bytes against
+   68, an extra cold `SLOAD`, an extra keccak, three data words in the log), so comparing it to
+   that receipt would measure the redesign and call the difference an Arc property. The anchor
+   is documented as lost in that file's header rather than quietly repointed, and the two
+   assertions that depended on it were deleted rather than loosened. A v2 deployment will give a
+   new anchor for the new function; it will not repair this one.
+
+The cost in (3) was named before the change was made and accepted anyway, on the grounds that a
+legible authorisation surface for a human co-signer outranks a gas measurement. That trade is
+recorded here so it can be re-examined rather than rediscovered.
+
 ---
 
 ### F16 — An approval never expires, and the suite's own test shows one being consumed a day later under policy conditions that had refused it
 
-**Severity: low as a risk, medium as an unstated property. Status: OPEN (design decision needed). Confidence: certain — the behaviour is pinned by an existing test.**
+**Severity: low as a risk, medium as an unstated property. Status: FIXED in v2 (#28),
+2026-08-27. Confidence: certain — the behaviour is pinned by an existing test.**
 
 Nothing decays an approval. `_cosignApproved` is `mapping(bytes32 => mapping(bytes32 =>
 bool))` (`v2:266`), written at `v2:937` and cleared in exactly two places: consumption in
@@ -822,36 +910,91 @@ to read.
 `spend` refusing when `block.timestamp >= validUntil`. That keeps the test's argument fully
 intact — a retry minutes or hours later still works, so nobody is pushed into bulk
 pre-approval — while ending the multi-year tail. Three notes on the cost. It changes the
-mapping's value type from `bool` to `uint40`, a storage-layout change, which is free now
-and not after v2 deploys. It needs a `validUntil > block.timestamp` guard, since `0` is
-already the absent value. And `isCosignApproved` can keep its `bool` signature by returning
-`!= 0`, but would then be withholding the fact a payer most wants, so it should gain a
-sibling that returns the deadline. Note the deadline does not compose with the bare
-`approveCosign` of F15 — an opaque-hash approval has no field to carry one — which is a
-third argument for making the explicit entry point the primary path.
+mapping's value type from `bool` to `uint40`, which was believed to be a storage-layout change
+and therefore free before v2 deploys and impossible after; **that belief was wrong, and it is
+corrected below rather than above so the original reasoning stays readable.** It needs a
+`validUntil > block.timestamp` guard, since `0` is already the absent value. And
+`isCosignApproved` can keep its `bool` signature by returning `!= 0`, but would then be
+withholding the fact a payer most wants, so it should gain a sibling that returns the deadline.
+
+One imprecision in the sentence this paragraph used to end with, corrected because it was
+wrong in a way that flatters the fix. It said the deadline "does not compose with the bare
+`approveCosign` of F15 — an opaque-hash approval has no field to carry one". The second clause
+is false as stated: `approveCosign(bytes32,bytes32)` could perfectly well have been widened to
+`approveCosign(bytes32,bytes32,uint40)`, and a deadline would then have composed with an
+opaque hash without difficulty. What is true is narrower and still sufficient: the *two*-
+argument form has nowhere to put a deadline, so keeping the deadline meant either widening that
+signature too — breaking its ABI, forfeiting the same gas anchor F15 forfeits, and getting a
+function that is now three opaque words instead of two — or making the explicit entry point the
+only path. That is an argument for F15, not a proof that a deadline is inexpressible without
+it, and the difference matters because an argument that overstates itself is the thing this
+document keeps finding in the contract's own comments.
+
+**What actually shipped, 2026-08-27.**
+
+`_cosignApproved`'s value type is now `uint40`, holding an exclusive deadline where `0` still
+means "never approved". `approveCosignFor` refuses `validUntil <= block.timestamp` and
+`validUntil > block.timestamp + MAX_COSIGN_TTL` with a named `BadDeadline(validUntil)`, refusing
+rather than clamping so that a co-signer who miscalculates learns it instead of getting a
+silently different authority than they asked for. `MAX_COSIGN_TTL` is **30 days**, an upper
+bound the finding above did not ask for: a co-signer-supplied deadline alone still permits a
+co-signer to type a date in 2040, which is the multi-year tail with an extra keystroke.
+`spend` splits the two denials — `CosignRequired(hash)` when nothing was ever approved,
+`CosignExpired(hash, validUntil)` when something was and lapsed — because a delegate that
+cannot tell "never authorised" from "authorised and you were too slow" will retry the wrong
+one. `isCosignApproved` keeps its `bool` signature but no longer means what it meant: it now
+returns `validUntil != 0 && block.timestamp < validUntil`, so it answers "would this be
+honoured right now" rather than "is there a row in the mapping". `cosignApprovalDeadline`
+exposes the raw value, including a lapsed one, so a payer auditing a mandate can tell "never
+approved" from "approved and it expired" — which `isCosignApproved` reports identically.
+
+**And the correction the paragraph above defers to: there was no storage-layout deadline.**
+The claim that `bool` → `uint40` on a mapping's value type is "free now and not after v2
+deploys" is false, and `forge inspect MandateManager storage-layout` was run before any code
+changed rather than after. A mapping occupies exactly one slot regardless of what it maps to;
+the values live at `keccak256(key . slot)`, not in the declaring slot. All eight mappings sit
+in slots 0–7 with `_cosignApproved` last at slot 7, and that is true of both versions.
+Widening the value type moves nothing. So F16 was not urgent, it was merely correct, and it was
+done for the second reason. This is recorded because the false urgency was in the triage table
+above and could have been used to justify rushing the change past its tests, which is the
+failure mode and not the fix.
 
 ---
 
-### F17 — `approveCosign` accepts a revoked mandate and an amount below the threshold, writing approvals that can never be consumed
+### F17 — The approval function accepts a revoked mandate and an amount below the threshold, writing approvals that can never be consumed
 
-**Severity: low (fail-closed). Status: OPEN. Confidence: certain.**
+**Severity: low (fail-closed). Status: OPEN, and it SURVIVED #28 unchanged. Confidence: certain.**
 
-`approveCosign` checks three things and none of them is whether the approval it is about to
+The heading used to name `approveCosign`, which no longer exists — F15 deleted it on 2026-08-27
+and `approveCosignFor` is now the only way to write an approval. The defect carried over verbatim,
+so this finding is re-pointed rather than closed: **the mechanism below is unchanged and the
+missing guard is still missing.** The three checks are the same three (`m.payer != 0`, `F_COSIGN`
+set, caller is `m.cosigner`), in the same order, and #28 added only the two deadline bounds —
+which constrain *when* an approval dies, not *whether* it could ever have been used. Two
+sentences below are now too strong and are corrected in place with `[#28:` notes rather than
+rewritten, because what F16 bounded and what it did not is the interesting part. `v2:NNN`
+citations resolve against the `92445dd` blob as the banner says; the function they point into has
+been replaced, and the guard they observe missing is missing from the replacement too.
+
+`approveCosignFor` checks three things and none of them is whether the approval it is about to
 write can ever be used. Two shapes get through.
 
 **A revoked or expired mandate.** `v2:933-936` reads `m.payer`, `m.flags` and `m.cosigner`,
 and does not read `m.revoked` or `m.expiresAt`. `spend` reads both in its first four lines
 (`v2:600`, `v2:608`), so the approval is inert — but it is paid for, written to storage,
-reported `true` by `isCosignApproved` forever, and entered into the audit trail as
-`CosignApproved` for a mandate that can never spend again. `revoke` is not idempotent either
-(F11), so a payer's reconstructed timeline can carry a revocation followed by approvals,
-twice over.
+reported `true` by `isCosignApproved` forever [**#28: for up to `MAX_COSIGN_TTL`, then `false`.
+F16 bounded the display at 30 days; it did not stop the approval being written, paid for, or
+logged**], and entered into the audit trail as `CosignApproved` for a mandate that can never
+spend again. `revoke` is not idempotent either (F11), so a payer's reconstructed timeline can
+carry a revocation followed by approvals, twice over.
 
 **An amount at or below the threshold.** The gate at `v2:691` is
 `amount > m.cosignThreshold`, strictly, and there is no threshold setter anywhere, so a
 hash naming an amount at or under the threshold describes a spend that will never consult
 the mapping. That approval is permanently unconsumable, and because only the consuming
-path and `withdrawCosign` ever `delete`, it also never goes away.
+path and `withdrawCosign` ever `delete`, it also never goes away [**#28: still exactly true —
+the deadline governs whether the row is honoured, not whether it exists. `cosignApprovalDeadline`
+keeps returning the stale value until someone withdraws it**].
 
 Neither risks funds. They are listed because this repository has now twice refused a
 configuration on exactly this ground and written the reason into the source: #11 refused a
@@ -861,9 +1004,26 @@ to allow state whose display and whose enforcement disagree. A live approval on 
 mandate is that same shape one level down — `isCosignApproved` displaying an authority that
 cannot exist. Either the doctrine is general or it was a preference about two fields.
 
-The revoked-and-expired half is two lines inside `approveCosign`. The threshold half cannot
-be expressed in the current signature at all and is free in F15's, which is the argument for
-taking F15, F16 and F17 as one change rather than three.
+The revoked-and-expired half is two lines inside the approval function. **The threshold half
+was inexpressible when this finding was written and is expressible now:** F15 shipped on
+2026-08-27, so the only approval entry point is `approveCosignFor`, which takes `amount` as an
+argument and can compare it to `m.cosignThreshold` directly. That removes the reason this
+finding was bundled with F15 and F16 as one change — F17 is now independent and can land on its
+own.
+
+Two things about F17 did NOT change when F15 and F16 shipped, and both are worth stating
+because a reader might reasonably assume otherwise:
+
+- **The deadline does not fix this.** An approval written against a revoked mandate now expires
+  within `MAX_COSIGN_TTL` instead of persisting forever, which bounds the lie's duration but
+  does not stop it being told. `CosignApproved` is still emitted for a mandate that can never
+  spend, and `cosignApprovalDeadline` still reports a future deadline on it for up to 30 days.
+- **A third unconsumable shape now exists, and it is F16's.** `spend` does not clear an approval
+  it refuses — it reverts, and a revert rolls back every write — so a lapsed approval sits in
+  storage until somebody calls `withdrawCosign`. `isCosignApproved` correctly reports `false`,
+  so nothing is displayed as live that is not, and it is inert on every future block. It is
+  noted here rather than as a new finding because it is the same shape as the two above: storage
+  nobody is obliged to clean, harmless and untidy. `withdrawCosign`'s own docstring says so.
 
 ---
 
@@ -904,13 +1064,26 @@ seven, at `v2:266`, `491`, `692`, `693`, `937`, `945` and `979` — rather than 
 list of attacks. Recorded because a sweep that reports only findings tells a reader nothing
 about what was ruled out.
 
+**Re-derived against the working tree on 2026-08-27, after #28: the count is now eight, and
+every conclusion below survives.** Under the same counting rule (the mapping declaration, the
+`cosigner` write into the struct literal, and every read, write or `delete` of
+`_cosignApproved`), #28 added exactly one site and it is `cosignApprovalDeadline`, a `view`.
+The three that move — `approveCosignFor`'s write, `spend`'s read-and-delete, and
+`withdrawCosign`'s delete — are the same three operations in the same three functions as
+before. A view cannot be a capability, so nothing a hostile co-signer can do changed, which
+is why the citations above are left pointing at the anchor rather than repointed: they are the
+evidence for the ruling-out, and the ruling-out is what still holds. The one substantive
+change inside an existing site is that `spend` now has **two** ways to refuse at the mapping
+instead of one, `CosignRequired` and `CosignExpired`, and both are refusals.
+
 - **Cause a transfer.** The only path to `usdc.transferFrom` is `v2:713`, inside `spend`,
   which requires `msg.sender == m.spender` at `v2:610`; and `v2:482` refuses
   `cosigner == spender` at grant time, so on one mandate the two roles can never be the same
   address. `cosigner == payer` *is* legal and is the ordinary case.
 - **Escape a cap.** The mapping is consulted at `v2:692`, after the per-transaction,
-  lifetime and window checks have all passed and committed. An approval satisfies one extra
-  condition; it cannot raise a bound.
+  lifetime and window checks have all passed and committed — still true after #28, and
+  `test_cosign_isCheckedAfterEveryCap` pins it. An approval satisfies extra conditions (two
+  of them since F16, the second being that it has not lapsed); it cannot raise a bound.
 - **Redirect or inflate an approved spend.** The hash binds recipient, amount and ref; three
   existing `ATTACK` tests pin it.
 - **Replay an approval onto another mandate or another deployment.** Double-bound: the hash
@@ -1244,9 +1417,11 @@ they are trading.
 
 ### What a green suite cannot mean, and four assumptions checked rather than assumed
 
-Derived by reading the three files that decide what 157 passing tests are evidence *of* —
+Derived by reading the three files that decide what a green suite is evidence *of* —
 `test/Base.t.sol` (361 lines), `test/mocks/MockUSDC.sol` (108), `test/mocks/MockRegistries.sol`
-(129) — rather than by re-reading the tests themselves.
+(129) — rather than by re-reading the tests themselves. The number of passing tests was 157 when
+this was written and is 165 declarations in source after #28; nothing in this section depends on
+which, because every limit below is a property of those three files.
 
 Four limits are structural, and no amount of test-writing moves them:
 
@@ -1348,15 +1523,34 @@ could still be hiding there.
 - **`forge lint` on the v2 tree.** `windowRemaining`'s `uint64` cast carries no
   suppression comment where its twin in `_checkAndCommitWindows` does; whether that is a
   new warning is #14's to find out.
-- **Four co-signature behaviours the seventeen tests in `test/Cosign.t.sol` never run**,
-  enumerated against the file rather than sampled, and all four are the subject of F16 and
-  F17: approving on a **revoked** mandate; approving on an **expired** one, or letting a
-  live approval outlive the mandate's `expiresAt` before spending; approving a hash whose
-  amount is **at or below the threshold**, so the mapping is written and never consulted;
-  and `withdrawCosign` **front-running** a spend that would have used the approval. The
-  first three are ordinary Foundry tests. The fourth is an ordering property, so what a
-  test can actually pin is the two-transaction sequence, not the mempool race — which is
-  the same limit F4 records for `revoke`.
+- **Three co-signature behaviours `test/Cosign.t.sol` never runs**, enumerated against the
+  file rather than sampled, and all three are F17's: approving on a **revoked** mandate;
+  approving on an **expired** one, or letting a live approval outlive the mandate's
+  `expiresAt` before spending; and approving a hash whose amount is **at or below the
+  threshold**, so the mapping is written and never consulted. All three are ordinary
+  Foundry tests. Re-derived on 2026-08-27 rather than carried forward, and the re-derivation
+  changed the bullet twice.
+
+  **This bullet said "four" and said "seventeen tests", and both were wrong.** The count is
+  now **25** — `grep -c '^    function test'` — of which eight are new in #28 and two are the
+  old `approveCosign_*` pair renamed. The four gaps were attributed to "F16 and F17";
+  F16 has since shipped, and its behaviour is now covered by `test_approval_expires`,
+  `test_deadlineInThePast_isRefused`, `test_deadlineBeyondTheCap_isRefused`,
+  `test_deadlineExactlyAtTheCap_isAccepted`, `test_expiredAndAbsent_areDifferentErrors` and
+  `test_expiredApproval_lingersInStorageButIsInert`, so what remains is F17's alone. Note
+  that the surviving second gap is **not** what F16 fixed: F16 bounds an approval's own life,
+  and this gap is an in-date approval outliving the *mandate*, which nothing bounds.
+
+  **The retired fourth gap was never a gap.** It read "`withdrawCosign` **front-running** a
+  spend that would have used the approval", and conceded in the same breath that what a test
+  can pin is the two-transaction sequence rather than the mempool race. That sequence was
+  already pinned, in the same file, at the anchor commit: `test_withdrawCosign_revokesAnUnusedApproval`
+  approves, withdraws, asserts `isCosignApproved` false, and then has the agent's `spend`
+  refused with `CosignRequired` carrying the same hash. So the bullet named as untested the
+  one part of the property a test can reach, next to the test that reaches it — a gap found by
+  reading test bodies instead of test names, which is exactly the discipline §3's opening
+  sentence claims for itself and this bullet had not applied. The mempool race itself remains
+  unpinnable, which is F4's limit and is recorded there, not here.
 - **`recipient == m.payer`, which no test anywhere in the suite performs** — derived, not
   recalled. Every recipient argument reaching `spend` across all eleven test files and
   thirteen suite contracts is one of `vendor`, `other`, `boss`, `ARC_RECIPIENT`, the
@@ -1391,28 +1585,64 @@ could still be hiding there.
 **And one thing this pass looked for and did not find, which bounds how much the gaps above
 can be hiding.** The ten test files were swept for *vacuity* rather than for adversary surface,
 on the reasoning that a test body has no adversary — the only way it can hurt you is by
-passing without asserting anything. Four mechanical checks, all derived from the files:
+passing without asserting anything. Four mechanical checks, all derived from the files. **All
+four were re-run against the working tree on 2026-08-27 after #28, and both numbers are given
+below: the anchor's figure first, then the current one.** Re-running them found an arithmetic
+error in one of the four, recorded in place rather than quietly corrected.
 
-- **157 `test_*`/`testFuzz_*`/`invariant_*` declarations counted from source**, distributed
-  `Creation` 34, `Bounds` 26, `Views` 22, `Gates` 18, `Cosign` 17, `Windows` 14, `Idempotency`
-  13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4, `Base` 0. That total matches the
-  runner's reported 157 exactly, which is the first time the count has been established
-  **independently of `forge`'s own output** rather than quoted from it.
-- **Zero vacuous bodies.** Every one of the 157 contains at least one assertion or one denial
-  helper: 287 assertion calls (202 `assertEq`, 39 `assertTrue`, 27 `assertFalse`, 10
-  `assertGt`, 8 `assertLe`, 3 `assertLt`, 1 `assertApproxEqAbs`), 56 `payReverts`, 7
-  `trySpend`, 5 `assertRevertedWith`, 5 `expectEmit`.
-- **Zero bare `vm.expectRevert()`.** Of 69 textual occurrences, one is the shared helper's
-  parameterised form in `Base.t.sol:318` and one is inside a *comment*; the remaining 67 all
-  name a specific error — 56 as `MandateManager.<Error>.selector` and 11 via `abi.encode*`,
-  which pins the arguments too. The comment is `Cosign.t.sol:333-335`, and it is warning
-  against exactly this hazard in exactly these terms: without the expiry, that test *"would
-  still revert and would still pass a bare `vm.expectRevert()` — while proving nothing about
-  the cosign gate."* Somebody had already thought about this axis, in writing, before it was
-  swept.
-- **All 31 custom errors declared in `MandateManager.sol` are expected by at least one test.**
-  No orphan error, checked by enumerating the declarations and grepping each name across
-  `test/`.
+- **157 → 165 `test_*`/`testFuzz_*`/`invariant_*` declarations counted from source**, now
+  distributed `Creation` 34, `Bounds` 26, `Cosign` 24, `Views` 23, `Gates` 18, `Windows` 14,
+  `Idempotency` 13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4, `Base` 0. The anchor's
+  157 matched the runner's reported 157 exactly, which was the first time the count had been
+  established **independently of `forge`'s own output** rather than quoted from it. **165 has
+  not been reconciled against a runner** — `forge test` has not been run since #28 landed, so
+  this is a source count and nothing more, and #14 owns the reconciliation. #28's arithmetic:
+  Cosign 17 → 25 and Views 22 → 23, then Cosign 25 → 24 when a duplicate was deleted (the
+  `spendHash`-on-unknown-mandate assertion had been written into both suites; the copy in
+  `CosignTest` was removed on 2026-08-27 and a comment left in its place pointing at
+  `ViewsTest`, because two suites asserting one line inflates this bullet without testing
+  anything twice).
+- **Zero vacuous bodies**, re-derived rather than restated: all 165 bodies were walked by
+  brace-matching and every one contains at least one assertion or denial helper — 305 assertion
+  calls (211 `assertEq`, 43 `assertTrue`, 29 `assertFalse`, 10 `assertGt`, 8 `assertLe`, 2
+  `assertLt`, 1 `assertGe`, 1 `assertApproxEqAbs`), plus **49** `payReverts` call sites, 6
+  `trySpend`, 4 `assertRevertedWith` and 5 `vm.expectEmit`.
+
+  **Two of those helper figures were inflated by their own declarations, and the fix lowers
+  them.** This bullet used to read 56 `payReverts`, 7 `trySpend`, 5 `assertRevertedWith`: raw
+  grep totals over all eleven files, which count `Base.t.sol`'s four `payReverts` overloads and
+  the three that delegate to a fourth, plus one declaration each for the other two. Subtracting
+  the definitions leaves 49, 6 and 4 actual uses. None of it changes the conclusion — a helper
+  declaration cannot make a vacuous body non-vacuous either way — and it is corrected here
+  because the same slip in the same direction appears three times in this bullet's history, which
+  makes it a habit rather than a typo: **a `grep -c` is a count of text, and calling it a count
+  of call sites is a claim the grep did not check.**
+
+  **The anchor's headline figure was wrong too, and its own parenthetical was the tell.** It read
+  "287 assertion calls (202 `assertEq`, …)", and those components sum to 290, not 287. The true
+  anchor count is **199 `assertEq`**, which makes the stated total of 287 add up exactly under
+  the rule that produced it (every `assert*(` in all eleven `.t.sol` files, excluding the five
+  `assertRevertedWith` listed separately as a denial helper). So the headline was right and one
+  component was mistyped — the least harmful version of this error, and still the reason a
+  document that reports sub-counts should have them checked against their own total.
+
+  Two components moved for reasons worth naming rather than absorbing: `assertLt` 3 → 2 and a
+  new `assertGe` 0 → 1 are the **same** edit, `ArcParity.t.sol`'s second `ARC_LIVE_GASUSED`
+  comparison deleted and the derived zero-byte floor put in its place. That is the evidence loss
+  F15 records, showing up here as a count.
+- **Zero bare `vm.expectRevert()`.** Of 69 → **76** textual occurrences, exactly one is the
+  shared helper's parameterised form in `Base.t.sol:318` and exactly one is inside a *comment*;
+  the remaining 67 → **74** all name a specific error — 56 → 57 as
+  `MandateManager.<Error>.selector` and 11 → **17** via `abi.encode*`, which pins the arguments
+  too. The comment lives in `CosignTest.test_perTxCapBelowThreshold_isRefusedAtGrantTime`
+  (cited by line number before #28 moved it), and it is warning against exactly this hazard in
+  exactly these terms: without the expiry, that test *"would still revert and would still pass a
+  bare `vm.expectRevert()` — while proving nothing about the cosign gate."* Somebody had already
+  thought about this axis, in writing, before it was swept.
+- **All 31 → 33 custom errors declared in `MandateManager.sol` are expected by at least one
+  test.** No orphan error, checked by enumerating the declarations and grepping each name across
+  `test/`. The two added by #28 are `CosignExpired(bytes32,uint40)` and `BadDeadline(uint40)`,
+  named 2 and 3 times respectively; `BadConfig` remains the most-expected at 24.
 
 **The first version of that sweep reported nineteen false positives, and the reason is worth
 recording because it is the grep somebody will re-run.** Searching test bodies for
@@ -1444,7 +1674,8 @@ about *this* struct and *these* thirteen fields only; it has to be re-run agains
 
 **The hostile-co-signer sweep, added 2026-08-26 as #16a**, was run the same way: not
 against a list of attacks but by finding every site that reads `m.cosigner` or
-`_cosignApproved` — seven, listed in full after F18 — and asking of the role as a whole
+`_cosignApproved` — seven at the time, listed in full after F18, where the post-#28 recount
+to eight is also recorded — and asking of the role as a whole
 *what can its holder do that the payer did not intend, including refusing to act.* It
 produced F15 through F18 and one restatement of an existing §3 row. Two of the four are
 about legibility rather than enforcement, which is now the dominant category in this
@@ -1504,8 +1735,10 @@ question became "and what about an address with no code".
 
 **The correction owed to the first attempt, since this document is about method.** The vacuity
 sweep was run once with a grep that under-reported nineteen tests as assertionless, because it
-did not know that `payReverts` is where 56 of the suite's 67 revert expectations live. It was
-caught by disbelief at the result rather than by rigour — the list contained
+did not know that `payReverts` is where 49 of the suite's denials live — every one of them
+routing through the single parameterised `vm.expectRevert` in `Base.t.sol`, which is why a grep
+for `expectRevert` in test bodies finds none of them. It was caught by disbelief at the result
+rather than by rigour — the list contained
 `test_zeroAmount_reverts`, which cannot plausibly be assertionless — and that is a weaker
 control than it should be. The general lesson is the one §5 now records: an automated check over
 a codebase with a harness has to be told the harness's vocabulary, or it silently measures the

@@ -391,7 +391,10 @@ transactions and no second party. Neither is a divergence between the contract a
 `reference/policy.js` — the model accepted both too, so no amount of cross-checking the
 two implementations would have surfaced them. v2 refuses all three. `cosigner == payer`
 remains legal and is the ordinary case; it is what live mandate 2 does on Arc today, and a
-rule that condemned it would have contradicted a receipt.
+rule that condemned it would have contradicted a receipt. (v2's `approveCosignFor`
+authorises the same way, which is the point: the fix belongs at grant time, because no check
+inside an approval can tell a cosigner who is legitimately also the payer from one who is
+illegitimately also the spender.)
 
 **And two more that were on no list at all, found by writing the threat model.** Neither
 belongs to the three above; both came out of a sweep asking which fields a mandate can
@@ -460,11 +463,18 @@ dropped, because the order they came off in is itself a record. `forge test --pr
 The three soft spots have been resolved as decisions, all three the strict way, and the
 third one uncovered two more. And the live exercises are closed: a cosigned spend and a
 revocation both have receipts on Arc Testnet, along with `approveCosign` and
-`withdrawCosign`, which is all five state-changing functions. The identity and credential
+`withdrawCosign`, which is all five state-changing functions **that v1 exposed** — v2 renamed
+one of them, so see the note below. The identity and credential
 gates are the exception and are still unexercised on chain, blocked on something no amount
 of care in this repository can supply — an ERC-8004 identity minted to our agent wallet,
 and an attestation that passes rather than the one real attestation on Arc Testnet, whose
 response is a failing 1.
+
+**One of those five no longer exists.** #28 deleted `approveCosign(bytes32,bytes32)` in favour of
+`approveCosignFor(mandateId, recipient, amount, ref, nonce, validUntil)`, so the sentence above
+is a closed statement about v1 and **not** a claim that every path in the current source has a
+receipt. Four of v2's five do, for the same signature; the cosign approval path has none, and
+cannot until v2 deploys.
 
 So: finish v2 — the merkle allowlist is the last change, the joint-ceiling view having landed
 as `spendableAcross`, which exposes the shared-allowance overlap the live 2026-08-24 run found

@@ -36,6 +36,18 @@ Those four reproduce the exact four transactions that were sent to Arc Testnet �
 caps, same window, same recipient, same amounts — so that real receipts have something
 honest to be compared against.
 
+**Three of the four, since #28.** F15 deleted `approveCosign(bytes32,bytes32)`, so
+`ArcParityApproveCosignTest` — now `test_arcParity_4_approveCosignFor` — no longer reproduces
+any transaction that was ever sent to Arc. Its two assertions against the live 53,114 were
+**deleted rather than loosened**, because widening a tolerance until a different function fits
+inside it would have relabelled our own arithmetic as an Arc property. `ARC_LIVE_GASUSED` stays
+in the file as history behind a banner explaining why it is unrepairable, and what survives in
+that test is everything that never depended on it: the A/B cold-surcharge isolation, the hand
+decomposition, the intrinsic-gas arithmetic, and a `used > 20_000` floor proving a virgin SSTORE
+was really paid for. **What the repository lost is its only same-function comparison between a
+Foundry prediction and a real Arc receipt on a USDC-free operation** — that check does not come
+back until v2 deploys and earns a new anchor for the new function.
+
 It also carries the two most useful lessons in this file, both in comments. The header
 records that it silently measured the wrong thing on its first version, passed every
 assertion while doing so, and reported an `approve` costing 3,185 gas when the SSTORE
@@ -330,6 +342,16 @@ which is not the cosigner. Both failed with `NotCosigner()`, several lines away 
 cause. The fix is to hoist the inner call into a local before the prank; `Base.payReverts`
 exists to contain exactly this hazard, and the same trap applies inside a
 `vm.expectRevert(...)` argument list.
+
+*The hazard outlived the example.* That expression no longer compiles: #28 deleted
+`approveCosign` and narrowed `spendHash` to five parameters. Written against the current
+contract the same mistake is `mm.approveCosignFor(id, to, amt, ref, nonce, deadline)` with any
+nested `mm.spendHash(...)` in the argument list, or the more tempting shape now that
+`approveCosignFor` **returns** the hash — pranking one call and then using its return value in
+a second call that also needs the prank. The rule is unchanged and does not depend on the
+signature: **one `vm.prank` covers one call, and an argument that is itself a call goes first.**
+The example above is kept as what actually happened on 2026-08-24 rather than repaired, because
+the run it describes is v1's.
 
 One was arithmetic in a comment that did not match the code. A `cosignThreshold` of 10
 with a spend of 20 described as "under the threshold" — the threshold had to sit between

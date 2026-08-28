@@ -288,6 +288,38 @@ contract ArcParitySpendTest is ArcParityBase {
  * land on the receipt with a residual near zero, and any failure to do so is the
  * harness, not Arc. That last sentence turned out to be the useful one: the residual
  * was 2,705 and it was indeed the harness.
+ *
+ * ============================================================================
+ * THE ANCHOR IN THIS SUITE IS GONE AS OF v2, AND NOTHING CAN RESTORE IT.
+ * ============================================================================
+ *
+ * `approveCosign(bytes32,bytes32)` was DELETED by F15. Every paragraph above still
+ * describes something true, but it describes a function that no longer exists at any
+ * address this repository can call, so the comparison this suite was built to perform
+ * cannot be performed. The live receipt — tx `0x29eb5c24…`, 53,114 gas, block on Arc
+ * Testnet — measured `approveCosign` running inside deployed v1 at
+ * `0x3744E93B9e796E05CB66311d897559B6F3860196`. That deployment is immutable and still
+ * holds the old function; this source tree no longer does. There is no way to put the
+ * two back on the same basis:
+ *
+ *   - `approveCosignFor` is a DIFFERENT function. Six parameters instead of two (196
+ *     calldata bytes instead of 68), one extra keccak for the hash it now derives itself,
+ *     two extra comparisons for the deadline, and three data words in the log instead of
+ *     none. Comparing its cost to 53,114 would be comparing two different computations
+ *     and calling the difference an Arc property, which is the precise error the reversal
+ *     note above exists to record.
+ *   - Re-measuring on Arc would need `approveCosignFor` deployed there. That is a v2
+ *     deployment, and when it happens it gives a NEW anchor for the NEW function — not a
+ *     repair of this one.
+ *
+ * So `ARC_LIVE_GASUSED` is retained below as history and is deliberately NOT asserted
+ * against any more. What survives is everything that never depended on the live figure:
+ * the A/B cold-surcharge isolation, the hand decomposition, the intrinsic-gas arithmetic,
+ * and the `used > 20_000` floor proving a virgin SSTORE was actually paid for. What is
+ * lost is the only same-function check in this repository between a Foundry prediction
+ * and a real Arc receipt on a USDC-free operation. That cost was named and accepted when
+ * the removal was chosen; it is written here rather than in a commit message because a
+ * reader of this file six months from now needs it more than a reader of the log does.
  */
 contract ArcParityApproveCosignTest is ArcParityBase {
     /// The live co-signed mandate: salt 2, cosigner == payer, threshold 0.05 USDC.
@@ -297,8 +329,10 @@ contract ArcParityApproveCosignTest is ArcParityBase {
     uint8 internal constant ARC_COSIGN_FLAGS = 79; // asserted below, not trusted
     uint256 internal constant ARC_COSIGN_AMOUNT = 100_000; // above the threshold
 
-    /// What Arc actually charged. Not a target to tune towards — the point is the
-    /// residual against a prediction built only from plain-EVM prices.
+    /// What Arc actually charged FOR THE DELETED TWO-ARGUMENT FUNCTION. Kept as history and
+    /// as the figure DESIGN.md and evidence/README.md cite; no longer compared against
+    /// anything measured here, because nothing measured here is that function. See the
+    /// banner above for why this is unrepairable rather than merely stale.
     uint256 internal constant ARC_LIVE_GASUSED = 53_114;
 
     /// EIP-2929 and the shape of a top-level call. A real transaction has NO `CALL`
@@ -331,7 +365,7 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         vm.prank(payer);
         cosignId = mm.createMandate(ARC_COSIGN_SALT, p);
 
-        approvedHash = mm.spendHash(cosignId, agent, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, ARC_NONCE);
+        approvedHash = mm.spendHash(cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, ARC_NONCE);
         approvedBeforeMeasurement = mm.isCosignApproved(cosignId, approvedHash);
     }
 
@@ -341,7 +375,7 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         }
     }
 
-    function test_arcParity_4_approveCosign() public {
+    function test_arcParity_4_approveCosignFor() public {
         _assertConstantsAgree();
         assertEq(
             uint256(ARC_COSIGN_FLAGS),
@@ -351,14 +385,19 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // The control, evaluated in setUp so that reading it cannot warm the slot.
         assertFalse(approvedBeforeMeasurement, "approval slot must start false, cold and virgin");
 
-        bytes memory cd = abi.encodeCall(MandateManager.approveCosign, (cosignId, approvedHash));
+        uint40 validUntil = uint40(block.timestamp + 1 days);
+        bytes memory cd = abi.encodeCall(
+            MandateManager.approveCosignFor,
+            (cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, ARC_NONCE, validUntil)
+        );
 
         vm.prank(payer);
         uint256 g = gasleft();
-        mm.approveCosign(cosignId, approvedHash);
+        mm.approveCosignFor(cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, ARC_NONCE, validUntil);
         uint256 used = g - gasleft();
 
         assertTrue(mm.isCosignApproved(cosignId, approvedHash), "approval was actually recorded");
+        assertEq(mm.cosignApprovalDeadline(cosignId, approvedHash), validUntil, "and at the deadline given");
         // A zero-to-non-zero SSTORE is 20,000 and cannot be avoided. Below that, the
         // slot was warm and this number is not what it looks like.
         assertGt(used, 20_000, "must pay a full SSTORE_SET; below this the slot was dirty");
@@ -368,35 +407,74 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // A minus B isolates exactly how much cold surcharge measurement A paid, which
         // is the only way to check the hand decomposition instead of asserting it. The
         // model says A should carry 2,500 of cold-account surcharge (2,600 EXTCODESIZE
-        // less the 100 a warm one costs) plus 3 x 2,000 for the mandate slots, so
-        // A − B should be 8,500. A different answer means the model is wrong about
+        // less the 100 a warm one costs) plus 2,000 for each cold mandate slot, so
+        // A − B should be a few thousand. A different answer means the model is wrong about
         // which slots are cold, and every other figure derived from it is suspect.
-        bytes32 secondHash =
-            mm.spendHash(cosignId, agent, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, bytes32(uint256(2)));
+        //
+        // v2 note: the 8,500 target quoted below was derived for the deleted two-argument
+        // function, which read three mandate slots. `approveCosignFor` reads a fourth
+        // (`spender`, slot 1, for the hash it now derives itself), so the expected A − B is
+        // 2,000 higher — around 10,500. It is PRINTED and not asserted, exactly as before,
+        // and the printed 8,500 label is corrected rather than silently reused.
+        bytes32 secondHash = mm.spendHash(cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, bytes32(uint256(2)));
         assertTrue(secondHash != approvedHash, "second hash must be a genuinely different slot");
 
         vm.prank(payer);
         uint256 g2 = gasleft();
-        mm.approveCosign(cosignId, secondHash);
+        mm.approveCosignFor(cosignId, ARC_RECIPIENT, ARC_COSIGN_AMOUNT, ARC_REF, bytes32(uint256(2)), validUntil);
         uint256 usedWarm = g2 - gasleft();
 
         assertTrue(mm.isCosignApproved(cosignId, secondHash), "second approval recorded too");
 
-        // Intrinsic gas depends only on how many calldata bytes are zero, so the local
-        // mandateId and spendHash only give a comparable figure if they are as dense as
-        // the live ones were. Both live words were fully non-zero; a keccak output has
-        // a ~12% chance of containing at least one zero byte, so this is checked.
-        assertEq(cd.length, 68, "selector + two words");
-        assertEq(_zeroBytes(cd), 0, "live calldata had zero zero-bytes; intrinsic is only comparable if this does too");
+        // Intrinsic gas depends only on how many calldata bytes are zero. The old test
+        // asserted EXACTLY ZERO zero-bytes, because the live transaction's two words were
+        // both fully dense and intrinsic was only comparable if the local ones were too.
+        // There is nothing to be comparable WITH any more, and the new calldata is sparse by
+        // construction, so that assertion is replaced rather than weakened.
+        //
+        // What replaces it is a bound that is DERIVED rather than observed. Five of the six
+        // argument words have known values, and each therefore has a known zero-byte count:
+        // the recipient 0x…c0de is 30 zeros (a 2-byte value in a 32-byte word), the amount
+        // 100000 = 0x0186a0 is 29, `bytes32("invoice-0001")` is 20 (12 ASCII bytes,
+        // left-aligned), the nonce 1 is 31, and the deadline 1787086400 = 0x6a84c640 is 28.
+        // That is 138, and it is a floor rather than an equality for two reasons: the
+        // selector and `cosignId` contribute an unknown number on top, since a keccak
+        // output's density is not knowable without computing it. Both can only ADD.
+        //
+        // A floor is a real assertion here — reordering the arguments, widening one, or
+        // changing an ARC_* constant materially would break it — and unlike an equality it
+        // cannot fail for a stochastic reason. The exact count is printed below.
+        assertEq(cd.length, 196, "selector + six words");
+        assertGe(
+            _zeroBytes(cd),
+            138,
+            "five known argument words contribute 30+29+20+31+28 zero bytes; fewer means the encoding moved"
+        );
+        // Cross-check of `_intrinsic`'s loop against the closed form, using the
+        // independently written `_zeroBytes`. This is the weakest assertion in the test and
+        // is labelled as such: two implementations of one formula agreeing is not evidence
+        // the formula is EIP-2028's, only that the arithmetic below is not a typo.
+        assertEq(
+            _intrinsic(cd),
+            21_000 + 4 * _zeroBytes(cd) + 16 * (cd.length - _zeroBytes(cd)),
+            "intrinsic must be 21k plus 4/16 per zero/non-zero calldata byte"
+        );
 
         uint256 intrinsic = _intrinsic(cd);
         uint256 predicted = used - COLD_ACCOUNT_ADJ + intrinsic;
 
-        _report("approveCosign(id, spendHash)", used, cd);
+        _report("approveCosignFor(id, recipient, amount, ref, nonce, validUntil)", used, cd);
+        console.log("  zero calldata bytes       ", _zeroBytes(cd));
         console.log("  less cold-account adj     ", COLD_ACCOUNT_ADJ);
         console.log("  PREDICTED, adjusted       ", predicted);
-        console.log("  charged on Arc            ", ARC_LIVE_GASUSED);
-        console.log("  residual (predicted-live) ", predicted - ARC_LIVE_GASUSED);
+        console.log("");
+        console.log("NOT COMPARABLE - read before using either number:");
+        console.log("  Arc receipt for the DELETED approveCosign(id,hash)", ARC_LIVE_GASUSED);
+        console.log("  That receipt measured a two-argument function with 68 calldata bytes,");
+        console.log("  no derived hash and a log with no data words. This measurement is of a");
+        console.log("  six-argument function with 196 calldata bytes, one extra cold SLOAD, an");
+        console.log("  extra keccak and three data words in the log. The difference is a");
+        console.log("  difference of computation, not an Arc property. No residual is asserted.");
         console.log("");
         console.log("A/B cold-surcharge isolation:");
         console.log("  A, everything cold        ", used);
@@ -407,48 +485,59 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // between two calls: on 2026-08-25 this read A = 58,319 against B = 60,222 and
         // the bare `used - usedWarm` below panicked with 0x11 on the unsigned subtraction
         // — 139 passed, 1 failed, from a comment-only commit. Plain `forge test` gives
-        // A = 36,231 and 140/140. Same bytecode, ~22,000 gas of swing.
+        // A = 36,231 and a full pass. Same bytecode, ~22,000 gas of swing.
         //
-        // That inversion is worth more than the isolation it breaks. In the same failing
-        // trace Foundry metered the inner call at exactly 53,114 — the live Arc receipt to
-        // the gas — while this `gasleft()` wrapper around that identical call read 58,319.
-        // The instrument this file was built to check is mode-independent and correct; the
-        // file's own instrument is neither. See the reversal note above and DESIGN.md.
+        // That inversion is worth more than the isolation it breaks, and it is the one part
+        // of this file's original finding that v2 did NOT cost. In the same failing trace
+        // Foundry metered the inner call at exactly 53,114 — the live Arc receipt to the gas
+        // — while this `gasleft()` wrapper around that identical call read 58,319. The
+        // instrument this file was built to check is mode-independent and correct; the file's
+        // own instrument is neither. That comparison was made against the old function while
+        // it still existed, so it stands as a recorded observation even though it can no
+        // longer be re-run. See the reversal note above and DESIGN.md.
         if (usedWarm >= used) {
             console.log("  A - B  SKIPPED: B >= A, so gasleft() is contaminated.");
             console.log("  Re-run without --gas-report for a meaningful A/B isolation.");
         } else {
-            console.log("  A - B  (model says 8500)  ", used - usedWarm);
+            console.log("  A - B  (model says ~10500) ", used - usedWarm);
         }
         console.log("");
-        console.log("hand decomposition of the execution a real tx would pay:");
-        console.log("  3 cold SLOAD (payer s0, cosigner s2, flags s3)  6300");
-        console.log("  SSTORE_SET cold on _cosignApproved             22100");
-        console.log("  LOG4, three indexed args, empty data            1875");
-        console.log("  3x keccak256(64 bytes): 1 mandate + 2 nested     126");
-        console.log("  ---- accounted                                 30401");
+        console.log("hand decomposition, RE-DERIVED for the six-argument function:");
+        console.log("  4 cold SLOAD: payer s0, flags s3, cosigner s2, spender s1     8400");
+        console.log("  1 warm SLOAD: payer s0 re-read inside spendHash                 100");
+        console.log("  SSTORE_SET cold on a virgin _cosignApproved slot              22100");
+        console.log("  LOG4: 375 + 4x375 topics + 8x96 for three data words           2643");
+        console.log("  keccak256 over the 9-word (288 B) spendHash preimage              84");
+        console.log("  keccak256(64) per mapping slot, 3 or 4 of them            126 or 168");
+        console.log("  ---- accounted, 33453 or 33495 ----");
         console.log("  execution a real tx would pay (test - adj)   ", used - COLD_ACCOUNT_ADJ);
+        console.log("");
+        console.log("  Two honest caveats on that total. The mapping-keccak line is a RANGE");
+        console.log("  because `_mandates[mandateId]` is addressed twice - once here, once in");
+        console.log("  spendHash, which has its own storage pointer - and whether solc's");
+        console.log("  optimiser computes that slot once or twice is not knowable from the");
+        console.log("  source. The 42-gas spread is far below the ~2,700 of harness error this");
+        console.log("  file has already documented, so it is stated rather than resolved.");
+        console.log("  And the total is arithmetic from the EVM cost table, not a measurement:");
+        console.log("  it has NOT been checked against a receipt for this function, because");
+        console.log("  there is no such receipt until v2 is deployed. Treat any gap against");
+        console.log("  the measured line as unexplained, NOT as an Arc premium.");
 
-        // The claim under test is the DIRECTION, which is the part that generalises:
-        // on an operation that touches no USDC, the Foundry harness predicts HIGH.
-        // `createMandate` also touches no USDC and also overshoots (−6,337), while
-        // `approve` and `spend` both touch USDC and undershoot. A tight numeric bound
-        // here would be tuning; the printed residual is the finding.
+        // WHAT IS NO LONGER ASSERTED, and why the test still earns its place.
         //
-        // The direction holds in every mode, so it is asserted unconditionally. The
-        // MAGNITUDE does not: under `--gas-report` the residual inflates from ~2,700 to
-        // 24,593 because tracing overhead is inside the `gasleft()` window, so bounding it
-        // would fail for a reason that has nothing to do with the model. B >= A is the
-        // signal that the measurement is contaminated — the same signal used above.
-        assertGt(predicted, ARC_LIVE_GASUSED, "harness should overshoot on a USDC-free operation");
-        if (usedWarm >= used) {
-            console.log("");
-            console.log("Residual bound SKIPPED: gasleft() contaminated by tracing overhead.");
-            console.log("This test is only quantitative under plain `forge test`.");
-        } else {
-            assertLt(
-                predicted - ARC_LIVE_GASUSED, 6_000, "overshoot should be small; a big one means the model is wrong"
-            );
-        }
+        // The two removed assertions were `predicted > ARC_LIVE_GASUSED` and
+        // `predicted - ARC_LIVE_GASUSED < 6_000`. Both compared this function to a receipt
+        // for a different one. Keeping them by loosening the bound would have been worse
+        // than deleting them: a passing test that compares incomparable things teaches a
+        // reader that the comparison is valid.
+        //
+        // What remains is not decoration. `used > 20_000` proves a virgin SSTORE was paid
+        // for, which is the trap at the top of this file and the reason `setUp` reads the
+        // slot instead of the test body. The calldata-shape and intrinsic assertions pin the
+        // arithmetic `_report` prints. And the A/B isolation still measures the harness
+        // against itself, which never needed Arc. The suite is now a measurement rather than
+        // a parity check, and it is named honestly in the banner rather than in a comment
+        // nobody reads.
+        assertGt(usedWarm, 20_000, "B must also pay a full SSTORE_SET on its own virgin slot");
     }
 }

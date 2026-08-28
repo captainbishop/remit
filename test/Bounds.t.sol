@@ -21,7 +21,7 @@ contract BoundsTest is Base {
         uint256 payerBefore = token.balanceOf(payer);
 
         bytes32 nonce = bytes32("n1");
-        bytes32 expectedHash = mm.spendHash(id, agent, vendor, usd(40), REF, nonce);
+        bytes32 expectedHash = mm.spendHash(id, vendor, usd(40), REF, nonce);
 
         vm.expectEmit(true, true, true, true, address(mm));
         emit MandateManager.Spend(id, agent, vendor, usd(40), REF, nonce, expectedHash, usd(40));
@@ -383,9 +383,8 @@ contract BoundsTest is Base {
         bytes32 id = grant(p);
 
         bytes32 nonce = bytes32("n-cosigned");
-        bytes32 hash = mm.spendHash(id, agent, vendor, usd(50), REF, nonce);
         vm.prank(boss);
-        mm.approveCosign(id, hash);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
         assertTrue(mm.isCosignApproved(id, hash));
 
         vm.prank(payer);

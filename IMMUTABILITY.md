@@ -137,6 +137,14 @@ altered only by those same people. There is no caller anywhere with authority ov
 else's mandate — and there is no caller with authority over *all* mandates, because no such
 role exists in the code.
 
+**This table describes the deployed contract and nothing else, which is the whole subject of
+this file.** The line numbers and the names are v1's, reproducible with
+`git show v1.0.0-arc-testnet:contracts/MandateManager.sol`. v2 in the working tree renames
+`approveCosign` to `approveCosignFor` and adds two views, and none of that reaches
+`0x3744E93B9e796E05CB66311d897559B6F3860196` — there is no proxy, so the row above is what that
+address exposes for as long as it exists. Do not update this table to match the source tree; a
+payer deciding whether to trust the live deployment needs the live deployment's surface.
+
 A detail that matters for §8: a mandate id is
 `keccak256(abi.encode(DOMAIN, chainid, address(this), msg.sender, salt))`, so it binds the
 deploying address. The same salt produces a *different* id on a different deployment, which

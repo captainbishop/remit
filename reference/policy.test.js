@@ -21,7 +21,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const P = require('./policy.js');
-const { usdc, window: win, createMandate, revoke, approveCosign, MAX_AMOUNT, Denial, DAY, WEEK } = P;
+const {
+  usdc,
+  window: win,
+  createMandate,
+  revoke,
+  approveCosignFor,
+  MAX_AMOUNT,
+  MAX_COSIGN_TTL,
+  Denial,
+  DAY,
+  WEEK,
+} = P;
 
 // `evaluate`, `spend` and the two headroom views are wrapped rather than destructured, to
 // close two vacuity traps that the introduction of FAR (below) created. Every mandate that
@@ -187,7 +198,7 @@ test('construction: a cosigner without a threshold is refused, because the contr
 });
 
 test('construction: the spender cannot be its own cosigner', () => {
-  // approveCosign authorises on `caller === mandate.cosigner` and nothing else, so this
+  // approveCosignFor authorises on `caller === mandate.cosigner` and nothing else, so this
   // configuration lets the agent approve its own spend hash and then spend it. The gate
   // becomes two transactions and no second party — not a weaker control, the absence of
   // one. It is invisible in the mandate object, which is what makes it worth refusing.
@@ -489,7 +500,7 @@ test('revocation: the payer or the spender may revoke, and nobody else', () => {
 test('revocation outranks every other check, including a valid cosign', () => {
   const m = simpleMandate({ cosignThreshold: usdc('10'), cosigner: BOSS });
   const r = req(usdc('50'));
-  approveCosign(m, BOSS, r);
+  approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1 });
   revoke(m, PAYER);
   assert.equal(evaluate(m, r, { now: 1 }).reason, Denial.REVOKED);
 });
@@ -643,19 +654,23 @@ test('ATTACK: a backwards clock cannot erase already-counted spending', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Every approval carries a deadline as of v2 (F16), and it is written out at each call site
+// rather than defaulted inside a local helper — the same reasoning as FAR above. A wrapper
+// that quietly supplied a deadline would also hide the fact that a real cosigner has to
+// choose one, and choosing one is the entire point of the finding.
 test('cosign: large spends need approval, small ones do not', () => {
   const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
   assert.equal(spend(m, req(usdc('25')), { now: 1 }).allowed, true, 'at threshold: no cosign needed');
   const big = req(usdc('26'));
   assert.equal(evaluate(m, big, { now: 1 }).reason, Denial.COSIGN_REQUIRED);
-  approveCosign(m, BOSS, big);
+  approveCosignFor(m, BOSS, { ...big, validUntil: DAY }, { now: 1 });
   assert.equal(spend(m, big, { now: 1 }).allowed, true);
 });
 
 test('cosign: an approval is single-use', () => {
   const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
   const r = req(usdc('50'));
-  approveCosign(m, BOSS, r);
+  approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1 });
   assert.equal(spend(m, r, { now: 1 }).allowed, true);
   // Replay is caught by the nonce; and the approval was consumed as well.
   assert.equal(m.cosignApprovals.size, 0);
@@ -665,7 +680,7 @@ test('cosign: an approval is single-use', () => {
 test('ATTACK: a cosign approval cannot be redirected to another recipient or amount', () => {
   const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
   const approved = req(usdc('50'), { recipient: VENDOR });
-  approveCosign(m, BOSS, approved);
+  approveCosignFor(m, BOSS, { ...approved, validUntil: DAY }, { now: 1 });
 
   // same nonce, different recipient — must not inherit the approval
   const swapRecipient = { ...approved, recipient: OTHER };
@@ -681,8 +696,119 @@ test('ATTACK: a cosign approval cannot be redirected to another recipient or amo
 
 test('cosign: only the named cosigner may approve', () => {
   const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
-  assert.throws(() => approveCosign(m, AGENT, req(usdc('50'))), /only the cosigner/);
-  assert.throws(() => approveCosign(m, PAYER, req(usdc('50'))), /only the cosigner/);
+  const at = { validUntil: DAY };
+  assert.throws(
+    () => approveCosignFor(m, AGENT, { ...req(usdc('50')), ...at }, { now: 1 }),
+    /only the cosigner/,
+  );
+  assert.throws(
+    () => approveCosignFor(m, PAYER, { ...req(usdc('50')), ...at }, { now: 1 }),
+    /only the cosigner/,
+  );
+});
+
+test('cosign (F16): an approval expires, and expiry is a DIFFERENT denial from absence', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1 });
+
+  // One second before the deadline it is honoured.
+  assert.equal(evaluate(m, r, { now: DAY - 1 }).allowed, true);
+
+  // AT the deadline it is not. validUntil is exclusive, matching expiresAt and the contract:
+  // with sub-second blocks sharing a timestamp, an inclusive bound would leave an ambiguous
+  // final second in which the approval's liveness depends on block ordering within it.
+  assert.equal(evaluate(m, r, { now: DAY }).reason, Denial.COSIGN_EXPIRED);
+  assert.equal(evaluate(m, r, { now: DAY + 1 }).reason, Denial.COSIGN_EXPIRED);
+
+  // Split from COSIGN_REQUIRED on purpose. "Nobody approved this" and "the cosigner approved
+  // it and you were too slow" call for different actions by the caller — ask for a signature
+  // versus ask for a fresh one — and collapsing them tells an operator to chase the wrong
+  // party. A mandate with no approval at all still reports absence.
+  const never = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  assert.equal(evaluate(never, req(usdc('50')), { now: DAY }).reason, Denial.COSIGN_REQUIRED);
+
+  // The stale entry LINGERS in the map rather than being swept: nothing in a denial path
+  // mutates state, and the contract behaves the same way — `cosignApprovalDeadline` keeps
+  // returning the dead timestamp until the slot is overwritten or withdrawn. It is inert,
+  // because every read compares it against the clock.
+  assert.equal(m.cosignApprovals.get(hash), BigInt(DAY));
+});
+
+test('cosign (F16): a deadline in the past, at now, or beyond MAX_COSIGN_TTL is refused', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const now = 1_000;
+
+  // Already dead on arrival. Refused rather than stored, because zero means "absent" in the
+  // map and a past deadline would otherwise be an approval that exists and can never be
+  // used — exactly the unconsumable state F17 is about.
+  for (const bad of [0, 1, now - 1, now]) {
+    assert.throws(
+      () => approveCosignFor(m, BOSS, { ...req(usdc('50')), validUntil: bad }, { now }),
+      /must be strictly after/,
+      `validUntil=${bad} should be refused`,
+    );
+  }
+
+  // The cap is what keeps F16 from being advisory. Without it the agent that builds the
+  // transaction pre-fills the maximum and every approval is immortal again.
+  assert.throws(
+    () =>
+      approveCosignFor(
+        m,
+        BOSS,
+        { ...req(usdc('50')), validUntil: BigInt(now) + MAX_COSIGN_TTL + 1n },
+        { now },
+      ),
+    /MAX_COSIGN_TTL/,
+  );
+
+  // Exactly at the cap is legal — the bound is inclusive on this side, so a cosigner who
+  // wants the longest permitted window does not have to guess an off-by-one.
+  const far = BigInt(now) + MAX_COSIGN_TTL;
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: far }, { now });
+  assert.equal(m.cosignApprovals.get(hash), far);
+  assert.equal(evaluate(m, r, { now: Number(far) - 1 }).allowed, true);
+});
+
+test('cosign (F16): ctx.now is required, so a deadline can never go unchecked', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  // A missing clock must throw rather than default. Defaulting `now` to 0 would accept every
+  // deadline in history as "in the future", which is the failure this guard exists for.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('50')), validUntil: DAY }),
+    /ctx\.now is required/,
+  );
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('50')), validUntil: DAY }, {}),
+    /ctx\.now is required/,
+  );
+});
+
+test('ATTACK (F15): an approval cannot be steered to a spender the mandate does not name', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+
+  // The old signature took a `spender` and fell back to the mandate's, so a caller could ask
+  // the cosigner to approve the hash of a spend by OTHER. That hash matched nothing
+  // `evaluate` can ever produce — WRONG_SPENDER refuses first — so the approval was
+  // unspendable, and the cosigner had no way to see that from the arguments in front of
+  // them: a signature that appears to authorise a payment and authorises nothing.
+  //
+  // `spendHash` now reads the spender off the mandate, so there is nowhere to put a
+  // different one. The field is inert if supplied, which is what these two assertions pin.
+  const r = req(usdc('50'));
+  const hijack = { ...r, spender: OTHER, validUntil: DAY };
+  const hash = approveCosignFor(m, BOSS, hijack, { now: 1 });
+
+  assert.equal(
+    hash,
+    P.spendHash({ mandate: m, recipient: r.recipient, amount: r.amount, ref: '', nonce: r.nonce }),
+    'the approved hash must be the mandate-spender hash, not the hijacked one',
+  );
+
+  // And it is a live approval for the real spender's spend, rather than a dead entry.
+  assert.equal(spend(m, r, { now: 1 }).allowed, true);
 });
 
 // ---------------------------------------------------------------------------
