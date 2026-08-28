@@ -384,6 +384,15 @@ contract MandateManager {
     error RecipientNotAllowed();
     error ZeroAmount();
     error ZeroRecipient();
+    /// NEW IN v2 (F19). `recipient == payer` passed every gate in v1: it consumed `perTxCap`,
+    /// the window buckets and the lifetime cap, burned its nonce and emitted `Spend`, then
+    /// called `transferFrom(payer, payer, amount)` and moved nothing. Refused for the audit
+    /// trail, not the caps: Arc's system emitter at `0xffff…fffe` writes no log for a
+    /// self-transfer, so those spends were the one class a reconciler could not see, and a
+    /// `Spend` event that transfers nothing is the state whose display and whose enforcement
+    /// disagree that #11 and #22 forbid. It closes a griefing vector as a side effect — a
+    /// stopped or captured delegate could zero a lifetime cap without ever being paid.
+    error SelfPayment();
     error OverPerTxCap();
     error OverWindowCap(uint32 lengthSeconds, uint96 cap, uint256 used);
     error OverTotalCap();
@@ -693,6 +702,12 @@ contract MandateManager {
         // Arc forbids value transfers to the zero address; reject up front
         // rather than burning the caller's gas on a guaranteed runtime revert.
         if (recipient == address(0)) revert ZeroRecipient();
+        // F19. Shape before policy, which is why this sits ahead of the allowlist: a
+        // self-payment is never a payment, whoever happens to be on the allowlist, and
+        // `RecipientNotAllowed` would answer a configuration question when the caller
+        // asked a design one. `m.payer` is written once (`payer: msg.sender`) and this
+        // contract has no mutator for it, so the equality can never stop holding.
+        if (recipient == m.payer) revert SelfPayment();
         if (m.flags & F_ALLOWLIST != 0 && !_allowlist[mandateId][recipient]) revert RecipientNotAllowed();
 
         if (amount == 0) revert ZeroAmount();
@@ -1136,6 +1151,13 @@ contract MandateManager {
         if (m.flags & F_EXPIRY != 0 && nowTs >= m.expiresAt) revert Expired();
 
         if (recipient == address(0)) revert ZeroRecipient();
+        // F19's guard, mirrored here under F17's rule rather than added to it as an
+        // afterthought: `m.payer` is assigned once in `createMandate` and never again, so
+        // `recipient == m.payer` is as permanent as a zero recipient. An approval naming the
+        // payer could never be consumed once `spend` refuses it, and letting the co-signer
+        // pay gas to authorise it would be exactly the false assurance F17 exists to prevent.
+        // Same position relative to the allowlist as in `spend`, for the parity reason below.
+        if (recipient == m.payer) revert SelfPayment();
         // `_allowlist` is written only in `createMandate` and this contract has no mutator for
         // it, so absence is permanent. F20 is an open question about adding a payer-only
         // REMOVE-only mutator, which would not weaken this: removal shrinks the set, so a

@@ -745,6 +745,8 @@ the permanent ones. Eleven guards nobody had named fell out of that — `Recipie
 `OverTotalCap`, `TotalSpentCeiling`, `Expired`, and two mandate-relative `BadDeadline` bounds.
 `reference/policy.js` carries 17 `throw refuse(` in its twin, counted from that file
 independently, so the two languages agree without either having been matched to the other.
+**Both counts are 18 as of later the same day**, F19 having added the eighteenth to each; the
+mirroring rule that made that mandatory is F17's own, and it is described under F19 below.
 
 The parenthetical above — "an in-date approval outliving the mandate's `expiresAt`, which
 nothing currently bounds" — is now **unconstructible** rather than untested: line 1189 refuses
@@ -767,6 +769,18 @@ ceiling and approves at exactly the ceiling, because neither gate does operator 
 boundary-tight assertion catches a `>` that becomes `>=`. Second run: 21 mutants — 17 removals,
 4 injections — all caught by a named test, baseline 178 green, 0 survivors, 0 inconclusive.
 
+**Third run, later the same day, after F19: 22 mutants, 22 caught, baseline 182 green.** The gate
+was not touched to get there — it finds its own targets by scanning the function for `revert `
+through `is_code()`, so F19's mirror enrolled itself. **A fourth run pointed the gate at `spend`
+for the first time** (`python3 reference/mutation-gate-sol.py spend`, which works because the
+injection table is keyed by function and `.get()` returns nothing for `spend`): 17 mutants, 17
+caught. I had predicted that one would find a hole the way the first run did, and it did not. The
+reason is not that `spend` is better code — it is that `spend` has had the whole project's tests
+aimed at it since v1, while `approveCosignFor` was one day old when its gate caught
+`TotalSpentCeiling`. **A gate's yield measures the age of the tests, not the importance of the
+function**, so the clean `spend` sweep is the weakest of the four results and should not be quoted
+as the strongest.
+
 **F19 is one line and closes a hole in the audit trail, not in the caps.** `recipient ==
 m.payer` is a legal spend: it consumes `perTxCap`, the window ring and the lifetime cap, burns
 its nonce, emits `Spend` — and moves nothing, because `transferFrom(payer, payer, amount)` is
@@ -779,6 +793,45 @@ SelfPayment();` beside the existing `ZeroRecipient` guard. One sub-question is s
 6-decimal `Transfer` for a self-transfer is undocumented, and `MockUSDC` answering it would
 only be our assumption answering itself. That needs one real transaction on Arc Testnet — the
 first item on this list in a while that is blocked on a receipt rather than on a decision.
+
+**F19 is DONE in v2, 2026-08-28, and "one line" was wrong — it was two guards, which is the
+second consecutive undercount on this page.** The guard text is exactly as sized above, but it
+went into `spend` *and* into `approveCosignFor`, because F17 had landed hours earlier and F17's
+rule is that every **permanent** refusal `spend` can make is mirrored on the approval path. This
+was not a judgement call: `m.payer` has one write site in the contract, `payer: msg.sender` in
+`createMandate`'s struct literal, and every other appearance is an `==` read, so the equality can
+never stop holding — which puts it in F17's permanent partition next to `ZeroRecipient`, and
+`approveCosignFor` was already mirroring `ZeroRecipient` on the line above. Omitting the mirror
+would have holed F17's invariant one day after it landed, and would have let a co-signer pay gas
+to authorise a payment that `spend` had just been taught to refuse: the exact false assurance F17
+exists to prevent. Position is asserted too — `SelfPayment` sits between `ZeroRecipient` and
+`RecipientNotAllowed` in both functions, shape before policy, so a self-payment is not answered
+with a configuration error about an allowlist that is not wrong.
+
+Full cost, none of it estimated: 1 error, 2 guards, 4 Solidity tests (3 in `test/Bounds.t.sol`,
+1 in `test/Cosign.t.sol`), 4 model refusals across `reference/policy.js` and `policy.test.js`,
+and 1 extra mutant in each gate. Suite 178 → **182** green; model suite 69 → **72**; both gates
+21 → **22**, and both still at 100%. The cosign mutant `SelfPayment (line 1160)` has **exactly
+one killer**, `test_f19_approvingThePayerAsRecipient_isRefused` — the same shape as
+`TotalSpentCeiling` two paragraphs up, and the reason that test is named here instead of counted.
+
+**The lesson is now a rule, because two data points in two days is not a coincidence.** F17 was
+sized at "2 lines" and shipped as 17 guards; F19 was sized at "one line" and shipped as two.
+Neither estimate was careless about the guard — both forgot that a refusal in this repository is
+not one edit, it is an edit propagated through the contract, the reference model, two test suites
+and two mutation gates. **From here on, every permanent refusal added to `spend` costs two guards,
+two model refusals and one mutant per gate**, and any remaining item on this page that proposes a
+one-line guard should be read as proposing at least that much.
+
+**F25 shipped in the same change, and it had to.** `MockUSDC._move` emits `Transfer`
+unconditionally including `from == to`, which is the precise opposite of Arc's rule for the system
+emitter — so the obvious test for F19's claim, counting transfer logs on a self-spend, would have
+passed while demonstrating the opposite of production, with our own mock answering a question
+about Arc. The mock is left **deliberately divergent** rather than corrected: adding `if (from !=
+to)` would make it look authoritative about a rule that is only documented for the 18-decimal
+emitter and is still unconfirmed for the 6-decimal token. What shipped instead is a header block
+naming the divergence, a note at the `emit`, and an instruction about what to write instead —
+`vm.expectRevert(SelfPayment.selector)`, which is what all four F19 tests do.
 
 **And the corrective that matters more than any of the four.** F19 was already written down,
 completely and correctly, at `L3-VAULT.md:492-496` — for somebody building a shielded vault.
@@ -811,6 +864,16 @@ no `vm.expectRevert()` anywhere in the suite is bare, and every one of the 31 cu
 source for the first time — `grep -cE '^    function (test|testFuzz|invariant)'` across the
 eleven files sums to exactly the 157 `forge test` reports, so the figure this repository quotes
 in a dozen places now has two independent derivations instead of one runner's word.
+
+**Both halves of that were re-derived on 2026-08-28 and both still hold at 182 and 35.** No
+orphan among the 35 errors — `CosignNotRequired` and `SelfPayment` joined since — and the test
+count matches `forge test` from the pattern `^    function (test|invariant_)`. **The pattern in
+the paragraph above is the one that fails now**: `(test|testFuzz|invariant)` was correct for the
+eleven files as they stood, since `testFuzz` is caught by `test` anyway and `invariant` catches
+`invariant_`, but the shortened `^    function test` that got used during the F19 sweep returns
+179 rather than 182, because `WindowInvariant.t.sol`'s three `invariant_` functions have no
+`test` prefix. Recorded rather than corrected in place, because the failure was in the re-typing
+and not in what this paragraph wrote down.
 
 ## What does not go in
 

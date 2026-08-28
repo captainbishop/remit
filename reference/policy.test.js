@@ -465,6 +465,38 @@ test('zero recipient and zero amount are refused before touching the chain', () 
   assert.equal(evaluate(m, req(0n), { now: 1 }).reason, Denial.ZERO_AMOUNT);
 });
 
+test('F19: paying the payer is refused, and refused as SELF_PAYMENT', () => {
+  // Before F19 this was a legal spend that consumed perTxCap, the window ring and the
+  // lifetime cap, burned its nonce, emitted Spend, and moved nothing. Arc's system emitter
+  // writes no log for a self-transfer, so it was also the one spend a reconciler could not
+  // see. The interesting assertion is the CODE, not the refusal.
+  const m = simpleMandate();
+  const d = evaluate(m, req(usdc('10'), { recipient: PAYER }), { now: 1 });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, Denial.SELF_PAYMENT);
+});
+
+test('F19: the guard normalises, so mixed-case payer hex does not slip past it', () => {
+  // `mandate.payer` is stored normalised. A naive `recipient === mandate.payer` would compare
+  // raw strings and let `0xPAYER…` through in any other casing — the same bypass the allowlist
+  // test above pins for allowlisted recipients, and the reason both sides call normalizeAddr.
+  const m = simpleMandate();
+  for (const cased of [PAYER.toUpperCase(), PAYER.toLowerCase()]) {
+    assert.equal(evaluate(m, req(usdc('10'), { recipient: cased }), { now: 1 }).reason, Denial.SELF_PAYMENT);
+  }
+});
+
+test('F19: SELF_PAYMENT outranks the allowlist, even when the payer is ON it', () => {
+  // Pins the ordering decision rather than the guard. Both denials are true for this request
+  // when the payer is absent from the allowlist, and only one of them is useful; putting the
+  // allowlist first would answer "fix your config" when the request itself is the mistake.
+  // Listing the payer explicitly is the case that makes the ordering observable at all.
+  const onIt = simpleMandate({ allowlist: [PAYER, VENDOR] });
+  assert.equal(evaluate(onIt, req(usdc('10'), { recipient: PAYER }), { now: 1 }).reason, Denial.SELF_PAYMENT);
+  const offIt = simpleMandate({ allowlist: [VENDOR] });
+  assert.equal(evaluate(offIt, req(usdc('10'), { recipient: PAYER }), { now: 1 }).reason, Denial.SELF_PAYMENT);
+});
+
 test('only the named spender may spend', () => {
   const m = simpleMandate();
   const d = evaluate(m, req(usdc('1'), { spender: OTHER }), { now: 1 });
@@ -914,6 +946,21 @@ test('cosign (F17): a malformed recipient, amount or nonce is refused', () => {
   assert.throws(
     () => approveCosignFor(m, BOSS, { ...req(usdc('50')), recipient: ZERO_ADDRESS, ...at }, { now: 1 }),
     refusedWith(Denial.ZERO_RECIPIENT),
+  );
+
+  // F19's mirror. This is the guard F17's derivation rule demands and F17 shipped without,
+  // because F19 had not landed yet: `payer` is fixed at creation, so an approval naming the
+  // payer names a spend that can never be legal, and the co-signer would be paying gas to
+  // authorise a payment that moves nothing. SELF_PAYMENT wins over COSIGN_NOT_REQUIRED here
+  // too — the recipient's shape is settled before the threshold is consulted, same as ZERO_AMOUNT
+  // above and same as the order `evaluate` uses.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('50')), recipient: PAYER, ...at }, { now: 1 }),
+    refusedWith(Denial.SELF_PAYMENT),
+  );
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('1')), recipient: PAYER, ...at }, { now: 1 }),
+    refusedWith(Denial.SELF_PAYMENT),
   );
 
   // ZERO_AMOUNT, not COSIGN_NOT_REQUIRED, even though zero is also at-or-below every

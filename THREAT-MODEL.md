@@ -106,6 +106,58 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > missed the parenthesised `(1132)`, `(1136)`, `(1173)` and the sentence-initial `1189`. Every one
 > of the nine carries its error name or its condition text alongside it, which is the mitigation
 > the first banner paragraph asks for.
+>
+> **2026-08-28, F19+F25: the three blobs are still three, but they are not the same three, and
+> F17's nine numbers are now ANCHORED rather than floating.** F17 committed as `088813d`, which is
+> the single most useful consequence of that commit for this document: the nine bare numbers
+> described two paragraphs above as "WORKING-TREE numbers" have stopped being working-tree numbers
+> and become citations into a blob. All nine were re-checked against it one at a time and all nine
+> land on the code they claim — `763` and `1164` on the two `TotalSpentCeiling` guards, `1132` on
+> `Revoked`, `1136` on `Expired`, `1173` on `CosignNotRequired`, `1189` on the
+> `validUntil > m.expiresAt` `BadDeadline`, `1101` on `function approveCosignFor(`, `1130` on the
+> comment it quotes, `1194` on the function's closing brace. **The recovery command for them is
+> `git show 088813d:contracts/MandateManager.sol`**, and that is a real command that works, unlike
+> the banner's `92445dd` one, which cannot reach `approveCosignFor` at all and fails silently.
+>
+> | | lines | `error` decls | `SelfPayment` |
+> |---|---|---|---|
+> | `92445dd` — this banner's anchor | 1,204 | 31 | absent |
+> | `088813d` — `HEAD`, F15+F16+F17 | 1,501 | 34 | absent |
+> | working tree — F19+F25 on top | 1,523 | 35 | present |
+>
+> **What that costs: the nine no longer match the working tree either.** F19 inserted its error
+> declaration above them and its two guards among them, so every one of the nine has moved — by
+> **+15** for those between the new `error SelfPayment();` and the cosign mirror (`1132`→`1147`,
+> `1136`→`1151`), and by **+22** for those after it (`1164`→`1186`, `1173`→`1195`, `1189`→`1211`,
+> `1194`→`1216`); `763`→`778` and `1101`→`1116`. Those deltas are recorded rather than applied,
+> because the numbers are correct as written against the blob they now name and rewriting them
+> would make them wrong. **The F17 finding's own text was updated to say `088813d` explicitly and
+> to give the working-tree bounds `1116–1216` for the guard count**, which is the one place a
+> reader needs today's tree rather than yesterday's blob.
+>
+> **F19's own citations — `710` and `1160` — are working-tree numbers, and they are the only ones
+> in this file that are.** They will resolve against the F19 commit once it exists; until then
+> `grep -n 'revert SelfPayment' contracts/MandateManager.sol` is the recovery command, and it is a
+> better one than any line number because the guard is a single distinctive line in each function:
+> `if (recipient == m.payer) revert SelfPayment();`, identical text in both places. Per the first
+> paragraph's rule, the function names are `spend` and `approveCosignFor` and those do not move.
+>
+> **The green figure is now 182/182, not 178/178.** Derived the same two ways as before — the run's
+> own summary line and the sum of the thirteen per-suite lines — and matched by
+> `grep -chE '^    function (test|invariant_)' test/*.t.sol`, which is the corrected pattern: the
+> earlier `^    function test` form returns 179 here because it misses the three `invariant_`
+> functions in `WindowInvariant.t.sol`. That undercount was made and caught during F19. #14 still
+> owns re-measurement.
+>
+> **F19 and F25 changed nothing in the other seven markdown files, and that is a swept result, not
+> an assumption.** `DESIGN.md`, `README.md`, `IMMUTABILITY.md`, `FORGE.md`, `GAS-ABSTRACTION.md`,
+> `PRIVACY.md`, `START-HERE.md` and `evidence/README.md` were grepped for guard counts, error
+> counts, and every spelling of self-payment, self-transfer and `recipient == m.payer`. **Not one
+> of them makes a claim either fix touches** — the only stale numbers there are the v1-era `140
+> tests` and `57 tests` figures, which predate v2 entirely and belong to #14's relabelling pass, not
+> to this one. So the F19/F25 blast radius inside the docs is exactly three files: this one,
+> `CHANGELIST.md` and `L3-VAULT.md`. Recorded so the next fix does not re-run the same eight greps
+> to learn the same thing.
 
 ## Why this document exists
 
@@ -224,6 +276,18 @@ threat model rather than the arithmetic. A payer granting to an agent they do no
 should treat it as mandatory. `v2:482` refuses `cosigner == spender`, so the co-signature
 route cannot be self-approved, but nothing refuses `recipient == spender` and nothing should.
 
+[**#28, F19: the recipient is constrained three ways in the working tree, not two** — zero, the
+payer, and the allowlist. `v2:614-615` above is correct against this banner's anchor and is left
+alone; `spend` additionally reverts `SelfPayment` on `recipient == m.payer` since 2026-08-28.
+**None of this paragraph changes**, and the reason is a distinction the document now has to be
+careful about: F19 refuses paying *the payer*, F22 is about paying *the spender*, and both get
+called a "self-payment" in English. They are opposite cases. Paying the payer moves nothing and
+was refused because it lies to a reconciler. Paying the spender moves everything and must stay
+legal, because forbidding it would mean the delegate could not be the recipient of its own
+mandate — which is most of what mandates are for. **A guard named `SelfPayment` that refused
+`recipient == m.spender` would break Remit; the one that shipped refuses `recipient == m.payer`
+and breaks nothing.** If that name ever has to be read quickly, read the condition instead.]
+
 **Everything is public.** Every mandate, every cap, every spend, every recipient, and
 the whole commercial relationship it implies. This is the subject of `PRIVACY.md` and
 `L3-VAULT.md` and is not restated here.
@@ -241,6 +305,7 @@ path.
 | Property | Enforced by |
 | :--- | :--- |
 | Only the named spender can spend | `spend`: `msg.sender != m.spender` → `WrongSpender` |
+| Every spend moves value to somebody other than the payer | `spend`: `recipient == address(0)` → `ZeroRecipient`, and #28/F19: `recipient == m.payer` → `SelfPayment`. Both are refused ahead of the allowlist on purpose — shape before policy, so a malformed request is not answered with a configuration error. The pair is what makes `Spend` events reconcilable at all: Arc's system emitter writes no log for a self-transfer, so before F19 a spend could consume every cap, emit `Spend`, and leave nothing for a reconciler to match against. Mirrored in `approveCosignFor`, since `m.payer` has one write site and no mutator, so an approval naming the payer could never be consumed |
 | A mandate id is unique to one payer forever | id = `keccak256(DOMAIN, chainid, this, msg.sender, salt)`; `payer != address(0)` → `MandateExists`. `payer` is never cleared, so an id is single-use permanently and no revoked mandate's storage can be reinterpreted |
 | No mandate can be created without a bound on **lifetime** exposure | `createMandate` at `v2:424`: `(flags & F_TOTAL == 0) && (flags & F_EXPIRY == 0)` → `Unbounded`. Narrowed in #22; v1's `hasBound` local also accepted `F_PER_TX` or a window, neither of which bounds a lifetime — that was F5, and this row is what the contract's own comment had been claiming all along |
 | Every flag agrees with the value it describes | five biconditionals in `createMandate`, plus the one-directional `F_EXPIRY` rule at `v2:446` added in #22 — F1. No field in the struct can now be displayed and unread |
@@ -266,20 +331,23 @@ category.
 **Twenty-six findings, counted from the headings below rather than asserted** — `grep -c
 "^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 26, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **five are
-already fixed in code** (F1, F5 in #22; F15, F16, F17 in #28 — the first two on 2026-08-27, F17
-on 2026-08-28); **two were fixed in this document as it was being written** (F22 and F23, both
-missing trust boundaries — §2 gained its sixth and seventh in one day); **five have a fix that
-changes v2's behaviour** (F3, F9, F11, F13, F19); **eight are comment rewrites** that change
-nothing any code does (F4, F7, F8, F10, F14, F21 in the contract, F25 and F26 in the mocks — and
-the last two are in `test/`, so they are free of the frozen-metadata constraint that governs
-`contracts/`); **three are documentation** (F2, F6, F18); **one needs a decision before it can be
-sized** (F20, whether the contract gains a sixth state-changing function, and its first that
-mutates a mandate after creation); **one needs a four-line test before it can be sized at all**,
+long the search ran. They partition exactly, which is more useful than the total: **seven are
+already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28 — F15 and F16 on
+2026-08-27, F17 on 2026-08-28, F19 and F25 later the same day); **two were fixed in this document
+as it was being written** (F22 and F23, both missing trust boundaries — §2 gained its sixth and
+seventh in one day); **four have a fix that changes v2's behaviour** (F3, F9, F11, F13); **seven
+are comment rewrites** that change nothing any code does (F4, F7, F8, F10, F14, F21 in the
+contract, F26 in the mocks — and the last is in `test/`, so it is free of the frozen-metadata
+constraint that governs `contracts/`); **three are documentation** (F2, F6, F18); **one needs a
+decision before it can be sized** (F20, whether the contract gains a sixth state-changing
+function, and its first that mutates a mandate after creation); **one
+needs a four-line test before it can be sized at all**,
 because one of its two possible answers cannot be settled by reading source (F24); and **one
 needs nothing** (F12).
-5 + 2 + 5 + 8 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
-same number. Triage:
+7 + 2 + 4 + 7 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
+same number. **The first bucket is a status and the rest are costs, so a finding moves into it
+when it lands** — F19 was in "changes v2's behaviour" and F25 in "comment rewrites" until
+2026-08-28, and the two buckets they left are why the middle figures fell by one each. Triage:
 
 | Fix before v2 freezes | Cost | Needs a decision first |
 | :--- | :--- | :--- |
@@ -295,17 +363,17 @@ same number. Triage:
 | F13 gate pre-validation | 2 registry reads at grant + tests | **DECIDED 2026-08-26: validate at grant** |
 | ✅ F15 `approveCosignFor`, explicit fields | **DONE in #28, 2026-08-27.** Not additive as proposed — the opaque `approveCosign` was DELETED, and `spendHash` lost its `spender_` parameter. See F15 for what that cost | **DECIDED 2026-08-27: remove it.** The row's own open question, answered against the recommendation in this row |
 | ✅ F16 approval deadline | **DONE in #28, 2026-08-27.** `bool` → `uint40`, `MAX_COSIGN_TTL = 30 days`, 2 guards in `spend`, `isCosignApproved` re-meaninged, `cosignApprovalDeadline` added | **The "storage layout, so free now and not after v2 deploys" claim was DISPROVEN by `forge inspect` before the work started — a mapping occupies one slot whatever its value type. It was done for its own sake, not to beat a deadline that did not exist** |
-| ✅ F17 dead approvals refused | **DONE in #28, 2026-08-28.** Not 2 lines — **17 guards**, derived from `spend`'s permanent refusals rather than from this row's list, plus 13 tests in `test/Cosign.t.sol` and a mutation gate that proves each guard is asserted. The hard half was deciding what NOT to refuse: `notBefore`, a full rolling window and an unfiled credential all recover, so refusing them would turn our caution into somebody's unapprovable payment | — |
+| ✅ F17 dead approvals refused | **DONE in #28, 2026-08-28.** Not 2 lines — **18 guards**, derived from `spend`'s permanent refusals rather than from this row's list, plus 13 tests in `test/Cosign.t.sol` and a mutation gate that proves each guard is asserted. The count was 17 on the day it shipped and F19 made it 18 the day after; see F19 for why that is a rule and not an accident. The hard half was deciding what NOT to refuse: `notBefore`, a full rolling window and an unfiled credential all recover, so refusing them would turn our caution into somebody's unapprovable payment | — |
 | F18 co-signer rotation | documentation only — `README.md`, that re-granting resets the lifetime counters | whether a rotation path is wanted at all, which needs a setter and this contract has none |
-| F19 refuse `recipient == m.payer` | 1 error + 1 line, beside `ZeroRecipient` | — |
+| ✅ F19 refuse `recipient == m.payer` | **DONE in #28, 2026-08-28.** Not "1 error + 1 line" — **1 error and 2 guards**, because F17 had shipped the day before and F17's rule is that every permanent refusal `spend` makes is mirrored in `approveCosignFor`. `m.payer` is assigned once and has no mutator, so this is permanent, and omitting the mirror would have holed F17's invariant one day after it landed. Plus 4 tests (3 in `Bounds.t.sol`, 1 in `Cosign.t.sol`), 4 model refusals, and 2 more gate mutants — `approveCosignFor` 17 → 18 guards, both gates 21 → 22. **The undercount was mine and it is the second in a row**; see F17's row above for the first | — |
 | F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
 | F21 `ZeroRecipient`'s Arc citation | comment only | — |
 | ✅ F22 §2's missing self-payment boundary | **DONE 2026-08-26**, in this document, in the commit that found it | — |
 | ✅ F23 §2's missing ERC-8004 registry boundary | **DONE 2026-08-26**, in this document — §2's seventh boundary; 0 lines of Solidity, and none available anyway since the addresses are `immutable` | — |
 | F24 codeless-but-non-zero registry | a 4-line test, which decides whether there is anything else to fix | **what Solidity 0.8.28 does with a decode failure inside `try` — not settleable by reading source, and both answers are denials** |
-| F25 `MockUSDC` self-transfer log | comment only, in `test/` | — |
+| ✅ F25 `MockUSDC` self-transfer log | **DONE in #28, 2026-08-28.** A 20-line header block plus a note at the `emit`, landing in the same change as F19 because F19 is the only reason the divergence matters. The mock's behaviour is deliberately left divergent rather than corrected: matching Arc here would make the mock look authoritative about a rule only a testnet transaction can confirm | — |
 | F26 mock revert shapes vs. the bare `catch` | comment only, in `test/` | — |
-| §5 coverage gaps | **10 tests, 3 testnet transactions**, enumerated from §5 rather than summed from memory. This row previously said "9 tests, 1 testnet transaction" and undercounted the testnet side by two — the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests | fold into #14, which needs the gas number anyway |
+| §5 coverage gaps | **5 tests, 3 testnet transactions as of 2026-08-28**, re-enumerated by walking §5's bullets — the same way the figure it replaces was built, and the reason this row is not simply decremented. It read **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. What survives is #27's four geometries and the one `lastUpdate` test. **The testnet side has not moved and no amount of Solidity can move it** | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list
 risks funds in the sense of letting a spend exceed a granted cap; the window search found
@@ -318,6 +386,16 @@ that gap to a second party, since the payer is not the only participant who is s
 something, while F19 extends it to a second *reader*, since a reconciler diffing `Spend`
 events against Arc's system log is shown a discrepancy that is not one. F25 extends it once
 more, to the most credulous reader of all: a passing test.
+
+Both of those last two closed on 2026-08-28, and **they closed by opposite means, which is the
+part worth keeping.** F19's reader was satisfied by removing the state that lied — a spend that
+emits `Spend` and moves nothing is now refused, so there is nothing left for a reconciler to
+mis-see. F25's reader could not be satisfied that way, because the credulous reader is a test and
+the lie is in our own mock: the divergence was documented and deliberately *left in place*, since
+making `MockUSDC` agree with Arc would have converted an honest simplification into an
+unverified claim wearing the clothes of evidence. **A gap between display and enforcement is
+closed by deleting the display or by deleting the enforcement gap — never by making the display
+more convincing**, and F25 is the case where that distinction had teeth.
 
 ---
 
@@ -444,6 +522,21 @@ least 2^96 / 2^32 = 2^64 ≈ 1.84e19 base units, i.e. **about 18.4 trillion USDC
 Circulating USDC is roughly 6.1e10 USDC, some 300× below that. So in precisely the
 `F_TOTAL`-unset case that `v2:682` was written for, the illegible panic fires about 300×
 sooner than the legible error, for every balance that can actually exist.
+
+[**#28, F19: "Nothing forbids `recipient == m.payer`" stopped being true on 2026-08-28** and this
+is the only argument anywhere in the document that was leaning on it, which is why it is corrected
+here rather than deleted. The conclusion survives; one step of the reasoning does not. **What
+breaks:** the self-spend was the *cheap* way to sustain 2^32 spends, since it returned the money
+in the same transaction, and `spend` now reverts `SelfPayment` before the transfer. **What does
+not break:** the sequence is still sustainable, just not for free — a recipient can return the
+funds to the payer outside Remit, which the contract neither sees nor prevents, so an attacker
+with one cooperating address and enough gas still gets an unbounded cumulative `totalSpent` from a
+finite balance. And the 300× figure is a *ratio between two ceilings*; it never depended on how
+the balance was recycled, so F3's actual claim — that the unnamed panic fires first on the path
+#10 claimed to have fixed — is untouched. **F19 makes reaching either ceiling more expensive
+without changing which one is reached first.** Recorded because a fix in one finding silently
+falsifying a premise in another is the failure mode this document is most exposed to: there are
+26 findings and no tooling that would have caught it.]
 
 Both are unreachable in practice and neither risks funds — `v2:697` sits above the
 transfer, so nothing moves. The finding is that #10's stated achievement ("a denial with
@@ -1019,17 +1112,19 @@ failure mode and not the fix.
 **Severity: low (fail-closed). Status: FIXED in #28 on 2026-08-28. Confidence: certain.**
 
 **What shipped, and why it is seven times the size this finding predicted.** `approveCosignFor`
-now carries **17 guards**, counted from the file rather than from the two-line estimate in the
-triage table above: `grep -c` over lines 1101–1194 returns 18 and the 18th is the word `revert`
-inside a comment at 1130, which is one more reminder that a grep counts text and not guards. The
-list was not extended from the two shapes named below; it was **derived from `spend`** by
-partitioning every refusal `spend` can make into permanent and recoverable, and mirroring exactly
-the permanent ones. That method is what found the eleven this finding never mentioned —
-`RecipientNotAllowed`, `ZeroRecipient`, `ZeroAmount`, `AmountTooLarge`, `NonceAlreadyUsed`,
-`OverPerTxCap`, `OverTotalCap`, `TotalSpentCeiling`, `Expired`, and the two mandate-relative
-`BadDeadline` bounds. `reference/policy.js` has 17 `throw refuse(` in its twin, derived
-independently from that file: the model and the contract agree on the count without either being
-matched against the other.
+shipped with **17 guards** — **18 as of 2026-08-28**, because F19 landed the next day and F17's
+own rule required it to; see F19 for why that is a rule and not an accident. Both numbers were
+counted from the file rather than taken from the two-line estimate in the triage table above:
+`grep -c "revert "` over the function's current bounds, lines 1116–1216, returns 19, and the
+19th is the word `revert` inside a comment at 1145 — one more reminder that a grep counts text
+and not guards. The list was not extended from the two shapes named below; it was **derived from
+`spend`** by partitioning every refusal `spend` can make into permanent and recoverable, and
+mirroring exactly the permanent ones. That method is what found the eleven this finding never
+mentioned — `RecipientNotAllowed`, `ZeroRecipient`, `ZeroAmount`, `AmountTooLarge`,
+`NonceAlreadyUsed`, `OverPerTxCap`, `OverTotalCap`, `TotalSpentCeiling`, `Expired`, and the two
+mandate-relative `BadDeadline` bounds. `reference/policy.js` has the same count in its twin —
+17 on the day, 18 now — derived independently from that file: the model and the contract agree
+without either being matched against the other.
 
 **The hard half was deciding what NOT to refuse.** `notBefore`, a full rolling window and an
 unfiled ERC-8004 credential all *recover*, so a shortfall in any of them says nothing about
@@ -1050,12 +1145,27 @@ shape would have been, and it is the one place F17 removed a possibility rather 
 refusal.
 
 **The evidence is a command, not this paragraph.** `python3 reference/mutation-gate-sol.py`
-neuters each of the 17 guards in turn and injects the four guards the function must not have; on
+neuters each of the guards in turn and injects the four guards the function must not have; on
 2026-08-28 all 21 mutants were caught by a named test against a baseline of 178 green, with 0
 survivors and 0 inconclusive. Its first run was **not** clean, and what it found is recorded under
 *"What a green suite cannot mean"* below: `TotalSpentCeiling` at 1164 survived a green 177,
 because every existing assertion of that guard exercised the identical line in `spend` instead.
 Twelve F17 tests covered eleven of its guards, and no reading of the test names would have said so.
+
+**Re-run later the same day, after F19: 22 mutants, 22 caught, baseline 182 green.** The gate was
+not edited to get there — it discovers its own targets by scanning the function for `revert `
+filtered through `is_code()`, so F19's mirror became mutant 19 by itself. Two properties of that
+design are worth stating because they are what makes the count trustworthy: the gate cannot be
+made to agree with the contract by hand, and a guard added without a test that bites will show up
+as a survivor rather than as a larger number. **The gate was also pointed at `spend` for the first
+time on the same day** — `python3 reference/mutation-gate-sol.py spend`, which works because
+`INJECTIONS.get(TARGET)` returns `None` and the injection block is skipped — and it returned 17
+mutants, 17 caught. **I had predicted it would find a hole, "the way the first Solidity run found
+`TotalSpentCeiling` unasserted on the approve path", and it did not.** The prediction was wrong for
+a reason worth keeping: `spend` is v1's function with the whole project's history of tests aimed at
+it, while `approveCosignFor` was one day old when its gate found a hole. **A mutation gate's yield
+tracks how long the tests have had to accumulate, not how important the function is** — which also
+means a clean `spend` run is the weaker of the two results, not the stronger.
 
 The rest of this finding is kept as written, because the gap between what it predicted and what
 the fix cost is the useful part.
@@ -1201,7 +1311,12 @@ instead of one, `CosignRequired` and `CosignExpired`, and both are refusals.
 
 ### F19 — `recipient == m.payer` is a legal spend that consumes every cap, moves nothing, and emits no system log
 
-**Severity: low as a fund risk, medium as an audit-trail hole. Status: OPEN. Confidence: certain on the contract; the Arc half is documented, one sub-case is not.**
+**Severity: low as a fund risk, medium as an audit-trail hole. Status: FIXED in #28, 2026-08-28 — `SelfPayment` is refused on both the spend path and the cosign approval. Confidence: certain on the contract; the Arc half is documented, one sub-case is still not.**
+
+**Everything below the next paragraph is written in the present tense and describes the
+contract as deployed at `0x0139…9Ff5`, where it remains true and unfixable.** What changed is
+the working tree: `spend` refuses it at `contracts/MandateManager.sol:710` and
+`approveCosignFor` at `:1160`. See the closing paragraph for what shipped and what it cost.
 
 `spend` constrains the recipient twice and no more: `recipient == address(0)` is refused at
 `v2:614`, and the allowlist is consulted at `v2:615` *only when `F_ALLOWLIST` is set*. So on
@@ -1250,6 +1365,48 @@ whose enforcement disagree — a `Spend` event that transfers nothing is the pur
 the contract. It closes the griefing vector as a side effect. The one configuration it would
 break is a payer deliberately using a self-spend as a heartbeat or a cap-burning kill switch,
 which is not a thing anyone here has ever wanted and which `revoke` does better.
+
+**What actually shipped, and why it was twice the size this finding predicted.** The guard is
+`if (recipient == m.payer) revert SelfPayment();` as sized above, but it went in **twice** —
+`spend:710` and `approveCosignFor:1160` — because F17 landed the day before this did, and
+F17's rule is that every *permanent* refusal `spend` makes is mirrored in `approveCosignFor`.
+The mirror is not a judgement call here. `m.payer` has exactly one write site in the whole
+contract, `payer: msg.sender` inside `createMandate`'s struct literal; every other occurrence
+is an `==` read, so the equality can never stop holding, which puts it in F17's permanent
+partition beside `ZeroRecipient` — and `approveCosignFor` was **already** mirroring
+`ZeroRecipient` one line above. Position matters too: `SelfPayment` sits between
+`ZeroRecipient` and `RecipientNotAllowed` in both functions, shape before policy, because
+`RecipientNotAllowed` would send the reader to edit a configuration that is not wrong.
+
+Total cost: 1 error, 2 guards, 4 Solidity tests (3 in `test/Bounds.t.sol`, 1 in
+`test/Cosign.t.sol`), 4 model refusals in `reference/policy.js` + `policy.test.js`, and 2 more
+mutants per gate — both gates went 21 → 22 without being edited, since each auto-discovers its
+targets. Suite 178 → 182 green; model suite 69 → 72; both gates 22/22 caught. The cosign
+mutant `SelfPayment (line 1160)` has **exactly one killer**,
+`test_f19_approvingThePayerAsRecipient_isRefused`, which makes that test load-bearing in the
+same way F17's `TotalSpentCeiling` case is — delete it and the mirror stops being asserted at
+all.
+
+**The sizing above — "two lines including the error" — was wrong, and it is the second
+consecutive undercount.** F17 was sized at "two lines" and shipped as 17 guards; F19 was sized
+at one guard and shipped as two. Neither estimate was careless about the guard itself; both
+missed that a refusal is not one edit in this repository, it is an edit propagated across the
+contract, the reference model, two test suites and two mutation gates. **Every permanent
+refusal added to `spend` from here on costs two guards, two model refusals and one extra mutant
+per gate.** That is now a rule, and any future finding in this document that proposes a
+one-line guard should be read as proposing at least that.
+
+**The deployed contract never exercised the behaviour F19 refuses, and that was checked rather
+than assumed.** Every ERC-20 `Transfer` log in `evidence/*.log` was decoded — topic0
+`0xddf252ad…`, then `from` and `to` off the next two topics — across all 31 live transactions.
+`to` is the payer exactly once, in `premium.log`, and there `from` is the zero address, so it is
+a faucet mint and not a spend. Every real spend runs `from` = payer `b56a7008…dcc0` to `to` =
+`0x…c0de`. **So no committed receipt becomes unreproducible against the working tree**, which is
+the thing worth confirming: F19 is the second fix in this document to falsify a claim made
+somewhere else in the repository, and after F3's premise went stale the cheap version of that
+check — grep the prose — is no longer good enough. Evidence has to be re-derived from the
+receipts, because a log file is the one artefact in this repository that must never be edited to
+agree with the code.
 
 ---
 
@@ -1459,7 +1616,7 @@ three together are the argument for F13's fix being an *eager* check rather than
 
 ### F25 — `MockUSDC` emits a `Transfer` on a self-payment; Arc does not, and that is precisely the point F19 turns on
 
-**Severity: none as code, medium as a trap. Status: open, one comment in `test/mocks/MockUSDC.sol`. Confidence: certain.**
+**Severity: none as code, medium as a trap. Status: FIXED in #28, 2026-08-28 — a `WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU` block in the mock's header plus a note at the `emit` itself. Confidence: certain.**
 
 `MockUSDC._move` emits `Transfer(from, to, amount)` **unconditionally** at
 `test/mocks/MockUSDC.sol:106` — including when `from == to`. Arc's `usdc-system-events`
@@ -1480,6 +1637,27 @@ to write. The fix is a comment in the mock's header, beside the existing note ab
 self-transfers and that no log-counting assertion about a self-payment means anything here.
 `test/mocks/MockUSDC.sol` is not `contracts/`, so this costs nothing against the frozen
 metadata hash.
+
+**What shipped, 2026-08-28, alongside F19 rather than after it.** A titled block in the mock's
+header — `WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU (F25)` — plus a three-line
+note at the `emit` itself, now at `test/mocks/MockUSDC.sol:127-130`. Two decisions inside it
+are worth naming because both could reasonably have gone the other way:
+
+**The mock was left divergent on purpose; it was not corrected to match Arc.** Adding
+`if (from != to)` around the emit would have made the mock *look* authoritative about a rule
+that only a testnet transaction can confirm for the ERC-20 contract at `0x3600…0000`. Arc
+documents the no-log rule for the 18-decimal system emitter at `0xffff…fffe` and says nothing
+about the 6-decimal token. A mock that silently implements the unconfirmed half of that would
+be a worse trap than the one this finding was filed about, because it would read as evidence.
+The header says so explicitly, and names the testnet transaction as the only thing that settles
+it — which is also how it stays on §5's list instead of quietly leaving it.
+
+**The comment names the assertion style, not just the hazard.** It ends by stating that F19's
+guard is asserted with `vm.expectRevert(SelfPayment.selector)` in `Bounds.t.sol` and
+`Cosign.t.sol` and **never** by counting logs. A warning that a test would lie is only half
+useful; the reader still has to be told what to write instead. All four F19 tests follow it,
+so the mock's header and the tests corroborate each other rather than the header being advice
+nobody took.
 
 ---
 
@@ -1516,12 +1694,16 @@ they are trading.
 ### What a green suite cannot mean, and four assumptions checked rather than assumed
 
 Derived by reading the three files that decide what a green suite is evidence *of* —
-`test/Base.t.sol` (361 lines), `test/mocks/MockUSDC.sol` (108), `test/mocks/MockRegistries.sol`
-(129) — rather than by re-reading the tests themselves. The number of passing tests was 157 when
-this was written, 165 declarations in source after F15 and F16, and **178** after F17 — the last
-figure derived twice, from `grep -cE '^    function (test|invariant)' test/*.t.sol` and from the
-run log's `13 test suites … 178 tests passed`, which agree. Nothing in this section depends on
-which, because every limit below is a property of those three files.
+`test/Base.t.sol` (361 lines), `test/mocks/MockUSDC.sol` (108, and **132 since F25**, which added
+the divergence block described below), `test/mocks/MockRegistries.sol` (129) — rather than by
+re-reading the tests themselves. The number of passing tests was 157 when this was written, 165
+declarations in source after F15 and F16, **178** after F17, and **182** after F19 — the last two
+derived twice each, from `grep -cE '^    function (test|invariant_)' test/*.t.sol` and from the run
+log's own `13 test suites … N tests passed`, which agree. Nothing in this section depends on which,
+because every limit below is a property of those three files. **The `invariant_` half of that
+pattern is load-bearing**: `^    function test` alone returns 179 rather than 182, because
+`WindowInvariant.t.sol` declares three `invariant_` functions and no `test` prefix reaches them.
+Getting that wrong is how the F19 sweep first reported 175 for a tree that was at 178.
 
 **One limit is no longer structural, and this is what closing it looked like.** The heading's
 subject used to be entirely a list of things a suite cannot reach. But the largest thing a green
@@ -1545,13 +1727,33 @@ that refuse the same input for different reasons hide each other**. In the contr
 coverage of both. Twelve F17 tests, eleven of F17's guards — and the twelve were green throughout.
 The gates also disagreed with each other, which is its own finding: the model already asserted
 that guard, so the JS gate scored 21/21 while its Solidity sibling scored 20/21. **When one gate
-is clean and its twin is not, the delta is a divergence report.** Both are 21/21 as of 2026-08-28.
+is clean and its twin is not, the delta is a divergence report.** Both reached 21/21 on 2026-08-28
+and **both are 22/22 later the same day**, F19's mirror having enlarged each by one without either
+gate being edited — they discover their own targets, the JS one by scanning for `throw refuse(` and
+the Solidity one for `revert ` filtered through `is_code()`. **A third run exists now and it is the
+one to be least impressed by:** the Solidity gate was pointed at `spend` for the first time and
+returned 17 mutants, 17 caught. I had said in advance that it would find something. It did not, and
+the explanation is not that `spend` is better written — it is that `spend` has had every test in
+the project aimed at it since v1, whereas `approveCosignFor` was a day old when its own gate caught
+`TotalSpentCeiling`. **Yield tracks the age of the tests, not the importance of the function**, so
+a clean sweep over old code is weak evidence and a clean sweep over new code is strong evidence,
+and this section should be read that way round.
 
 What the gates still cannot mean: neither performs operator swaps, so a `>` quietly becoming `>=`
 is invisible to both and only a boundary-tight assertion catches it. That is why the ceiling test
 refuses at one base unit over and approves at exactly the limit, and why the model's version —
 which sat ten units clear of the cliff and would have passed against an off-by-one — was tightened
 to match rather than left as the twin that agreed for the wrong reason.
+
+**And one gap that F19 exposed rather than created: the JS gate cannot reach `evaluate` at all.**
+Its removal scan looks for `throw refuse(`, and `evaluate` denies by `return deny(…)`, so the
+model's spend-path `SELF_PAYMENT` guard is not gate-covered — only the `approveCosignFor` mirror
+is. This was true before F19 for every guard in `evaluate`; F19 is simply the first finding whose
+fix lands on both sides of that line, which is what made it visible. The Solidity gate has no
+equivalent blind spot, since `revert` is `revert` in both functions, and the spend-path guard is
+covered there as mutant `SelfPayment (line 710)`. It is recorded here rather than fixed because
+extending the JS gate to `return deny(` is a change to the gate, and a gate edited in the same pass
+as the code it judges is worth less than one that was not.
 
 Four limits are structural, and no amount of test-writing moves them:
 
@@ -1670,10 +1872,18 @@ could still be hiding there.
   bounds. The file now declares **37** tests (`grep -c '^    function test'`, cross-checked
   against `Ran 37 tests for test/Cosign.t.sol` in the run log), of which **13** are `test_f17_*`.
   Read the following bullet before treating that as coverage: twelve of those thirteen were
-  green while one of F17's seventeen guards was asserted by nothing at all.
+  green while one of F17's seventeen guards was asserted by nothing at all. **38 and 18 as of
+  2026-08-28**, cross-checked the same two ways (`Ran 38 tests for test/Cosign.t.sol`): F19 added
+  `test_f19_approvingThePayerAsRecipient_isRefused` and the eighteenth guard it asserts. That test
+  is the **sole** killer of its mutant, which is the same shape as the `TotalSpentCeiling` story
+  below and the reason it is named here rather than left in a count.
 
-  **This bullet said "four" and said "seventeen tests", and both were wrong.** The count is
-  now **25** — `grep -c '^    function test'` — of which eight are new in #28 and two are the
+  **This bullet said "four" and said "seventeen tests", and both were wrong** — and this
+  paragraph is an *earlier* correction layer than the two above it, so **the 25 below is history,
+  not the current figure**; the file is at 38. The layers are out of chronological order because
+  each was appended where it was most readable rather than where it happened, which is worth
+  knowing before quoting any number out of this bullet. The count was
+  **25** — `grep -c '^    function test'` — of which eight are new in #28 and two are the
   old `approveCosign_*` pair renamed. The four gaps were attributed to "F16 and F17";
   F16 has since shipped, and its behaviour is now covered by `test_approval_expires`,
   `test_deadlineInThePast_isRefused`, `test_deadlineBeyondTheCap_isRefused`,
@@ -1692,17 +1902,22 @@ could still be hiding there.
   reading test bodies instead of test names, which is exactly the discipline §3's opening
   sentence claims for itself and this bullet had not applied. The mempool race itself remains
   unpinnable, which is F4's limit and is recorded there, not here.
-- **`recipient == m.payer`, which no test anywhere in the suite performs** — derived, not
-  recalled. Every recipient argument reaching `spend` across all eleven test files and
-  thirteen suite contracts is one of `vendor`, `other`, `boss`, `ARC_RECIPIENT`, the
-  `0x…c0de` literal, or `address(0)` in the two tests that expect `ZeroRecipient`; `payer`
-  is never among them, and `Base.t.sol:100-104` makes all five accounts distinct
-  `makeAddr`s, so no fuzz path can collide into it either. The test F19 wants asserts the
-  paradox directly: a self-spend succeeds, `totalSpent` and the window ring both advance by
-  `amount`, the nonce is burned, `Spend` is emitted, and the payer's USDC balance is
-  unchanged. It is also the test that would have to be **deleted** if F19's fix lands, so
-  writing it now is only worth it as the fix's negative case
-  (`vm.expectRevert(SelfPayment.selector)`).
+- **`recipient == m.payer` — CLOSED 2026-08-28, and closed in the shape this bullet predicted.**
+  When it was written, no test anywhere in the suite performed it, derived rather than recalled:
+  every recipient argument reaching `spend` across all eleven test files and thirteen suite
+  contracts was one of `vendor`, `other`, `boss`, `ARC_RECIPIENT`, the `0x…c0de` literal, or
+  `address(0)` in the two tests that expect `ZeroRecipient`; `payer` was never among them, and
+  `Base.t.sol:100-104` makes all five accounts distinct `makeAddr`s, so no fuzz path could
+  collide into it either — a claim that still holds, since no test function in `test/*.sol`
+  takes an `address` parameter at all. This bullet then said the obvious test asserts the
+  paradox directly (a self-spend succeeds, `totalSpent` and the window ring advance, the nonce
+  burns, `Spend` fires, the balance does not move) and that it *"would have to be **deleted** if
+  F19's fix lands, so writing it now is only worth it as the fix's negative case
+  (`vm.expectRevert(SelfPayment.selector)`)"*. F19 landed, the paradox test was never written,
+  and all four of its tests are that negative case. **Recorded rather than deleted, because the
+  useful part was not the gap — it was declining to spend a test on a behaviour that was about
+  to become unreachable.** The gap that remains here is not about the contract: it is the next
+  bullet, and no test can close it.
 - **Whether Arc's ERC-20 USDC at `0x3600…0000` emits its own 6-decimal `Transfer` on a
   self-transfer.** Arc's `usdc-system-events` page documents the rule only for the
   18-decimal system emitter at `0xffff…fffe`. `MockUSDC` cannot answer this — it is our own
@@ -1784,6 +1999,18 @@ error in one of the four, recorded in place rather than quietly corrected.
   test.** No orphan error, checked by enumerating the declarations and grepping each name across
   `test/`. The two added by #28 are `CosignExpired(bytes32,uint40)` and `BadDeadline(uint40)`,
   named 2 and 3 times respectively; `BadConfig` remains the most-expected at 24.
+
+  **Re-derived 2026-08-28 at 35 declarations, and still no orphan.** `CosignNotRequired` (F17)
+  and `SelfPayment` (F19) took the count 33 → 35, and every one of the 35 is named by at least
+  one `X.selector` in `test/` — the check is the empty output of a loop over
+  `grep -oP '^    error \K\w+'` that prints any name with zero `.selector` hits. `SelfPayment`
+  arrives at **8**, which puts it above every error except `CosignRequired` (9) and `BadConfig`
+  (24, unchanged and still the outlier); `BadDeadline` went 3 → 6 when F17 added the
+  mandate-relative bounds. **The method matters more than the numbers**: counting bare error
+  names instead of `X.selector` inflates several of these, because this document and the test
+  files discuss errors in prose — `SelfPayment` reads as 9 that way and `TransferFailed` as 6
+  against a real 2. Two counts of the same thing that disagree by a comment are the standing
+  trap in this repository.
 
 **The first version of that sweep reported nineteen false positives, and the reason is worth
 recording because it is the grep somebody will re-run.** Searching test bodies for

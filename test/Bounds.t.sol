@@ -248,6 +248,54 @@ contract BoundsTest is Base {
         payReverts(id, vendor, 0, MandateManager.ZeroAmount.selector);
     }
 
+    // ---------------------------------------------------------- F19: self-payment
+
+    /// Before F19 this was a fully legal spend. It passed every gate, consumed `perTxCap`,
+    /// the window buckets and the lifetime cap, burned its nonce, emitted `Spend`, and then
+    /// called `transferFrom(payer, payer, amount)`, which moves nothing. The fund risk was
+    /// low — a delegate gains nothing by it — but the audit hole was not: Arc's system
+    /// emitter writes no log for a self-transfer, so a reconciler diffing `Spend` against
+    /// native transfers saw an event with no counterpart and concluded its indexer had
+    /// dropped a log. It also let a stopped or captured delegate burn a lifetime cap to zero
+    /// without ever being paid.
+    ///
+    /// Deliberately asserted with `expectRevert` and not by counting `Transfer` logs. F25:
+    /// `MockUSDC._move` emits unconditionally, including when `from == to`, so a log-counting
+    /// test here would pass while demonstrating the opposite of production — the mock would be
+    /// answering a question about Arc with our own code.
+    function test_f19_payingThePayer_reverts() public {
+        payReverts(grant(simpleParams()), payer, usd(10), MandateManager.SelfPayment.selector);
+    }
+
+    /// Ordering, not the guard. `SelfPayment` names the mistake in the request;
+    /// `RecipientNotAllowed` would send the reader off to edit a config that is not wrong.
+    /// Putting the payer explicitly ON the allowlist is what makes the ordering observable —
+    /// the allowlist passes, and this still refuses.
+    function test_f19_selfPaymentOutranksTheAllowlist_evenWithThePayerOnIt() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.allowlist = new address[](2);
+        p.allowlist[0] = payer;
+        p.allowlist[1] = vendor;
+        p.flags |= F_ALLOWLIST;
+        bytes32 id = grant(p);
+
+        assertTrue(mm.isAllowedRecipient(id, payer), "the allowlist must really contain the payer");
+        payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
+
+        // And the same code when the payer is absent from the allowlist, so the answer does
+        // not depend on a configuration the caller cannot see.
+        payReverts(grant(withAllowlist(simpleParams(), vendor)), payer, usd(10), MandateManager.SelfPayment.selector);
+    }
+
+    /// The guard must refuse a shape, not narrow the mandate: a third party is still payable
+    /// on the same mandate afterwards, and the refused attempt consumed none of the cap.
+    function test_f19_aThirdPartyIsStillPayableOnTheSameMandate() public {
+        bytes32 id = grant(simpleParams());
+        payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
+        payTo(id, vendor, usd(10));
+        assertEq(mm.getMandate(id).totalSpent, usd(10), "the refused self-payment must not have consumed the cap");
+    }
+
     // ---------------------------------------------------------- spender
 
     /// A mandate names exactly one spender. This is what makes the grant a delegation

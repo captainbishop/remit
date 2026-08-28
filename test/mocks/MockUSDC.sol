@@ -26,6 +26,27 @@ pragma solidity 0.8.28;
  * balance) is NOT modelled, because MandateManager only ever touches the ERC-20
  * interface. That is the whole reason the native path is out of scope: see the
  * SCOPE block in MandateManager.sol.
+ *
+ * WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU (F25)
+ * `_move` emits `Transfer(from, to, amount)` UNCONDITIONALLY, including when
+ * `from == to`. Arc's `usdc-system-events` reference states the opposite for the
+ * system emitter at 0xffff...fffe: "Self-transfers (from == to) emit no log."
+ *
+ * So NO LOG-COUNTING ASSERTION ABOUT A SELF-PAYMENT MEANS ANYTHING HERE. A test
+ * that watched for a `Transfer` on a spend where recipient == payer would pass
+ * while demonstrating the precise opposite of production, and it would be this
+ * mock — our own code — answering a question about Arc. That is not a hypothetical
+ * test: it is the one F19 invites, since F19's claim is that a self-payment is
+ * invisible in the transfer log and must be reconciled from
+ * `getMandate(id).totalSpent` instead. F19's guard is therefore asserted with
+ * `vm.expectRevert(SelfPayment.selector)` in Bounds.t.sol and Cosign.t.sol, and
+ * never by counting logs.
+ *
+ * One narrower question this mock also cannot answer: whether Arc's ERC-20 USDC at
+ * 0x3600...0000 emits its own 6-decimal `Transfer` for a self-transfer. Arc
+ * documents the rule only for the 18-decimal system emitter. Whatever this file
+ * does is a description of our assumption, not of Arc; only a testnet transaction
+ * against the real token settles it.
  */
 contract MockUSDC {
     string public constant name = "USD Coin (mock)";
@@ -103,6 +124,9 @@ contract MockUSDC {
         if (bal < amount) revert InsufficientBalance(bal, amount);
         balanceOf[from] = bal - amount;
         balanceOf[to] += amount;
+        // F25: unconditional, including from == to, where Arc's system emitter is silent.
+        // Left divergent on purpose — matching Arc here would make the mock look
+        // authoritative about a rule only a testnet transaction can confirm. See the header.
         emit Transfer(from, to, amount);
     }
 }

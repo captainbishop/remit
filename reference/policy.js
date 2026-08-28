@@ -60,6 +60,11 @@ const Denial = {
   RECIPIENT_NOT_ALLOWED: 'RECIPIENT_NOT_ALLOWED',
   ZERO_AMOUNT: 'ZERO_AMOUNT',
   ZERO_RECIPIENT: 'ZERO_RECIPIENT',
+  // NEW IN v2 (F19). `recipient === payer` was a legal spend that consumed every cap and moved
+  // nothing, and Arc's system emitter writes no log for a self-transfer, so it was the one
+  // class of spend a reconciler could not see. Refused on both the spend path and the cosign
+  // approval, since `payer` is fixed at creation and the equality can never stop holding.
+  SELF_PAYMENT: 'SELF_PAYMENT',
   AMOUNT_TOO_LARGE: 'AMOUNT_TOO_LARGE',
   OVER_PER_TX_CAP: 'OVER_PER_TX_CAP',
   OVER_WINDOW_CAP: 'OVER_WINDOW_CAP',
@@ -524,6 +529,12 @@ function evaluate(mandate, request, ctx) {
     // rather than burning the sender's gas on a guaranteed runtime revert.
     return deny(Denial.ZERO_RECIPIENT);
   }
+  // F19. Ahead of the allowlist deliberately: shape before policy. A self-payment is never a
+  // payment regardless of who is allowlisted, and answering RECIPIENT_NOT_ALLOWED would send
+  // the reader to edit a config when the request itself is the mistake.
+  if (normalizeAddr(recipient) === mandate.payer) {
+    return deny(Denial.SELF_PAYMENT, { payer: mandate.payer });
+  }
   if (mandate.allowlist !== null && !mandate.allowlist.has(normalizeAddr(recipient))) {
     return deny(Denial.RECIPIENT_NOT_ALLOWED, { recipient });
   }
@@ -944,6 +955,12 @@ function approveCosignFor(mandate, caller, request, ctx) {
   const recipient = request.recipient;
   if (!recipient || normalizeAddr(recipient) === ZERO_ADDRESS) {
     throw refuse(Denial.ZERO_RECIPIENT, 'the recipient is the zero address');
+  }
+  // F19's mirror, and it belongs to F17's rule rather than being bolted onto it: `payer` is set
+  // once at creation, so a self-payment is refused by `evaluate` now and forever. Same position
+  // relative to the allowlist as on the spend path, which the parity note below depends on.
+  if (normalizeAddr(recipient) === mandate.payer) {
+    throw refuse(Denial.SELF_PAYMENT, 'the recipient is the payer, so no spend can ever consume this');
   }
   // The allowlist is fixed at creation in the contract and has no mutator, so absence is
   // permanent. F20 asks whether a payer-only REMOVE-only mutator should exist; it would not

@@ -725,6 +725,29 @@ contract CosignTest is Base {
         );
     }
 
+    /// F19's mirror, and it is here because of F17's rule rather than as an afterthought to it.
+    /// F17's list was derived by partitioning every refusal `spend` can make into permanent and
+    /// recoverable and mirroring the permanent ones; `payer` is assigned once in `createMandate`
+    /// and never again, so `recipient == m.payer` is exactly as permanent as a zero recipient
+    /// and belongs to that partition. Without this guard the co-signer could pay gas to
+    /// authorise a spend the contract would refuse forever — the false assurance F17 exists to
+    /// prevent, reintroduced by the fix to a different finding.
+    ///
+    /// The second case pins the ordering against `CosignNotRequired`: one unit is also
+    /// at-or-below the threshold, so a contract that consulted the threshold first would answer
+    /// "no signature needed" about a payment that can never happen. `spend` settles the
+    /// recipient's shape before it looks at any amount, and so does this.
+    function test_f19_approvingThePayerAsRecipient_isRefused() public {
+        bytes32 id = grant(cosignParams()); // threshold 10
+
+        approveReverts(id, payer, usd(50), nextNonce(), MandateManager.SelfPayment.selector);
+        approveReverts(id, payer, 1, nextNonce(), MandateManager.SelfPayment.selector);
+
+        // And the spend path agrees, which is the whole point of the mirror: the same request
+        // is refused with the same error whether it arrives as an approval or as a payment.
+        payReverts(id, payer, usd(50), MandateManager.SelfPayment.selector);
+    }
+
     /// `perTxCap` is fixed at creation and `totalSpent` only grows, so both refusals are
     /// permanent. The second case is the interesting one: the amount fits the lifetime cap in
     /// the abstract and does not fit what is LEFT of it, and since headroom never widens, no

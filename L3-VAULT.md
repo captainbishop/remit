@@ -489,20 +489,33 @@ themselves. `p.credential.validator` names a chosen third party. None of these h
 getter — `_identity` and `_credential` are private with no accessor — which makes them
 easy to audit past, since they are visible only in the transaction that set them.
 
-**`recipient == vault` is a legal spend.** It consumes `totalSpent` and allowance
-while leaving the pool balance unchanged, so a compromised agent can burn a
-depositor's escrow into unattributed pool surplus. Arc additionally emits no EIP-7708
-system log for a self-transfer, so a vault reconciling escrow from logs would not see
-it at all. Reconcile from `getMandate(mandateId).totalSpent`, never from transfer logs.
+**`recipient == vault` WAS a legal spend, and stopped being one on 2026-08-28.** It consumed
+`totalSpent` and allowance while leaving the pool balance unchanged, so a compromised agent could
+burn a depositor's escrow into unattributed pool surplus. Arc additionally emits no EIP-7708
+system log for a self-transfer, so a vault reconciling escrow from logs would not have seen it at
+all. `MandateManager.spend` now reverts `SelfPayment` on `recipient == m.payer`, and `m.payer ==
+address(vault)` for every mandate this design creates (line 100 above), so the two conditions are
+the same condition and the hazard is closed in the contract rather than in the vault. **Reconcile
+from `getMandate(mandateId).totalSpent`, never from transfer logs** — that advice is unchanged and
+is not conditional on the guard, because the guard removes one way for the log stream to lie and
+the log stream still says nothing about a self-transfer if any other path ever produces one.
 
 > **This paragraph is where the general form of the problem was found, and for a day it
-> was filed only here.** It is not a vault-specific hazard: `recipient == m.payer` is a
-> legal spend on *any* mandate, and the reconciliation hole is the same for a payer with a
-> payroll bot as for a vault. It is now `THREAT-MODEL.md` **F19**, where a payer will
-> actually read it, and the self-transfer rule this paragraph asserts has since been
-> confirmed against Arc's `usdc-system-events` reference — *"self-transfers (`from == to`)
-> emit no log"* — where before it was an unsourced claim. Keep both: this one for the vault
-> reader, F19 for everyone.
+> was filed only here.** It is not a vault-specific hazard: `recipient == m.payer` was a
+> legal spend on *any* mandate, and the reconciliation hole was the same for a payer with a
+> payroll bot as for a vault. It became `THREAT-MODEL.md` **F19**, where a payer would
+> actually read it, and the self-transfer rule this paragraph asserts was confirmed against
+> Arc's `usdc-system-events` reference — *"self-transfers (`from == to`) emit no log"* — where
+> before it was an unsourced claim. **F19 then shipped on 2026-08-28** as one error and two
+> guards, in `spend` and mirrored in `approveCosignFor`. Keep both paragraphs: this one for the
+> vault reader, F19 for everyone.
+>
+> **What the vault gains, stated carefully.** The contract now refuses the spend, so this is no
+> longer a hazard the vault has to design around — which is the *only* part of this design where
+> a `MandateManager` change has removed work from L3 rather than added it. What it does **not**
+> do is make the withdrawal path below optional. F19 stops the agent paying the vault; it says
+> nothing about the agent paying the depositor's own address, which is the actual privacy leak
+> in the next paragraph and is still entirely the depositor's problem.
 
 Withdrawal deserves its own warning. A depositor who has their agent pay *themselves*
 has published their own address as `recipient` and undone the vault. Withdrawals need
