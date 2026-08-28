@@ -133,19 +133,32 @@ pragma solidity 0.8.28;
  * on the memo wrapper being available.
  */
 
+/// @title IERC20 — the three USDC functions this contract calls
+///
+/// @notice Declared inline rather than imported. The file has zero `import` statements by
+/// design, so what an auditor compiles is what they read, and nothing outside this file can
+/// change the ABI the contract talks to. Only these three are needed: `transferFrom` moves the
+/// money, and `allowance` and `balanceOf` are read by `spendable` alone, never by `spend`.
+///
+/// `transferFrom`'s `bool` is checked at the call site: `spend` negates the call itself and
+/// reverts `TransferFailed`, with no intermediate variable. A token that returns no data at all
+/// therefore reverts the spend rather than passing it, which is the safe direction and is why
+/// this contract does not use SafeERC20.
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function allowance(address owner, address spender) external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
 }
 
-/// ERC-8004 IdentityRegistry. Agent identities are ERC-721 tokens, so `ownerOf`
+/// @title IIdentityRegistry — the one ERC-8004 identity function the `F_IDENTITY` gate reads
+/// @notice ERC-8004 IdentityRegistry. Agent identities are ERC-721 tokens, so `ownerOf`
 /// REVERTS for a nonexistent or burned id rather than returning address(0).
 interface IIdentityRegistry {
     function ownerOf(uint256 tokenId) external view returns (address);
 }
 
-/// ERC-8004 ValidationRegistry. Note the lookup key: `requestHash` ALONE. The
+/// @title IValidationRegistry — the one ERC-8004 function the `F_CREDENTIAL` gate reads
+/// @notice ERC-8004 ValidationRegistry. Note the lookup key: `requestHash` ALONE. The
 /// validator and the agent the attestation is about come back in the tuple and
 /// must be checked, or the gate is decorative. See _checkCredential.
 interface IValidationRegistry {
@@ -185,22 +198,38 @@ contract MandateManager {
     // against mocks and deployed to mainnet without an edit.
     // ---------------------------------------------------------------------
 
+    /// @notice The ERC-20 every spend moves, and the unit every cap in this contract is
+    /// denominated in — base units, not whole tokens. Set once in the constructor and
+    /// `immutable`, with no upgrade path, so a wrong address here can only be fixed by
+    /// deploying again. `script/Deploy.s.sol` pins it per chain id and reads it back.
     IERC20 public immutable usdc;
+
+    /// @notice ERC-8004 IdentityRegistry, read only by the `F_IDENTITY` gate. May be
+    /// `address(0)`, in which case `createMandate` refuses any mandate that sets that flag
+    /// rather than letting it grant cleanly and then fail every spend.
     IIdentityRegistry public immutable identityRegistry;
+
+    /// @notice ERC-8004 ValidationRegistry, read only by the `F_CREDENTIAL` gate. May be
+    /// `address(0)`, refused at grant time on the same rule as `identityRegistry`.
     IValidationRegistry public immutable validationRegistry;
 
-    /// Domain tag. Included in every spend hash along with chainid and this
+    /// @notice Domain tag. Included in every spend hash along with chainid and this
     /// address, so a co-signature can never be replayed on another chain or
     /// against another deployment of this contract.
     bytes32 public constant DOMAIN = keccak256("Remit:v1");
 
+    /// @notice The most rolling windows one mandate may carry, so 0 to 4 inclusive.
+    ///
     /// Each spend reads every ring slot of every window, so these caps are what
     /// keep the gas cost of a spend bounded rather than a function of untrusted
     /// grant-time input. Mirrored in reference/policy.js so the two cannot drift.
     uint256 public constant MAX_WINDOWS = 4;
+
+    /// @notice The most sub-periods one window may divide into. A window stores
+    /// `buckets + 1` ring slots, so this bounds the inner loop of the check above.
     uint256 public constant MAX_BUCKETS = 32;
 
-    /// NEW IN v2. How many mandates `spendableAcross` will read in one call. Same
+    /// @notice NEW IN v2. How many mandates `spendableAcross` will read in one call. Same
     /// purpose as the two caps above — bound the gas of a loop over untrusted input —
     /// but note the difference that keeps it OUT of reference/policy.js: those two
     /// change which mandates can exist and therefore which spends are legal, while
@@ -209,7 +238,7 @@ contract MandateManager {
     /// fits one `eth_call` at every default node gas cap.
     uint256 public constant MAX_JOINT = 8;
 
-    /// NEW IN v2 (F16). The furthest ahead a co-signer may set an approval's deadline.
+    /// @notice NEW IN v2 (F16). The furthest ahead a co-signer may set an approval's deadline.
     ///
     /// v1 approvals never decayed: `_cosignApproved` held a `bool` and the only ways out
     /// were consumption and withdrawal, so an approval was good for the whole life of the
@@ -240,12 +269,20 @@ contract MandateManager {
     // precedence table places bitwise `&` ABOVE the comparison operators, unlike
     // C, so this parses as `(flags & F_X) != 0` — which is what is meant. It reads
     // like a bug and is not one. Parenthesize anyway if a reviewer objects.
+    /// @notice Enforce `perTxCap`: no single spend may exceed it.
     uint8 public constant F_PER_TX = 1 << 0;
+    /// @notice Enforce `totalCap`: the mandate's lifetime total may not exceed it.
     uint8 public constant F_TOTAL = 1 << 1;
+    /// @notice Require a live co-signature for any spend strictly above `cosignThreshold`.
     uint8 public constant F_COSIGN = 1 << 2;
+    /// @notice Enforce `expiresAt`, which is exclusive: at that second the mandate is dead.
     uint8 public constant F_EXPIRY = 1 << 3;
+    /// @notice Require the spender to still own the agent's ERC-8004 identity token.
     uint8 public constant F_IDENTITY = 1 << 4;
+    /// @notice Require a fresh, passing ERC-8004 validation from the named validator.
     uint8 public constant F_CREDENTIAL = 1 << 5;
+    /// @notice Restrict recipients to the mandate's allowlist. Without this flag any
+    /// non-zero address that is not the payer may receive.
     uint8 public constant F_ALLOWLIST = 1 << 6;
 
     // ---------------------------------------------------------------------
