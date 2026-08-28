@@ -426,7 +426,10 @@ requirement anywhere that it be in the future.
 **The model mirrors F5 and deliberately does not mirror F1.** `reference/policy.js` renames
 `hasBound` to `hasLifetimeBound` at lines 217–218 and the suite goes from 56 tests to **57**,
 derived by running it rather than counted by hand: `node --test policy.test.js` reports
-`# tests 57 / # pass 57 / # fail 0`. F1 gets no mirror because the model has no `getMandate`
+`# tests 57 / # pass 57 / # fail 0`. **That 57 is the figure as of #22 and is left as history, not
+updated in place** — the model suite is **76** as of 2026-08-28, having gained F16's and F17's
+cosign tests, F19's four refusals, and the four the `evaluate` mutation gate demanded. F1 gets no
+mirror because the model has no `getMandate`
 and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
 would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
 asymmetry reads as a decision rather than an omission. The Solidity suite is now **157** test
@@ -874,6 +877,43 @@ eleven files as they stood, since `testFuzz` is caught by `test` anyway and `inv
 179 rather than 182, because `WindowInvariant.t.sol`'s three `invariant_` functions have no
 `test` prefix. Recorded rather than corrected in place, because the failure was in the re-typing
 and not in what this paragraph wrote down.
+
+**2026-08-28, later the same day: the model's mutation gate was pointed at `evaluate` for the
+first time, and it added F27 and F28 — taking the document to twenty-eight.** Neither is a new
+entry here, and for two different reasons. **F27** is a grant-time guard, so it joins **#23**
+alongside F13: `createMandate` stores `IdentityGate.expectedOwner` unread, and because
+`_checkIdentity`'s only caller has already forced `msg.sender == m.spender`, the pin has exactly
+three outcomes — skipped at zero, redundant when it equals the spender, and **permanently
+unspendable for anything else**. Same shape as F5's unread `expiresAt` and F17's unconsumable
+approval, and the same fix: refuse at grant time what cannot work at spend time. **F28** is a
+divergence in `reference/policy.js` rather than in `contracts/`, so it costs one line and no
+Solidity: the model reads `expectedOwner = address(0)` as a pin because a zero-address *string* is
+truthy in JavaScript, where the contract reads it as "do not pin" — the model is stricter than the
+chain, which is the second instance of the `maxStaleness == 0` hazard `test/Gates.t.sol` already
+documents.
+
+**What that run cost and what it bought.** `reference/mutation-gate.js` had scanned only for
+`throw refuse(`, and every one of those 18 lines is inside `approveCosignFor` while all 24
+`return deny(` are inside `evaluate` — so **the gate had reported a clean sweep while the function
+that decides whether money moves had never had a single guard broken on purpose.** Extended with a
+`NEUTERINGS` table plus seven injections; the injections anchor at the *bottom* of `evaluate`,
+immediately before `return { allowed: true }`, so a mutant can only fire on a request the model
+was about to allow and only a test expecting an allow can kill it. Result: **31 mutants, three
+survivors in a green 72/72**, all three probed and real — `UNKNOWN_MANDATE` asserted only for the
+wrong function, `IDENTITY_TRANSFERRED` never once reached because every `expectedOwner` in the
+suite equalled the spender, and an injected self-payment guard that nothing noticed. Four tests
+later the model suite is **76/76** and `evaluate` is **31/31**, two of them crash-only kills that
+are structural rather than gaps. `approveCosignFor` was re-run first as a regression on the
+refactor and returned the same **22/22**, which is what makes the new figure comparable.
+
+**The uncomfortable part, recorded because it is the transferable one.** F27 was not missed by
+inattention. `THREAT-MODEL.md` §3 — the table of properties the contract enforces, fifteen rows
+covering spender, recipient, ids, bounds, flags, caps, windows, nonces, co-signatures and
+revocation — **had no row for either ERC-8004 gate**, while §4 discussed them at length in F13,
+F23 and F24. A finding-by-finding treatment of a mechanism reads like coverage of it. Two rows
+were added in the same commit. **A mutation gate found a design defect that three reading passes
+did not, and it found it by failing rather than by passing** — the useful question at a surviving
+mutant is not "which test is missing" but "why did nobody write it".
 
 ## What does not go in
 

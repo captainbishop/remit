@@ -168,6 +168,37 @@ down what Remit protects, what it does not, and what nobody has looked at yet.
 > to this one. So the F19/F25 blast radius inside the docs is exactly three files: this one,
 > `CHANGELIST.md` and `L3-VAULT.md`. Recorded so the next fix does not re-run the same eight greps
 > to learn the same thing.
+>
+> **2026-08-28, F27 and F28: for the first time since #28 began, a new finding's contract
+> citations are unambiguous.** Both cite bare `contracts/MandateManager.sol:NNN` rather than
+> `v2:NNN`, on the F17 precedent above — but the hazard that precedent was hedging against is
+> absent here, because **neither finding changes the contract.** `git diff --stat 65f05d8 --
+> contracts/MandateManager.sol` is empty, so the blob table's last row and the working tree are
+> byte-identical at 1,523 lines, and every number in F27 resolves identically against either.
+> They were printed out of the working tree one at a time before being written down — `276`,
+> `538`, `646`, `651`, `652`, `700`, `725`, `929`, `941`, `942` — and `_checkIdentity`'s
+> single-caller claim was derived (`grep -c _checkIdentity` returns 2: the definition and the one
+> call), not assumed. As always the function names are the durable citation: `_checkIdentity` and
+> `createMandate` do not move.
+>
+> **What moved instead is the model and its suite, which this banner has never had to track
+> before.** `reference/policy.test.js` went **72 → 76 tests**, all passing, and
+> `reference/mutation-gate.js` grew a second target. The Solidity figure is untouched at
+> **182/182** because no `.sol` file was edited — stated because "the tests went up by four" and
+> "the suite is still 182" are both true here and describe different suites. The gate figures are
+> the new evidence: `approveCosignFor` **22/22** (re-run as a regression on the refactor, not
+> quoted from the earlier run) and `evaluate` **31/31**, from **31 mutants: 24 removals and 7
+> injections**.
+>
+> **Two of those 31 kills are crash-kills, and the gate reports them separately on purpose.**
+> Neutering `evaluate`'s `UNKNOWN_MANDATE` or `CREDENTIAL_MISSING` return leaves the next line
+> dereferencing the very value the guard proved absent — `mandate.revoked` off `null`,
+> `att.validator` off `null` — so the tests that assert those denials throw before reaching their
+> assert. **That is structural and not a coverage gap:** no test written from outside the function
+> can reach an assertion once the guard is gone. An assertion-kill proves the suite knows the
+> right answer; a crash-kill proves only that it would not stay green. Both are kills; only the
+> first is what a gate is for, so the figure to quote is "31/31, two of them crash-only" rather
+> than a bare 31/31.
 
 ## Why this document exists
 
@@ -329,6 +360,8 @@ path.
 | Revocation is immediate and permanent | `revoke` sets `revoked = true`; no un-revoke exists |
 | A compromised agent can shut itself off | `revoke` also accepts the spender |
 | Caps hold even if the token misbehaves | see F7 — this is stronger than the source claims |
+| Authority follows the ERC-8004 agent identity, and dies when the identity moves | **Row added 2026-08-28; its absence is F27's other half.** `spend` at `:725` calls `_checkIdentity`, which reads `ownerOf(agentId)` live and refuses `IdentityNotHeld` unless the caller still holds it — so selling or burning a transferable identity NFT kills the mandate rather than transferring authority with the token. Read at **spend** time, not grant time, which is the whole value of the gate. The second guard on the next line, `expectedOwner`, adds nothing to this and can only subtract — see **F27** |
+| A gated mandate stops working when a named validator stops vouching for the agent | `spend` at `:726` calls `_checkCredential`, which refuses unless the ERC-8004 `getValidationStatus` tuple shows the payer's **named validator** answering about the payer's **named agent** with `response >= minResponse`, fresh within `maxStaleness`. Checking the tuple rather than `response` alone is what makes it a gate at all, since the registry is keyed on `requestHash` and anyone may file under any hash. Also spend-time: a lapsed attestation stops the mandate with no action from the payer, and re-attesting revives it. Both gates are independent and both must pass; neither implies the other. Bounded by **F13** (no grant-time validation), **F23** (the registries are an unnameable trust boundary) and the documented weakening in `test/Gates.t.sol`'s `test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent` |
 
 ## 4. Findings
 
@@ -338,26 +371,32 @@ false or overstated claims in comments and documents rather than defects in code
 for a primitive whose entire product is *legibility of authority* is not a lesser
 category.
 
-**Twenty-six findings, counted from the headings below rather than asserted** — `grep -c
-"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 26, which is the check, not the
+**Twenty-eight findings, counted from the headings below rather than asserted** — `grep -c
+"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 28, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
 long the search ran. They partition exactly, which is more useful than the total: **seven are
 already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28 — F15 and F16 on
 2026-08-27, F17 on 2026-08-28, F19 and F25 later the same day); **two were fixed in this document
 as it was being written** (F22 and F23, both missing trust boundaries — §2 gained its sixth and
-seventh in one day); **four have a fix that changes v2's behaviour** (F3, F9, F11, F13); **seven
+seventh in one day); **five have a fix that changes v2's behaviour** (F3, F9, F11, F13, F27 —
+F27's fix also carries a comment rewrite in `test/Gates.t.sol`, which is a rider on it rather than
+a ninth bucket); **seven
 are comment rewrites** that change nothing any code does (F4, F7, F8, F10, F14, F21 in the
 contract, F26 in the mocks — and the last is in `test/`, so it is free of the frozen-metadata
 constraint that governs `contracts/`); **three are documentation** (F2, F6, F18); **one needs a
 decision before it can be sized** (F20, whether the contract gains a sixth state-changing
 function, and its first that mutates a mandate after creation); **one
 needs a four-line test before it can be sized at all**,
-because one of its two possible answers cannot be settled by reading source (F24); and **one
+because one of its two possible answers cannot be settled by reading source (F24); **one is a
+divergence between the reference model and the contract, fixed in the model rather than in
+`contracts/`** (F28); and **one
 needs nothing** (F12).
-7 + 2 + 4 + 7 + 3 + 1 + 1 + 1 = 26, which is the arithmetic and not a second assertion of the
+7 + 2 + 5 + 7 + 3 + 1 + 1 + 1 + 1 = 28, which is the arithmetic and not a second assertion of the
 same number. **The first bucket is a status and the rest are costs, so a finding moves into it
 when it lands** — F19 was in "changes v2's behaviour" and F25 in "comment rewrites" until
-2026-08-28, and the two buckets they left are why the middle figures fell by one each. Triage:
+2026-08-28, and the two buckets they left are why the middle figures fell by one each. **F27 and
+F28 arrived the same day from a different direction entirely** — neither came from reading the
+contract, which is what §6 now has to account for. Triage:
 
 | Fix before v2 freezes | Cost | Needs a decision first |
 | :--- | :--- | :--- |
@@ -383,6 +422,8 @@ when it lands** — F19 was in "changes v2's behaviour" and F25 in "comment rewr
 | F24 codeless-but-non-zero registry | a 4-line test, which decides whether there is anything else to fix | **what Solidity 0.8.28 does with a decode failure inside `try` — not settleable by reading source, and both answers are denials** |
 | ✅ F25 `MockUSDC` self-transfer log | **DONE in #28, 2026-08-28.** A 20-line header block plus a note at the `emit`, landing in the same change as F19 because F19 is the only reason the divergence matters. The mock's behaviour is deliberately left divergent rather than corrected: matching Arc here would make the mock look authoritative about a rule only a testnet transaction can confirm | — |
 | F26 mock revert shapes vs. the bare `catch` | comment only, in `test/` | — |
+| F27 `expectedOwner` is skipped, redundant, or bricking | 1 guard in `createMandate` + tests, plus a comment rewrite at `test/Gates.t.sol:62-65` | **folds into #23** — it is the same "validate the ERC-8004 gate at grant time" work as F13, and #23's decision already covers it |
+| F28 model reads `expectedOwner = 0` as a pin | 1 line in `reference/policy.js`, and the pinning test in `policy.test.js` is deleted when it lands | **sequenced behind F27, not undecided** — if `createMandate` refuses everything but zero and the spender, zero becomes the only non-redundant value and the model's handling of it stops being a detail |
 | §5 coverage gaps | **5 tests, 3 testnet transactions as of 2026-08-28**, re-enumerated by walking §5's bullets — the same way the figure it replaces was built, and the reason this row is not simply decremented. It read **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. What survives is #27's four geometries and the one `lastUpdate` test. **The testnet side has not moved and no amount of Solidity can move it** | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list
@@ -546,7 +587,9 @@ the balance was recycled, so F3's actual claim — that the unnamed panic fires 
 #10 claimed to have fixed — is untouched. **F19 makes reaching either ceiling more expensive
 without changing which one is reached first.** Recorded because a fix in one finding silently
 falsifying a premise in another is the failure mode this document is most exposed to: there are
-26 findings and no tooling that would have caught it.]
+28 findings and no tooling that would have caught it. The two mutation gates are the nearest
+thing, and they would not have — they ask whether a test notices a broken guard, not whether a
+prose argument in §4 still holds after the guard it cited changed.]
 
 Both are unreachable in practice and neither risks funds — `v2:697` sits above the
 transfer, so nothing moves. The finding is that #10's stated achievement ("a denial with
@@ -1826,6 +1869,112 @@ defects gives no way to tell a verified assumption from an unexamined one:
   `Transfer(from, address(0))` while bypassing `_move`'s zero-address refusal **matches** Arc,
   where burns happen only through the precompile.
 
+---
+
+### F27 — `expectedOwner` has three outcomes and two of them are useless: skipped, redundant, or a permanently unspendable mandate
+
+**Severity: no fund loss and no bypass — the failure is total denial, not permission. Medium as a footgun, because the only value that does anything new is the one that kills the mandate. Status: open, belongs to #23. Confidence: certain; derived from the contract, and the model agrees.**
+
+`IdentityGate.expectedOwner` is documented at `contracts/MandateManager.sol:276` as
+*"address(0) = do not pin, only require ownerOf == spender"*, and a payer reading that has every
+reason to think the non-zero case pins the owner they intended at grant time. It does not,
+because of where the gate runs rather than what it says.
+
+`_checkIdentity` has **exactly one caller** — `spend` at `:725` — and `spend` has already run
+`if (msg.sender != m.spender) revert WrongSpender();` at `:700`. So inside the gate,
+`owner == msg.sender` and `owner == m.spender` are the same statement. The two lines at the end
+of the gate are:
+
+```solidity
+if (owner == address(0) || owner != msg.sender) revert IdentityNotHeld();          // :941
+if (g.expectedOwner != address(0) && owner != g.expectedOwner) revert IdentityTransferred(); // :942
+```
+
+Both compare against the same `owner`, and the first has already forced it to equal the spender.
+Together they therefore require `expectedOwner == m.spender`. The second line is not a second
+fact about the world; it is a second spelling of the first. That leaves three outcomes and no
+fourth:
+
+| `expectedOwner` | effect |
+|---|---|
+| `address(0)` | the pin is skipped — the documented and only sane configuration |
+| `== m.spender` | the pin is **redundant** with `:941`, which ran one line earlier |
+| anything else | **no caller can ever spend this mandate, for its whole life** |
+
+Nothing refuses the third case. `createMandate` stores the struct verbatim at `:651`, and the
+only grant-time check `F_IDENTITY` gets is `:538`, that a registry address exists — nothing about
+the gate's contents. That is conspicuous rather than merely absent: **eight lines earlier
+`createMandate` validates the neighbouring fields**, refusing an allowlist entry of `address(0)`
+at `:646` and `credential.minResponse == 0` at `:652`. The identity gate is the one it stores
+unread.
+
+This is F5's shape (an `expiresAt` nothing reads) and F17's shape (a cosign approval nothing can
+consume): **a configuration accepted at grant time that cannot work at spend time.** F17 was
+fixed by refusing the unusable approval outright, and the same remedy fits here — refuse
+`expectedOwner != 0 && expectedOwner != p.spender` in `createMandate`, which collapses the table
+to the two rows that mean something. The alternative reading, that the pin is meant to survive
+`m.spender` changing, has no support in the code: **`spender` is immutable for the life of a
+mandate**, so there is no second owner the pin could ever be protecting against.
+
+**How this was found, because the method is the transferable part.** Not by review — this
+document's §3 enumeration walked past it twice. It came out of extending
+`reference/mutation-gate.js` to `evaluate` on 2026-08-28: neutering the model's mirror of `:942`
+killed no test, and the reason turned out to be that **every `expectedOwner` in
+`reference/policy.test.js` was set to `AGENT`, which is also the spender**, so the guard had never
+once been reached in a green suite. The question *"why is this guard unreachable in the tests"*
+answered itself with *"because it is nearly unreachable in life"*. A coverage tool produced a
+design finding, which is not what coverage tools are usually for.
+
+**`test/Gates.t.sol:62-65` is a seventh instance of the #25 pattern — a wrong justification
+beside a correct assertion.** Its comment explains the mismatch case as *"a distinct error,
+because it means the mandate's assumptions changed rather than that the agent lost its key."*
+The assumptions did not change. Nothing happened at all: the test's mandate is born unspendable
+at grant time, and `test_identityGate_expectedOwnerMismatch_reportsIdentityTransferred` is
+asserting the brick, not a transfer. The test is right and its name is right; the reason attached
+to it teaches the reader the opposite of F27. It belongs on #25's list.
+
+---
+
+### F28 — The model reads `expectedOwner = address(0)` as a pin where the contract reads it as "do not pin", and the model is the wrong one
+
+**Severity: informational for the chain, medium for anyone trusting the model — the divergence makes the reference implementation *stricter* than production, so it reports a live mandate as permanently dead. Status: open, pinned by a test, one-line fix deferred to #23. Confidence: certain; both behaviours executed.**
+
+`contracts/MandateManager.sol:942` tests `g.expectedOwner != address(0)` explicitly, implementing
+the semantics its own `:276` documents. `reference/policy.js:578` tests bare truthiness:
+
+```js
+if (mandate.identity.expectedOwner && normalizeAddr(owner) !== normalizeAddr(mandate.identity.expectedOwner))
+```
+
+**The zero address as a JavaScript string is truthy.** So a mandate carrying
+`expectedOwner: ZERO_ADDRESS` spends on Arc and denies `IDENTITY_TRANSFERRED` forever in the
+model. Executed both ways rather than reasoned about: absent → allowed, `null` → allowed,
+`ZERO_ADDRESS` → `IDENTITY_TRANSFERRED`, `== spender` → allowed.
+
+The direction is what makes this worth a finding rather than a note. A model that is *looser*
+than the contract invites a bad spend; a model that is *stricter* tells a payer their mandate is
+bricked when the chain would honour it — and F27 above means a reader who is handed
+`IDENTITY_TRANSFERRED` has every reason to believe it.
+
+**This is the second instance of one hazard, and the file already knows about it.**
+`test/Gates.t.sol:143-162` documents the first — `maxStaleness == 0` means "no freshness
+requirement" in the contract, and it says in as many words that *"reference/policy.js currently
+encodes zero the other way. The model is wrong; the contract is right."* A zero the contract
+reads as **unset** and the model reads as a **value** has now appeared twice in the same two
+gates. `policy.js` compares against its own `ZERO_ADDRESS` constant in four other places
+(`:324`, `:527`, `:611`, `:956`), and `:623` documents this exact trap for `credential.agentId`
+and handles it deliberately. `expectedOwner` is the one field left on truthiness — so this is a
+missed instance of a rule the file follows everywhere else, not an unconsidered question.
+
+**Pinned rather than fixed, and the reason is not convenience.** The one-line change belongs with
+#23, which validates both ERC-8004 gates at grant time and is where F27 settles what
+`expectedOwner` may contain at all; if `createMandate` refuses everything but zero and the
+spender, the zero case becomes the *only* non-redundant value and the model's handling of it stops
+being a detail. Changing `evaluate` in the same pass as the tests the mutation gate had just
+demanded would also have muddied what the gate proved. Until then the divergence is asserted by
+`policy.test.js`'s `identity gate (F28)` test, which fails the day the model is corrected — the
+alarm being the point.
+
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
 Two kinds of gap are listed together because a reader deciding how much weight to put on
@@ -2082,6 +2231,45 @@ document that discovers a hazard about `MandateManager` gets a line in `THREAT-M
 the same commit, even when the discovering document handles it correctly for its own reader.
 Nothing in the repository currently requires that, which is why it has now happened three
 times.
+
+**A second methodological result, and the first one that did not come from reading.** Every
+finding F1–F26 was produced by a human-or-model reading source against documentation, a
+neighbouring file, or an adversary's incentives. **F27 and F28 were produced by a tool, and by
+the tool failing to do its job rather than succeeding at it.** Extending
+`reference/mutation-gate.js` to `evaluate` on 2026-08-28 broke each of the model's 24 denials in
+turn and required a test to fail; three mutants survived a green 72/72, and one of them was the
+mirror of `MandateManager.sol:942`. The finding is not that the guard was untested. It is the
+answer to *why* it was untested: **every `expectedOwner` in the suite was set to the spender,
+because that is the only non-zero value that lets a mandate spend at all.** An unreachable guard
+in the tests turned out to be a nearly unreachable guard in life, and F28 fell out of writing the
+test that F27 demanded.
+
+That is worth stating as a method and not just as provenance, and the reason reading missed it is
+worse than "reading is fallible". **§3 — "Properties the contract does enforce, and the guard for
+each", the table this document's whole claim to systematicity rests on — had no row for either
+ERC-8004 gate.** Fifteen rows covering spender, recipient, ids, bounds, flags, caps, windows,
+nonces, co-signatures and revocation, and nothing for the two gates that `spend` consults at
+`:725` and `:726`. So `:942` was never walked past twice by accident; **the enumeration it should
+have appeared in did not include it**, while §4 discussed the gates at length in F13, F23 and F24
+and §2 named the registries as a trust boundary. A finding-by-finding treatment of a mechanism can
+look like coverage of it. The two rows have been added, which is a fix to this document of the
+same kind F22 and F23 were.
+
+**Reading finds guards that are wrong. It is much worse at finding guards that are
+correct, asserted nowhere, and pointless** — all three of which look identical to a reader who is
+checking whether the line does what it says. The transferable rule: **when a mutation gate reports
+a survivor, the question to ask is not "which test is missing" but "why did nobody write it",**
+and the second question is the one that reaches design. The gate's own header already said to
+treat a survivor as a hypothesis; this extends it — a survivor is a hypothesis about the *code*,
+not only about the suite.
+
+The corrective is symmetric with the one above and just as cheap: **the two mutation gates should
+be run against any function this document makes a claim about**, not only against the function
+that shipped most recently. `evaluate` had never had a single guard broken on purpose before
+2026-08-28, despite being the function that decides whether money moves, purely because the gate
+had been written for `approveCosignFor` and scanned for `throw refuse(` while `evaluate` denies
+with `return deny(`. A gate that covers half a file reports a clean sweep in exactly the same
+words as one that covers all of it.
 
 **What has not been swept:** the actor-versus-actor matrix is complete for the delegate, for
 third parties, for the **co-signer** and for the **recipient**, and as of 2026-08-26 the

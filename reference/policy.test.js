@@ -1668,6 +1668,164 @@ test('PROPERTY: cap is enforced per mandate, not shared or leaked between them',
 });
 
 // ---------------------------------------------------------------------------
+// The three tests in this block were not written from the spec. Each one exists because
+// `node reference/mutation-gate.js evaluate` — the first mutation run ever aimed at the spend
+// path rather than at `approveCosignFor` — broke a guard, or added one, and NOTHING in the
+// suite noticed. A green 72/72 had been reporting on all three of them for weeks.
+
+test('evaluate refuses a mandate that does not exist (the gate found this one unasserted)', () => {
+  // `Denial.UNKNOWN_MANDATE` was asserted exactly once in this file, and for the WRONG
+  // function: the F17 prologue test above pins it for `approveCosignFor`. So the spend path's
+  // own null check could be deleted and the suite stayed green. It did not stay green *quietly*
+  // — the next line reads `mandate.revoked` off null and throws — but a TypeError from a model
+  // is not a denial, and a caller integrating against it cannot tell the two apart. The
+  // contract has this covered on both sides (test/Bounds.t.sol pays an unknown id and expects
+  // UnknownMandate); until now the model only had it on one.
+  for (const absent of [null, undefined]) {
+    const d = evaluate(absent, req(usdc('10')), { now: 1 });
+    assert.equal(d.allowed, false, `evaluate(${absent}) must deny rather than throw`);
+    assert.equal(d.reason, Denial.UNKNOWN_MANDATE);
+  }
+});
+
+test('identity gate (F27): pinning expectedOwner to anyone but the spender BRICKS the mandate', () => {
+  // `Denial.IDENTITY_TRANSFERRED` had no test at all: every `expectedOwner` in this file was
+  // set to AGENT, which is also the spender, so the guard was never once reached. Asking why
+  // is what turned a coverage hole into a finding.
+  //
+  // The gate is two conditions on one value. `owner` must equal the SPENDER (line 574) and
+  // then must equal `expectedOwner` (line 578). Both compare against the same `owner`, so
+  // together they say `expectedOwner === spender` — and `spender` is already checked against
+  // the caller before the gate ever runs. So the second condition is not a second fact about
+  // the world. It has exactly three outcomes, none of which is the one a payer reading
+  // "pin the owner I intended" would expect:
+  //
+  //   absent/null          the guard is skipped
+  //   equal to the spender the guard is redundant with the check above it
+  //   anything else        NO caller can ever spend, for the mandate's whole life
+  //
+  // Nothing refuses the third case at grant time — `createMandate` stores `identity` verbatim
+  // (policy.js:405), exactly as the contract stores `p.identity` unvalidated
+  // (MandateManager.sol:651). That is F5's shape (an expiresAt nothing reads) and F17's shape
+  // (a cosign approval nothing can consume): a config accepted at grant time that cannot work.
+  const bricked = simpleMandate({ identity: { agentId: 42n, expectedOwner: BOSS } });
+
+  // AGENT is the named spender and DOES hold #42, so the first condition passes. The mandate
+  // still cannot spend, and the denial names a transfer that never happened.
+  const d = evaluate(bricked, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, Denial.IDENTITY_TRANSFERRED);
+
+  // The brick is total, and this is the half a single-case test would miss: there is no owner
+  // the registry could report that makes this mandate spendable. BOSS is who the payer pinned,
+  // and BOSS holding the token fails one line EARLIER, because BOSS is not the spender.
+  for (const owner of [AGENT, BOSS, OTHER, null]) {
+    const r = evaluate(bricked, req(usdc('10')), { now: 1, resolveIdentityOwner: () => owner });
+    assert.equal(r.allowed, false, `expectedOwner=BOSS must stay unspendable when owner=${owner}`);
+  }
+
+  // And the contrast that makes the redundancy claim concrete rather than asserted: the only
+  // pin that spends is the one that repeats the spender check above it.
+  const pinned = simpleMandate({ identity: { agentId: 42n, expectedOwner: AGENT } });
+  assert.equal(
+    evaluate(pinned, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT }).allowed,
+    true,
+  );
+});
+
+test('identity gate (F28): the model reads expectedOwner = address(0) as a PIN, the contract as "do not pin"', () => {
+  // KNOWN DIVERGENCE, PINNED SO IT CANNOT BE LOST — the model is wrong here, not the contract.
+  //
+  // MandateManager.sol:276 documents `address(0) = do not pin`, and :941 implements it with an
+  // explicit `g.expectedOwner != address(0)`. The model at policy.js:578 tests bare truthiness
+  // instead, and the zero address as a STRING is truthy in JavaScript. So the same mandate is
+  // spendable on-chain and permanently dead in the model.
+  //
+  // The direction is what makes this worth a test rather than a comment. A model that is
+  // stricter than the contract does not cause a bad spend, but it tells a payer their mandate
+  // is bricked when the chain would honour it — and F27 above means a reader who is told
+  // IDENTITY_TRANSFERRED has every reason to believe it.
+  //
+  // This is the SECOND instance of one hazard: a zero that the contract reads as "unset" and
+  // the model reads as a value. test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement
+  // in test/Gates.t.sol says so in as many words — "the model is wrong; the contract is right".
+  // policy.js already compares against ZERO_ADDRESS in four other places (324, 527, 611, 956),
+  // and line 623 documents this exact trap for `credential.agentId` and handles it on purpose.
+  // `expectedOwner` is the one field that was left on truthiness.
+  //
+  // The one-line fix belongs with #23, which validates both ERC-8004 gates at grant time and is
+  // where the whole `expectedOwner` question gets settled; changing `evaluate` in the same pass
+  // as the tests the mutation gate demanded would muddy what the gate proved. Until then this
+  // test fails the day the model is corrected, which is the intended alarm.
+  const zeroPinned = simpleMandate({ identity: { agentId: 42n, expectedOwner: ZERO_ADDRESS } });
+  const d = evaluate(zeroPinned, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT });
+  assert.equal(d.allowed, false, 'if this now passes, the model was fixed — delete this test');
+  assert.equal(d.reason, Denial.IDENTITY_TRANSFERRED);
+  assert.equal(String(d.detail.expected).toLowerCase(), ZERO_ADDRESS);
+
+  // Omitting the field entirely is the only spelling of "do not pin" the model honours, and it
+  // is the one the suite has always used, which is why nothing caught this.
+  for (const identity of [{ agentId: 42n }, { agentId: 42n, expectedOwner: null }]) {
+    assert.equal(
+      evaluate(simpleMandate({ identity }), req(usdc('10')), {
+        now: 1,
+        resolveIdentityOwner: () => AGENT,
+      }).allowed,
+      true,
+    );
+  }
+});
+
+test('F22: a delegate may be paid by its own mandate — recipient == spender stays ALLOWED', () => {
+  // THE MOST IMPORTANT OF THESE THREE, and the one no removal-mutation could ever have found.
+  // Deleting a guard makes the model more permissive; this is a claim that the model must not
+  // become STRICTER. The gate reaches it by INJECTING the guard Remit must never have, at the
+  // last line before `return { allowed: true }` — so it can only fire on a spend that was about
+  // to be allowed, and only a test expecting an allow can kill it. Nothing did.
+  //
+  // THREAT-MODEL.md section 2 already warned about this in prose: F19 refuses paying the PAYER,
+  // and the English phrase "self-payment" covers that and paying the SPENDER equally well while
+  // the two are opposites. Paying the payer is a no-op that burns an allowance and forges an
+  // audit trail. Paying the spender is an agent invoicing for its work, or a payroll delegate
+  // taking its own salary line — ordinary, supported, and the reason someone was delegated to
+  // in the first place. `Denial.SELF_PAYMENT` is the code F19 raises, so the plausible mistake
+  // is not inventing a new guard but WIDENING that one, which is how the injection is written.
+  //
+  // So the two cases go in one test, on one mandate, three lines apart. Read together they say
+  // what neither says alone: the condition is the claim, and the name covers both.
+  const m = cosignMandate();
+
+  const paysItself = evaluate(m, req(usdc('5'), { recipient: AGENT }), { now: 1 });
+  assert.equal(paysItself.allowed, true, 'a delegate paying itself must not be refused');
+
+  const paysPayer = evaluate(m, req(usdc('5'), { recipient: PAYER }), { now: 1 });
+  assert.equal(paysPayer.allowed, false);
+  assert.equal(paysPayer.reason, Denial.SELF_PAYMENT);
+
+  // Above the cosign threshold the same asymmetry has to survive the mirror, because F17 makes
+  // `approveCosignFor` refuse every PERMANENT denial `evaluate` would raise. A must-NOT-refuse
+  // is mirrored too: if the spender were ever added to the payer guard, the cosigner would be
+  // unable to approve the payment as well as the agent unable to make it, and F17's parity test
+  // would keep passing throughout — both halves would be wrong in the same direction.
+  const big = { ...req(usdc('50'), { recipient: AGENT }), validUntil: DAY };
+  assert.doesNotThrow(() => approveCosignFor(m, BOSS, big, { now: 1 }));
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...big, recipient: PAYER }, { now: 1 }),
+    refusedWith(Denial.SELF_PAYMENT),
+  );
+
+  // An allowlist is the one thing that legitimately stops a delegate paying itself, and it does
+  // so by naming who may be paid rather than by knowing anything about the spender. Pinning it
+  // here keeps a future reader from "fixing" the allow above by reaching for a self-payment
+  // check when the allowlist was the mechanism all along.
+  const listed = cosignMandate({ allowlist: [VENDOR] });
+  assert.equal(
+    evaluate(listed, req(usdc('5'), { recipient: AGENT }), { now: 1 }).reason,
+    Denial.RECIPIENT_NOT_ALLOWED,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // This one guards the suite rather than the engine, and it exists because of FAR.
 test('meta: no test runs past FAR, and the run is not vacuously green', () => {
   assert.ok(maxTimeSeen > 0, 'the recorders saw no timestamps at all, so they are not wired up');
