@@ -3,8 +3,8 @@
 Bounded, revocable, non-custodial spending authority for autonomous agents on Arc.
 
 A payer grants an agent capped, rate-limited, allowlisted, expiring authority to spend
-the payer's USDC. Funds stay in the payer's wallet. Every spend carries an idempotency
-nonce and emits a reconcilable event, and the payer can revoke at any time.
+the payer's USDC, and the funds stay in the payer's wallet throughout. Every spend carries
+an idempotency nonce and emits a reconcilable event, and the payer can revoke at any time.
 
 ## The problem
 
@@ -168,14 +168,13 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-There is now a second suite, in Solidity: 185 Forge tests in `test/`, covering the
-same ground plus the three properties a JavaScript model structurally cannot express —
-that a failed spend consumes nothing (real transaction rollback), that rewinding onto
-the same physical ring slot accumulates rather than overwrites (real storage aliasing),
-and that `totalSpent` panics rather than wrapping near 2^96 (real packed arithmetic).
-All 185 pass, under `solc` 0.8.28 — 2,048 fuzz runs and 49,152 invariant calls, and
-coverage of `contracts/MandateManager.sol` stands at 100% of lines, statements, branches
-and functions.
+A second suite now exists in Solidity — 185 Forge tests in `test/` — covering the same
+ground plus the three properties a JavaScript model structurally cannot express: a failed
+spend consumes nothing (real transaction rollback), rewinding onto the same physical ring
+slot accumulates rather than overwrites (real storage aliasing), and `totalSpent` panics
+rather than wrapping near 2^96 (real packed arithmetic). All 185 pass, under `solc` 0.8.28
+— 2,048 fuzz runs and 49,152 invariant calls — and coverage of
+`contracts/MandateManager.sol` stands at 100% of lines, statements, branches and functions.
 **[FORGE.md](FORGE.md)** covers setup, the two commands that check the suite is not
 passing vacuously, and what the first build and the first run actually found.
 
@@ -260,15 +259,15 @@ A payer then calls `USDC.approve(mandateManager, budget)` — approve the intend
 budget, not `type(uint256).max`, so the allowance is a hard outer ceiling — followed
 by `createMandate(salt, params)`, and then the delegate can `spend`.
 
-## Status, honestly
+## Status
 
 **Verified.** The reference model runs and passes 76 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
-collision at low timestamps) and two in the credential gate (unchecked validator,
-unchecked agent id). Each is now a named regression test. The `K/(K+1)` throughput
-cost was measured, not assumed: ~92% of nominal at K=12, ~96% at K=24, both within
-0.5% of prediction. The demo's engine was extracted from the HTML and exercised
+collision at low timestamps) and two in the credential check (unchecked validator,
+unchecked agent id), and each of the six is now a named regression test. The `K/(K+1)`
+throughput cost was measured, not assumed: ~92% of nominal at K=12, ~96% at K=24, both
+within 0.5% of prediction. The demo's engine was extracted from the HTML and exercised
 headlessly to confirm it behaves as the page claims.
 
 **Verified against primary source.** All nine Arc-specific claims the design rests
@@ -312,39 +311,39 @@ salt)` matched the emitted `MandateCreated` topic exactly, and the `spendHash` r
 a dry run matched the one in the emitted `Spend` event exactly. So a payer can reference a
 mandate, and a cosigner can approve a specific spend, before either is mined.
 
-*Six policy gates were re-checked against the deployed bytecode*, not the mock, by
-dry-running each rejection with `cast call` — which costs nothing. Replaying a used nonce
+*Six policy refusals were re-checked against the deployed bytecode*, not the mock, by
+dry-running each rejection with `cast call`, which costs nothing. Replaying a used nonce
 returns `NonceAlreadyUsed()`, a non-allowlisted recipient `RecipientNotAllowed()`, an
 over-cap amount `OverPerTxCap()`, the payer signing in the delegate's place
 `WrongSpender()`, a zero amount `ZeroAmount()`, an unknown id `UnknownMandate()`. A
-legitimate spend with a fresh nonce still simulates clean afterwards, so the gate rejects
-the duplicate rather than the mandate seizing up.
+legitimate spend with a fresh nonce still simulates clean afterwards, so the contract
+refuses the duplicate rather than the mandate seizing up.
 
 **Not verified.** It has not been audited. Five mandate shapes have now been exercised
-live — ungated, cosigned, identity-gated, and credential-gated with and without a staleness
-bound — and both ERC-8004 gates fired against Arc's real registries with a passing ungated
-control beside them. `revoke` was exercised on 2026-08-25, once by a payer and once by a
-delegate revoking its own authority, and `withdrawCosign` the same day, so **all five
-state-changing functions now have live transactions across thirty-one of them, every one with
-`status 1`**. Both of those numbers were wrong in an earlier version of this paragraph, which
-said `revoke` was the only untried path and then said five of six functions rather than five of
-five; the surface is five, obtained by parsing every declaration in the contract for `external`
-or `public` without `view`. What stays untestable rather than merely untried is the identity
-gate's *positive* path, until an identity NFT is minted to our delegate.
-Sub-second blocks sharing a timestamp and the CallFrom precompile remain asserted from
-documentation rather than observed.
+live — one with no requirement beyond its caps, one cosigned, one with an identity
+requirement, and two with a credential requirement, one of them with a staleness bound and
+one without — and both ERC-8004 checks fired against Arc's real registries, with a passing
+control beside them that carried neither requirement. `revoke` was exercised on 2026-08-25,
+once by a payer and once by a delegate revoking its own authority, and `withdrawCosign` the
+same day, so **all five state-changing functions now have live transactions across
+thirty-one of them, every one with `status 1`**. Both of those numbers were wrong in an
+earlier version of this paragraph, which said `revoke` was the only untried path and then
+said five of six functions rather than five of five; the surface is five, obtained by
+parsing every declaration in the contract for `external` or `public` without `view`. What
+stays untestable rather than merely untried is the identity check's *positive* path, until
+an identity NFT is minted to our delegate. Sub-second blocks sharing a timestamp and the
+CallFrom precompile remain asserted from documentation rather than observed.
 
 **Measured against Arc's real USDC, as of 2026-08-24.** The steady-state marginal spend,
-measured inside an already-written window bucket, costs **177,429 gas ≈ 0.0037 USDC**. A
-bare `transfer` to a fresh account on the same chain costs 73,950. So the entire apparatus —
-per-transaction cap, lifetime cap, 24-bucket rolling daily window, expiry, allowlist,
-idempotency nonce, audit event — costs about **103,479 gas, roughly 0.217 cents per
-payment**, and a policed payment is about **2.4×** a bare one. A *first-ever* spend on a
-fresh mandate, with every slot cold and every counter virgin, costs 216,458; quoting that
-against a bare transfer is what produced the ~142,500 figure this paragraph used to carry,
-and it charged one-time initialisation to the recurring cost. One caveat survives:
-`transferFrom` touches the allowance slot and `transfer` does not, worth ~5,000 gas, so read
-the floor as ~98,000.
+measured inside an already-written window bucket, costs **177,429 gas ≈ 0.0037 USDC**, and
+a bare `transfer` to a fresh account on the same chain costs 73,950. The entire apparatus
+— per-transaction cap, lifetime cap, 24-bucket rolling daily window, expiry, allowlist,
+idempotency nonce, audit event — therefore costs about **103,479 gas, roughly 0.217 cents
+per payment**, and a policed payment is about **2.4×** a bare one. A *first-ever* spend on
+a fresh mandate, with every slot cold and every counter virgin, costs 216,458; quoting that
+against a bare transfer produced the ~142,500 figure this paragraph used to carry, charging
+one-time initialisation to the recurring cost. One caveat survives: `transferFrom` touches
+the allowance slot and `transfer` does not, worth ~5,000 gas, so read the floor as ~98,000.
 
 **Arc's native USDC is more expensive than a plain ERC-20, and the premium is very nearly a
 per-call constant.** Both halves of that sentence used to read differently, and both were
@@ -393,38 +392,38 @@ low. Deployment cost **0.0537 USDC**, not the 0.051 published.
 `SLOAD`, ~2,150 gas or 0.000045 USDC at 21 Gwei. Widening a window from `K=12` to `K=24`
 costs about 25,800 gas, **0.00054 USDC — a twentieth of a cent** — and buys a rise in the
 `K/(K+1)` throughput floor from 92% to 96% of nominal. `K=24` should be the default
-wherever the rate limit is load-bearing. The caveat that used to sit here — that this was
-measured against a mock and Arc's real token would cost more by an unknown margin — is
-now answered: the margin is **13,110 gas** on the `transferFrom`, and it is a per-call
-constant, not a per-bucket cost, so it does not change the K decision at all.
+wherever the rate limit is one of the bounds a payer relies on. The caveat that used to sit
+here — that this was measured against a mock and Arc's real token would cost more by an
+unknown margin — is now answered: the margin is **13,110 gas** on the `transferFrom`, and it
+is a per-call constant, not a per-bucket cost, so it does not change the K decision at all.
 
 Writing the tests did surface real work: four places where the contract was right and
 the reference model was wrong. The co-signature threshold is strictly greater, so an
 at-threshold spend needs no signature. The staleness guard treats `maxStaleness == 0` as
 no requirement at all rather than maximum strictness. An amount above `2^96-1` is
 refused outright, before any cap is consulted, because every cap is a packed `uint96`
-and an unchecked downcast would truncate a large amount into a small one that passes.
-And the spender may revoke, not only the payer — an agent that has finished its work or
-detects it is compromised can surrender its own authority, which cannot hurt the payer
-because the only power it removes is the agent's own.
+and an unchecked downcast would truncate a large amount into a small one that passes. The
+spender may revoke as well as the payer: an agent that has finished its work or detects it
+is compromised can surrender its own authority, which cannot hurt the payer because the
+only power it removes is the agent's own.
 
 Writing the *documentation* then surfaced a fifth, which is the more interesting one.
-Explaining the credential gate's agent binding carefully enough to caveat it exposed
+Explaining the credential check's agent binding carefully enough to caveat it exposed
 that the model resolved the expected agent with `??`, so `agentId: 0n` meant "require
 the attestation to be about agent 0" — a state the on-chain `uint256` cannot express,
 where zero is the only available spelling of "unset". The divergence was invisible to
 every existing test and sat on a security path.
 
 Generalising *that* — auditing every field whose zero doubles as "unset" — found five
-more, all in the same direction: the model's `createMandate` accepted configurations the
-contract refuses. A window with `cap == 0`. An `expiresAt` at or before `notBefore`. The
-zero address on an allowlist. A credential with no validator, which the on-chain flag
-rules cannot represent. And `minResponse == 0`, which is the one that matters: ERC-8004
+more, all in the same direction, with the model's `createMandate` accepting configurations
+the contract refuses: a window with `cap == 0`; an `expiresAt` at or before `notBefore`;
+the zero address on an allowlist; a credential with no validator, which the on-chain flag
+rules cannot represent; and `minResponse == 0`, which is the one that matters. ERC-8004
 encodes a *failed* validation as a low response and 100 as passing, so a zero threshold
-does not loosen the credential gate, it inverts it into one that accepts precisely the
-attestations it exists to reject. The contract refuses all five. `Creation.t.sol` already
-asserted all five. The model had none of them, so a first `forge test` would have caught
-the lot — this reconciliation just got there without a compiler, by reading.
+inverts the credential check into one that accepts precisely the attestations it exists to
+reject. The contract refuses all five, and `Creation.t.sol` already asserted all five.
+The model had none of them, so a first `forge test` would have caught the lot — this
+reconciliation just got there without a compiler, by reading.
 
 One more fix came out of it that is about the model's job rather than its logic. The
 credential's defaults were applied at read time, so a constructed mandate carried
@@ -436,10 +435,10 @@ defaults to disagree with. A specification that needs a translator has moved the
 rather than fixed it.
 
 The model now matches on all ten, which took its suite from 41 tests to 46 — and to 57 over
-the course of v2, which added the counter-ceiling denial, three cosign-gate refusals, six
-joint-ceiling tests and the lifetime-bound narrowing. One Forge
-test was also rewritten for proving nothing — it tripped two `BadWindow` conditions at
-once, so it would have passed with either check removed.
+the course of v2, which added the counter-ceiling denial, three co-signature refusals, six
+joint-ceiling tests and the lifetime-bound narrowing. One Forge test was also rewritten for
+proving nothing — it tripped two `BadWindow` conditions at once, so it would have passed
+with either check removed.
 
 The first real run was informative in the way that matters: seven things had to be fixed
 and all seven were in the tests, not the contract. Three were compile failures — a
@@ -476,8 +475,8 @@ anyway, on the grounds that it was already in a deployed ABI. Tagging
 calls it `NotAuthorised()`, moving the selector from `0x1435e357` to `0x1648fd01`.
 
 *Fixed, and it grew.* A mandate whose co-signature threshold sits at or above the largest
-single spend its other bounds permit makes the co-signature branch unreachable, producing a
-policy that looks supervised and silently never asks for a signature; v1's `createMandate`
+single spend its other bounds permit makes the co-signature branch unreachable, producing
+a policy that looks supervised and never asks for a signature; v1's `createMandate`
 accepts it. Two details this paragraph previously got wrong: the condition is `<=` rather
 than `<`, because `spend` tests `amount > cosignThreshold` strictly, so a threshold exactly
 equal to the ceiling is dead too — and `perTxCap` is not the only ceiling, since with
@@ -491,19 +490,19 @@ Fixing it properly meant asking the general question — *in how many ways can a
 display a co-signature requirement and not have one?* — and the answer was five, not one.
 Two were already refused in v1, this was the third, and **two more had never been written
 down anywhere**. A threshold with `F_COSIGN` unset is stored and shown by `getMandate` and
-measured against nothing. And, worse, `approveCosign` authorises on `msg.sender ==
+measured against nothing. Worse still, `approveCosign` authorises on `msg.sender ==
 m.cosigner` alone, so a mandate whose **cosigner is its own spender** lets the agent
-approve its own spend hash and then spend it: the supervision gate becomes two
+approve its own spend hash and then spend it: the supervision requirement becomes two
 transactions and no second party. Neither is a divergence between the contract and
 `reference/policy.js` — the model accepted both too, so no amount of cross-checking the
-two implementations would have surfaced them. v2 refuses all three. `cosigner == payer`
-remains legal and is the ordinary case; it is what live mandate 2 does on Arc today, and a
-rule that condemned it would have contradicted a receipt. (v2's `approveCosignFor`
-authorises the same way, which is the point: the fix belongs at grant time, because no check
-inside an approval can tell a cosigner who is legitimately also the payer from one who is
-illegitimately also the spender.)
+two implementations would have surfaced them. v2 refuses all three, while
+`cosigner == payer` remains legal and is the ordinary case: it is what live mandate 2 does
+on Arc today, and a rule that condemned it would have contradicted a receipt. (v2's
+`approveCosignFor` authorises the same way, which is the point: the fix belongs at grant
+time, because no check inside an approval can tell a cosigner who is legitimately also the
+payer from one who is illegitimately also the spender.)
 
-**And two more that were on no list at all, found by writing the threat model.** Neither
+**Two more were on no list at all, found by writing the threat model.** Neither
 belongs to the three above; both came out of a sweep asking which fields a mandate can
 display without anything measuring against them, and both are grant-time refusals in v2.
 The first is the bigger change. v1 called a mandate "bounded" if it carried a
@@ -517,39 +516,38 @@ expiry specifically, and refuses everything else with `Unbounded()`. The second:
 returned by `getMandate`, and have it enforce nothing — v2 refuses that pairing at grant
 time, which closes the last field in the struct that could be shown and unread.
 
-The cost of the first one is real and is worth stating plainly: it invalidates worked
-examples in this repository's own documentation, including the flagship one in `DESIGN.md`,
-which bounds a rate and a blast radius but never a lifetime. Those are being corrected
-rather than grandfathered. Every new grant-time refusal re-audits every configuration the
-project has ever printed, and that sweep is the expensive part, not the two lines of
-Solidity.
+The cost of the first one is real: it invalidates worked examples in this repository's own
+documentation, including the flagship one in `DESIGN.md`, which bounds a rate and a blast
+radius but never a lifetime. Those are being corrected rather than grandfathered.
+Every new grant-time refusal re-audits every configuration the project has ever printed, and
+that sweep is the expensive part, not the two lines of Solidity.
 
 **Not audited.** No third party has looked at this. Do not put money behind it.
 
 This is a blocker rather than a disclaimer: Remit is intended to hold real money, not to
 be a testnet demonstration. That intent is what makes the audit a scheduled line item and
 what makes `forge test --profile deep` (20,000 fuzz runs, 2,000 invariant runs at depth
-256) the gate to clear before it, rather than the default profile used during development.
+256) the bar to clear before it, rather than the default profile used during development.
 It is also what reopened the three soft spots listed above as decisions rather than
-curiosities, and what settled each of them the strict way — the dead co-signature gate in
-particular, which had been left legal on the reasoning that a merely useless configuration
-does not deserve a validation rule. Real money turns "useless" into "advertises a control
-it does not have", and immutability means a combination left legal is legal forever at that
-address.
+curiosities, and what settled each of them the strict way — the dead co-signature branch
+in particular, which had been left legal on the reasoning that a merely useless
+configuration does not deserve a validation rule. Real money turns "useless" into
+"advertises a control it does not have", and immutability means a combination left legal is
+legal forever at that address.
 
 **Unresolved factual questions.** Whether Circle's `agent-wallet-policy` already
-implements equivalent caps off-chain in its custodial API — unverified, so the claim
-to make is "non-custodial, on-chain, independently verifiable", not "first". And whether
-an EIP-7702-delegated EOA still counts as an EOA for the Memo path, which matters for
-smart-account agents and, given the real-money intent, needs an answer before launch.
-The gas question that used to sit here is answered above.
+implements equivalent caps off-chain in its custodial API is unverified, so the claim to
+make is "non-custodial, on-chain, independently verifiable", not "first". A second question
+is whether an EIP-7702-delegated EOA still counts as an EOA for the Memo path, which
+matters for smart-account agents and, given the real-money intent, needs an answer before
+launch. The gas question that used to sit here is answered above.
 
 ## Next
 
 The Forge port is written and runs — 185 tests, including exact-ledger property tests and
-a stateful invariant that lets the fuzzer choose the call sequence. All pass. Gas is
-measured against Arc's real USDC, `K=24` is settled as affordable, and the contract is
-deployed and exercised on testnet.
+a stateful invariant that lets the fuzzer choose the call sequence, and all of them pass.
+Gas is measured against Arc's real USDC, `K=24` is settled as affordable, and the contract
+is deployed and exercised on testnet.
 
 Raising `optimizer_runs` was the obvious next move and it has been tried and rejected. The
 reasoning was that 200 is low, deployment costs five cents once, and `spend` runs forever —
@@ -562,20 +560,20 @@ can touch — 6% of a 216,458-gas spend, not the 15% this line used to claim at 
 stays on the strength of the six-gas measurement alone. DESIGN.md has the table and the seed
 caveat that nearly made this look like a 40% improvement.
 
-What's left, in order:
+What remains, in order:
 
-Four items that used to head this list are done and are struck from it rather than quietly
-dropped, because the order they came off in is itself a record. `forge test --profile deep`
-— 20,000 fuzz runs, 2,000 invariant runs at depth 256 — has been run as the pre-audit gate.
-The three soft spots have been resolved as decisions, all three the strict way, and the
-third one uncovered two more. And the live exercises are closed: a cosigned spend and a
+Four items that used to head this list are done and are struck from it rather than deleted,
+since the order they came off in is itself a record. `forge test --profile deep` — 20,000
+fuzz runs, 2,000 invariant runs at depth 256 — has been run as the bar to clear before the
+audit. The three soft spots have been resolved as decisions, all three the strict way, and
+the third one uncovered two more. The live exercises are closed: a cosigned spend and a
 revocation both have receipts on Arc Testnet, along with `approveCosign` and
-`withdrawCosign`, which is all five state-changing functions **that v1 exposed** — v2 renamed
-one of them, so see the note below. The identity and credential
-gates are the exception and are still unexercised on chain, blocked on something no amount
-of care in this repository can supply — an ERC-8004 identity minted to our agent wallet,
-and an attestation that passes rather than the one real attestation on Arc Testnet, whose
-response is a failing 1.
+`withdrawCosign`, which is all five state-changing functions **that v1 exposed** — v2
+renamed one of them, so see the note below. The identity and credential checks are the
+exception and are still unexercised on chain, blocked on something no amount of care in
+this repository can supply: an ERC-8004 identity minted to our agent wallet, and an
+attestation that passes rather than the one real attestation on Arc Testnet, whose response
+is a failing 1.
 
 **One of those five no longer exists.** #28 deleted `approveCosign(bytes32,bytes32)` in favour of
 `approveCosignFor(mandateId, recipient, amount, ref, nonce, validUntil)`, so the sentence above

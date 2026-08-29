@@ -44,8 +44,8 @@ contract ViewsTest is Base {
 
     // ------------------------------------------------------ policyHeadroom
 
-    /// The headroom is the minimum across every active bound, and it must track
-    /// which one is currently binding rather than reporting a favourite.
+    /// The headroom is the minimum across every active bound, and it must track which
+    /// bound is currently binding rather than reporting a favourite.
     function test_policyHeadroom_reportsTheBindingConstraint() public {
         MandateManager.MandateParams memory p = simpleParams(); // perTx 100, daily 500
         p.totalCap = usd(150);
@@ -79,7 +79,7 @@ contract ViewsTest is Base {
     }
 
     /**
-     * A mandate bounded only by expiry genuinely has no amount limit, so the honest
+     * A mandate bounded only by expiry has no amount limit at all, so the correct
      * answer is "unlimited" rather than zero.
      *
      * Returning 0 here would be the more defensive-looking choice and it would be
@@ -173,9 +173,9 @@ contract ViewsTest is Base {
     // notice. The joint ceiling is the only figure in the contract that depends on
     // something no mandate contains: the payer's single ERC-20 allowance.
 
-    /// The property that makes the joint view trustworthy: for one mandate it is not
-    /// a second opinion, it is the same opinion. If these ever diverge, the joint path
-    /// has grown a rule `spendable` does not have.
+    /// The property that makes the joint view trustworthy: for one mandate the joint path
+    /// returns the same opinion rather than a second one. If these ever diverge, the joint
+    /// path has grown a rule `spendable` does not have.
     function test_spendableAcross_ofOne_agreesWithSpendable() public {
         bytes32[] memory one = new bytes32[](1);
 
@@ -205,7 +205,7 @@ contract ViewsTest is Base {
      *
      * This does NOT fix the race — both delegates can still spend until the shared
      * allowance is dry, which is inherent to layering per-mandate policy over one
-     * ERC-20 approval. It converts the overlap from an inference nobody makes into a
+     * ERC-20 approval. It converts the overlap from an inference no payer makes into a
      * number one call away.
      */
     function test_spendableAcross_exposesTheSharedAllowanceOverlap() public {
@@ -235,9 +235,9 @@ contract ViewsTest is Base {
      * add on the total.
      *
      * `policyHeadroom` returns `type(uint256).max` for a mandate bounded only by an
-     * expiry — correctly, since the payer set no amount bound. But `spend` refuses
-     * anything above `type(uint96).max` with `AmountTooLarge`, so that return value
-     * over-reports the largest single spend, and adding two of them PANICS. Two
+     * expiry — correctly, since the payer set no amount bound. `spend` nonetheless
+     * refuses anything above `type(uint96).max` with `AmountTooLarge`, so that return
+     * value over-reports the largest single spend, and adding two of them PANICS. Two
      * expiry-only grants from one payer is a two-line construction, which puts this in
      * the same class as v1's `totalSpent` cliff rather than among the astronomical
      * edges. Clamping each term first makes every term the true largest single spend
@@ -313,7 +313,7 @@ contract ViewsTest is Base {
     /// A repeated id would double-count headroom that exists once. Refused rather than
     /// deduplicated, because deduplicating hands the right number to a caller who
     /// still believes they hold two grants — and 200 is far more convincing than 100
-    /// to somebody in that state.
+    /// to a caller in that state.
     function test_spendableAcross_duplicateIds_revert() public {
         bytes32 a = grant(simpleParams());
         bytes32 b = grant(simpleParams());

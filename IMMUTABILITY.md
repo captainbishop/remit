@@ -11,20 +11,19 @@ that its cost is a migration rather than a vulnerability. The first half is chec
 checked below. The second half is an argument, and it is presented as one.
 
 > **Unqualified line numbers in this file refer to the tagged v1 source**, per the repo-wide
-> convention recorded in `FORGE.md`. Recover it with
-> `git show v1.0.0-arc-testnet:contracts/MandateManager.sol`. Unlike `THREAT-MODEL.md`, this
-> file needs no exception to that convention: it is *about* the deployed code, which is
+> convention recorded in `FORGE.md`; recover that source with
+> `git show v1.0.0-arc-testnet:contracts/MandateManager.sol`. This file needs no exception to
+> that convention, unlike `THREAT-MODEL.md`: it is *about* the deployed code, which is
 > exactly what the tag preserves.
 
-**What this document does not say** is that v1 is correct. It is not. `THREAT-MODEL.md`
-records twenty-six findings against the same surface. Two are already fixed in v2's code and
-two in that document itself; eight more have a fix that changes v2's behaviour, eight are
-comment rewrites, three are documentation, one needs a decision, one needs a test before it can
-be sized, and one needs nothing — a
-partition worth more than the total, since it says how much of the list is about the code
-doing the wrong thing rather than about it being described wrongly. v1 has never been audited,
-holds nothing but faucet money, and must not hold real money. Immutable and correct are
-independent properties, and this document is only about the first.
+**v1 is not correct.** `THREAT-MODEL.md` records twenty-six findings against the same
+surface. Two are already fixed in v2's code and two in that document itself; eight more have
+a fix that changes v2's behaviour, eight are comment rewrites, three are documentation, one
+needs a decision, one needs a test before it can be sized, and one needs nothing — a
+partition that carries more information than the total, since it says how much of the list is
+about the code doing the wrong thing rather than about it being described wrongly. v1 has
+never been audited, holds nothing but faucet money, and must not hold real money.
+Immutable and correct are independent properties, and this document is only about the first.
 
 ---
 
@@ -110,7 +109,7 @@ count of zero for `owner`, and only reading all 16 distinguishes them.
 **There is no contract-level mutable storage variable outside the mandate mappings.** A
 sweep for declarations at contract scope that are neither `constant`, `immutable`, nor a
 mapping returns nothing — every other hit is a struct field, a function parameter, an event
-parameter or a local. So there is no global switch, no fee rate, no beneficiary, no
+parameter or a local. There is therefore no global switch, no fee rate, no beneficiary, no
 registry pointer that anything can move.
 
 `implementation` appears exactly once, on line 28, inside the header banner's prose ("says
@@ -120,8 +119,8 @@ the implementation matches the model"). There is no second contract behind this 
 
 Five functions in `MandateManager` can write. Deriving this count needs care: `spend`
 declares its visibility on a continuation line (437–440), so a same-line grep for `external`
-misses it and silently produces a total that looks right for the wrong reason. The five,
-with the guard that decides who may call:
+misses it and produces a total that looks right for the wrong reason. The five, with the
+guard that decides who may call:
 
 | Function | Line | Who may call | What it can change |
 |---|---|---|---|
@@ -131,14 +130,14 @@ with the guard that decides who may call:
 | `approveCosign` | 726 | that mandate's `cosigner` only | marks one spend hash pre-approved |
 | `withdrawCosign` | 736 | that mandate's `cosigner` only | un-marks one spend hash |
 
-`spendHash` (747) is `public view`; every other public entry point is a `view`. So the whole
-mutable state of the deployed contract is: mandates, created by the people they bind, and
-altered only by those same people. There is no caller anywhere with authority over someone
+`spendHash` (747) is `public view`; every other public entry point is a `view`. The whole
+mutable state of the deployed contract is therefore mandates, created by the people they bind,
+and altered only by those same people. There is no caller anywhere with authority over someone
 else's mandate — and there is no caller with authority over *all* mandates, because no such
 role exists in the code.
 
-**This table describes the deployed contract and nothing else, which is the whole subject of
-this file.** The line numbers and the names are v1's, reproducible with
+**This table describes the deployed contract and nothing else.** The line numbers and the
+names are v1's, reproducible with
 `git show v1.0.0-arc-testnet:contracts/MandateManager.sol`. v2 in the working tree renames
 `approveCosign` to `approveCosignFor` and adds two views, and none of that reaches
 `0x3744E93B9e796E05CB66311d897559B6F3860196` — there is no proxy, so the row above is what that
@@ -153,16 +152,17 @@ signed for one deployment cannot be replayed against another.
 
 ## 4. What it costs you
 
-This is the honest bill, and it is not small.
+These costs are real, and they are not small.
 
 **A bug means a new address, not a patch.** There is no mechanism by which the code at
 `0x3744…0196` becomes different code. A fix is a second deployment somewhere else.
 
-**Migration is per-payer, and nobody can force it.** Because there is no admin, there is
-also nobody who can pause the flawed contract, freeze new grants, or push users off it. Each
-payer has to act for themselves. Anyone who does not notice, or does not bother, keeps using
-the flawed version — and it keeps working for them indefinitely. In a system with an admin
-key, a critical bug is met with a pause; here it is met with an announcement and a hope.
+**Migration is per-payer, and no role in the contract can force it.** Because there is no
+admin, there is also no party able to pause the flawed contract, freeze new grants, or push
+users off it. Each payer has to act for themselves. Anyone who does not notice, or does not
+bother, keeps using the flawed version — and it keeps working for them indefinitely. In a
+system with an admin key, a critical bug is met with a pause; here the only response
+available is an announcement that each payer must act on.
 
 That difference is the single largest operational risk in this document, and it is **not
 conditional on Remit becoming popular.** It applies in full to the first payer who is not the
@@ -172,10 +172,10 @@ yet" is a fact about the calendar, not a property of the design, and it stops be
 first time someone reads the address off this repo.
 
 The mitigation is entirely social: a disclosure channel people actually read, and integrators
-who can be reached. Which means it has to exist **before** the first third-party grant, not
-after the first bug — a channel announced in response to an incident reaches nobody, because
-the people who need it are the ones who already stopped looking. As of this writing no such
-channel exists. This paragraph records that gap; it does not close it.
+who can be reached. It has to exist **before** the first third-party grant rather than after
+the first bug, because a channel announced in response to an incident reaches no readers: the
+people who need it are the ones who already stopped looking. As of this writing no such
+channel exists, and nothing in this document closes that gap.
 
 **Anyone integrating has to redeploy or reconfigure.** The address appears in this repo's
 scripts, in `evidence/`, and in anything anyone builds. All of it has to move.
@@ -184,25 +184,25 @@ scripts, in `evidence/`, and in anything anyone builds. All of it has to move.
 storage, so a re-granted mandate starts at zero. A payer who intended "this agent may spend
 10,000 ever" and had already spent 8,000 gets a fresh 10,000 on the new contract unless they
 grant 2,000 instead. The old figures stay readable forever via `getMandate` on the old
-address, so this is recoverable — but only if you remember to look, which is why it is step 4
-of the runbook rather than a footnote.
+address, so this is recoverable, though only if you remember to look, which is what step 4 of
+the runbook is for.
 
-**Rolling windows restart too, and that is worth a sentence of its own.** The ring buffer
-that enforces "no more than 15,000 per 24 hours" is storage in the old contract. Re-granting
-resets it, so the first day on the new contract permits a full window's worth on top of
-whatever was already spent that day on the old one. For a low-frequency mandate this is
-noise; for one running near its rate limit it is a real, if one-off, doubling.
+**Rolling windows restart too.** The ring buffer that enforces "no more than 15,000 per 24
+hours" is storage in the old contract. Re-granting resets it, so the first day on the new
+contract permits a full window's worth on top of whatever was already spent that day on the
+old one. For a low-frequency mandate this is noise; for one running near its rate limit it is
+a real, if one-off, doubling.
 
 ## 5. Why there is no upgrade key anyway
 
-Every cost in §4 is real, and I would still not add one.
+Every cost in §4 is real, and the design still declines an upgrade key.
 
 Remit's entire proposition is that a payer's limits are properties of code rather than
 promises from an operator. When you grant a mandate with a 5,000 per-transaction cap, a
 three-address allowlist, a 24-hour ceiling and an expiry ninety days out — v2 requires that
-last one, or a lifetime cap in its place, because the first three bound how fast money leaves
-and never how much — the reason those hold is that the bytecode
-enforcing them cannot be replaced. A contract that can be upgraded can be upgraded to remove
+last one, or a lifetime cap in its place, because the first three bound how fast money
+leaves and never how much — the reason those hold is that the bytecode enforcing them
+cannot be replaced. A contract that can be upgraded can be upgraded to remove
 the cap check — so on an upgradeable Remit, the accurate description of a mandate is *capped,
 unless whoever holds the key decides otherwise*, and the payer's real counterparty is the
 key, not the code they read. That is the same trust relationship as a custodial policy
@@ -215,19 +215,19 @@ which makes it the highest-value single target in the system, permanently, and i
 way whether or not it is ever used. Approving an ERC-20 allowance to an upgradeable contract
 is approving it to whatever that contract may later become.
 
-So the choice is not "upgradeable or not". It is which failure you prefer: patchable bugs
-plus a standing trusted party, or unpatchable bugs plus no trusted party. For a primitive
-whose only job is to bound what someone else may take from your account, the second is the
-one that can be described honestly to the person taking the risk.
+The choice is therefore which failure you prefer: patchable bugs plus a standing trusted
+party, or unpatchable bugs plus no trusted party. For a primitive whose only job is to bound
+what someone else may take from your account, the second is the one that can be described
+accurately to the person taking the risk.
 
-Two things this argument does **not** establish, stated because leaving them implicit would
-overstate it. It does not establish that immutability makes v1 safe — §4's costs are the
-price of a *guarantee about the caps*, not evidence that the caps are correctly implemented,
-and `THREAT-MODEL.md` says they are not yet. And it does not establish that no upgradeable
-design could be better: a timelocked, publicly-announced upgrade with a payer veto window is
-a real design that real protocols use, and the reason to decline it here is that it
-reintroduces a privileged party and a governance surface for a contract whose whole appeal is
-having neither. That is a judgement about this project's goals, not a proof.
+This argument does **not** establish two further claims. It does not establish that
+immutability makes v1 safe — §4's costs are the price of a *guarantee about the caps* rather
+than evidence that the caps are correctly implemented, and `THREAT-MODEL.md` says they are
+not yet. It also does not establish that no upgradeable design could be better: a timelocked,
+publicly-announced upgrade with a payer veto window is a real design that real protocols use,
+and the reason to decline it here is that it reintroduces a privileged party and a governance
+surface for a contract whose whole appeal is having neither. That is a judgement about this
+project's goals, not a proof.
 
 ## 6. What bounds the damage
 
@@ -235,19 +235,20 @@ The reason unpatchable bugs are survivable here is the shape of the exposure, an
 from most immutable contracts people are right to worry about.
 
 **The contract holds nothing.** A spend is a single
-`usdc.transferFrom(m.payer, recipient, amount)` at line 514. Verified against receipts rather
-than asserted: across the five live spends there are ten ERC-20 `Transfer` logs, every one of
-them has the payer as `from` and the vendor as `to` — all ten `(from, to)` pairs are
-byte-identical — and the contract's own address appears as neither party in any of them, zero
-times in five receipts. Each spend emits exactly one `Spend` event and exactly two
-`Transfer`s, the second being Arc's 18-decimal native emitter reporting the same movement at
-a different scale. Evidence: `evidence/spend.log`, `ref-spend.log`, `cosign-spend.log`,
-`marginal-a.log`, `subthreshold.log`.
+`usdc.transferFrom(m.payer, recipient, amount)` at line 514, verified against receipts
+rather than asserted: across the five live spends there are ten ERC-20 `Transfer` logs,
+every one of them has the payer as `from` and the vendor as `to` — all ten `(from, to)`
+pairs are byte-identical — and the contract's own address appears as neither party in any
+of them, zero times in five receipts. Each spend emits exactly one `Spend` event and exactly
+two `Transfer`s, the second being Arc's 18-decimal native emitter reporting the same movement
+at a different scale. The evidence is in `evidence/spend.log`, `ref-spend.log`,
+`cosign-spend.log`, `marginal-a.log`, and `subthreshold.log`.
 
-So there is no pool to drain, no TVL, no liquidity, no share accounting, and nothing that can
-be stranded at an address nobody controls. Compare an immutable lending market, where a bug
-means depositors' funds are permanently unreachable. Here, the worst case is that a payer's
-own standing authorisation is abused, and the recovery is to withdraw the authorisation.
+There is therefore no pool to drain, no TVL, no liquidity, no share accounting, and nothing
+that can be stranded at an address with no controller. Compare an immutable lending market,
+where a bug means depositors' funds are permanently unreachable. Here, the worst case is
+that a payer's own standing authorisation is abused, and the recovery is to withdraw the
+authorisation.
 
 **There is no cross-payer reach.** The `from` in that transfer is `m.payer`, a field stored
 at grant time — never an argument the caller supplies. A defect in one mandate cannot reach a
@@ -257,11 +258,11 @@ created it.
 **The ceiling on any single payer's exposure is
 `min(their allowance to Remit, their USDC balance)`**, and both are things the payer sets.
 
-**What is *not* bounded, stated plainly because it is the sharpest edge in the design:** that
-allowance is shared across *all* of that payer's mandates. Remit does not partition it. This
-was demonstrated live on 2026-08-24 — with the allowance at 90,000, two separate mandates each
-reported `spendable` = 90,000, summing to 180,000, and 50,000 dry-runs succeeded against both,
-which is 100,000 simulated against a 90,000 allowance (`evidence/ceiling.log`, `race.log`).
+**What is *not* bounded is the allowance itself:** it is shared across *all* of that payer's
+mandates, and Remit does not partition it. This was demonstrated live on 2026-08-24 — with
+the allowance at 90,000, two separate mandates each reported `spendable` = 90,000, summing
+to 180,000, and 50,000 dry-runs succeeded against both, which is 100,000 simulated against a
+90,000 allowance (`evidence/ceiling.log`, `race.log`).
 
 Be precise about what that does and does not mean, because the loose version of it is
 alarmist. No funds beyond the allowance can actually leave: whichever `transferFrom` arrives
@@ -276,8 +277,8 @@ true joint ceiling — and it is a view, so it corrects the reporting, not the s
 Circle's own wallet documentation makes a stronger version of the same point:
 an ERC-20 allowance is not a cap on total USDC spending, because on Arc the same balance can
 also leave as native value, and any module with execution rights on a smart-contract account
-can move it regardless of allowance state. So for a smart-contract payer, the allowance is not
-a safety guarantee at all. `L3-VAULT.md` makes a contract the payer, which is precisely why
+can move it regardless of allowance state. For a smart-contract payer the allowance is not a
+safety guarantee at all. `L3-VAULT.md` makes a contract the payer, which is precisely why
 that boundary is written down there too.
 
 ## 7. The two kill switches
@@ -298,31 +299,31 @@ chain. It is not true of the *mempool*. Arc has a mempool and a rotating propose
 spend submitted before your revocation can still be included before it. Revocation is
 immediate on inclusion, not on submission. Do not plan around it being instantaneous.
 
-**`approve(remit, 0)` on USDC** — and this is the important one, because **it is not in our
-code**. The allowance lives in Arc's USDC contract at `0x3600…0000`. A spend is
+**`approve(remit, 0)` on USDC** — the important one, because **it is not in Remit's code at
+all**. The allowance lives in Arc's USDC contract at `0x3600…0000`; a spend is
 `transferFrom`, and `transferFrom` cannot exceed the allowance, so zeroing it severs every
 mandate at once and it keeps working even if `MandateManager` were broken in a way that made
-`revoke` unreachable. It depends on Circle's token behaving as an ERC-20, not on anything I
-wrote.
+`revoke` unreachable. It depends on Circle's token behaving as an ERC-20 rather than on
+anything in this repository.
 
 That is strictly stronger than the pause function this contract does not have. A pause
 depends on the pauser being alive, reachable, honest and awake at the moment it matters; the
 allowance depends on you sending one transaction. It is also why the migration runbook does
 the allowance first.
 
-What both switches assume, so that it is not left implicit: that the payer's own account is
-secure and can still send transactions, that Arc is producing blocks, and that USDC behaves
-as specified. Those are trust boundaries, they are enumerated in `THREAT-MODEL.md` §2, and no
-amount of contract design removes them.
+Both switches assume that the payer's own account is secure and can still send
+transactions, that Arc is producing blocks, and that USDC behaves as specified. Those are
+trust boundaries, they are enumerated in `THREAT-MODEL.md` §2, and no amount of contract
+design removes them.
 
 ## 8. Migration runbook
 
-To be used if v1 ever needs abandoning. The ordering is deliberate: the step that does not
+Use this if v1 ever needs abandoning. The ordering is deliberate: the step that does not
 depend on `MandateManager` being correct comes first.
 
 One mechanical warning that applies to every step involving `--account`: those commands prompt
 for the keystore password, and a hidden prompt consumes whatever is still queued in the
-terminal's input buffer. So paste them **one at a time, as the last line of the paste**, or
+terminal's input buffer. Paste them **one at a time, as the last line of the paste**, or
 wrap them in a script and invoke that as a single command. The scripts already in this repo
 (`revoke.sh`, `cosign-withdraw.sh`) exist for exactly that reason.
 
@@ -348,16 +349,17 @@ wrap them in a script and invoke that as a single command. The scripts already i
    Expect `0`. At this point nothing can be spent through the old contract regardless of what
    its mandates say.
 
-3. **Revoke each live mandate** on the old contract. This is now belt-and-braces rather than
-   load-bearing, and it is still worth doing: it makes `isLive` return false so that any
-   monitoring or accounting reading the old contract agrees with reality, and it leaves a
-   `MandateRevoked` event in the audit trail. Use a script rather than separate pasted
-   commands, so the keystore password prompts do not compete with queued terminal input —
-   `revoke.sh` is the established pattern.
+3. **Revoke each live mandate** on the old contract. The zeroed allowance has already
+   stopped every spend, so this step is a precaution rather than a requirement, and it
+   remains useful: it makes `isLive` return false so that any monitoring or accounting
+   reading the old contract agrees with reality, and it leaves a `MandateRevoked` event in
+   the audit trail. Use a script rather than separate pasted commands, so the keystore
+   password prompts do not compete with queued terminal input — `revoke.sh` is the
+   established pattern.
 
 4. **Read the old counters off before you stop caring about them.** `getMandate(id)` on the
-   old address returns `totalSpent` and `spendCount`, readable forever. Write them down. You
-   need them for step 6, and after the migration nothing will remind you they existed.
+   old address returns `totalSpent` and `spendCount`, readable forever. Write them down for
+   step 6, since after the migration nothing will remind you they existed.
 
 5. **Deploy the new contract and verify it**, then confirm its three immutables by reading
    them back — the check in `evidence/deploy-check.log` is the template. A deployment whose
@@ -382,13 +384,13 @@ wrap them in a script and invoke that as a single command. The scripts already i
 
 ## 9. What is permanently wrong in v1, and cannot be fixed
 
-Two things, recorded so they are not rediscovered as surprises.
+Two things in v1 are permanently wrong.
 
 **The header comment inside the verified source is wrong, and must stay wrong.** Correcting it
 would change the source, which changes solc's appended metadata hash, which breaks the
-byte-for-byte reproduction of the deployed bytecode. So these are permanent properties of
-`0x3744…0196`. They are comments and affect no execution, but a reader of the on-chain source
-is being misinformed and cannot be un-misinformed. It is worth separating two kinds:
+byte-for-byte reproduction of the deployed bytecode. These are therefore permanent properties
+of `0x3744…0196`. They are comments and affect no execution, but a reader of the on-chain
+source is being misinformed and cannot be un-misinformed. The errors fall into two kinds:
 
 *Wrong when it was deployed.* Line 11 and line 22 say the suite is **139 tests**; it was 140.
 Line 26 attributes **~142,500** gas to the policy machinery and **~32,700** to Arc's
@@ -396,30 +398,31 @@ native-USDC accounting; the correctly-derived figures are **~103,500** and **~13
 the originals were measurement errors rather than drift.
 
 *Accurate then, stale now.* Lines 14–15 say "one mandate has been granted and one spend
-executed live", and lines 21–22 say cosignature, both ERC-8004 gates and revoke have "zero
+executed live", and lines 21–22 say cosignature, both ERC-8004 checks and revoke have "zero
 live transactions". Both were true on 2026-08-24 and are badly understated today: the live
 surface is five mandates, five spends, three revocations, four cosignature transactions, 31
-in total, every one status 1, with both ERC-8004 gates having fired against Arc's real
-registries. All five state-changing functions have now run live — nothing has zero. Line 13
-likewise credits the reference model with 46 tests, which was right then and is 57 now.
+in total, every one status 1, with both ERC-8004 checks having fired against Arc's real
+registries. All five state-changing functions have now run live, so none of them stands at
+zero. Line 13 likewise credits the reference model with 46 tests, which was right then and
+is 57 now.
 
 The one part of that banner which is correct and which the v2 replacement keeps verbatim is
-the `NOT AUDITED` / no-real-money half. `CHANGELIST.md:87` quotes the stale banner
-deliberately and annotates it four lines later; that quotation is not a defect and should not
-be "fixed".
+the `NOT AUDITED` / no-real-money half.
+`CHANGELIST.md:87` quotes the stale banner deliberately and annotates it four lines later;
+that quotation is not a defect and should not be "fixed".
 
-The generalisable point, since this is the whole subject of the document: **a number written
-into an immutable contract is a permanent claim, so it has to be derived at the moment of
-writing rather than carried over.** This is precisely why v2's banner currently carries no
-test count and no gas table — an inherited number is worse than a missing one, because a
-missing number invites a measurement and an inherited one invites trust.
+**A number written into an immutable contract is a permanent claim, so it has to be derived
+at the moment of writing rather than carried over.** This is precisely why v2's banner
+currently carries no test count and no gas table — an inherited number is worse than a
+missing one, because a missing number invites a measurement and an inherited one invites
+trust.
 
 **`THREAT-MODEL.md`'s findings describe the deployed bytecode too.** They are being fixed in
 v2, in the working tree, at a future address. Nothing in that document is fixed in v1 and
 nothing in it can be. The ones that change which grants are legal — requiring a lifetime
 bound, meaning a total cap or an expiry and not merely a rate; refusing an `expiresAt` that
-nothing reads; refusing an unreachable cosign gate — are exactly the class of defect that
-costs one edit before a freeze and a migration after one.
+nothing reads; refusing an unreachable cosign requirement — are exactly the class of defect
+that costs one edit before a freeze and a migration after one.
 
 ## 10. What this document claims, and what it does not
 
@@ -438,4 +441,4 @@ same-author review cannot be the second pair of eyes it is meant to be.
 
 The sequencing follows directly: finish v2, fix everything `THREAT-MODEL.md` found, commission
 the audit, and only then consider a mainnet deployment — with low caps at first, since a
-staged rollout is the one cheap way left to discover what nobody caught.
+staged rollout is the one cheap way left to discover what review missed.

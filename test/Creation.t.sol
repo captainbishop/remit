@@ -31,7 +31,8 @@ contract CreationTest is Base {
     }
 
     /// The domain separator is mixed into every mandateId and every spend hash, so
-    /// changing the string silently invalidates every id already issued. Pin it.
+    /// changing the string invalidates every id already issued without producing an
+    /// error, and this test pins the value.
     function test_domainSeparator_isRemitV1() public view {
         assertEq(mm.DOMAIN(), keccak256("Remit:v1"), "DOMAIN must stay Remit:v1 once deployed");
     }
@@ -151,7 +152,7 @@ contract CreationTest is Base {
         // (4) Both together, because two bounds that each fail to bound a lifetime do not
         // combine into one that does. Built fresh rather than by mutating `win`: a memory
         // struct assignment in Solidity copies the pointer, so `both = win` would have
-        // silently edited case (3) as well.
+        // edited case (3) as well, with no failing test to show it.
         MandateManager.MandateParams memory both = emptyParams();
         both.perTxCap = usd(100);
         both.flags = F_PER_TX;
@@ -193,7 +194,7 @@ contract CreationTest is Base {
      * An `expiresAt` with F_EXPIRY unset is refused. NEW IN v2, F1 in THREAT-MODEL.md.
      *
      * v1 stored the value, emitted it in `MandateCreated`, and never read it — both
-     * `spend` and `isLive` gate the comparison on the flag. So `getMandate` could show a
+     * `spend` and `isLive` test the flag before comparing, so `getMandate` could show a
      * payer a mandate that expired last Tuesday and that spends forever. That is the
      * precise failure this primitive exists to prevent: a control that is displayed and
      * not enforced. The value and the flag now have to agree.
@@ -261,7 +262,7 @@ contract CreationTest is Base {
      * rule has nothing to say, and the only thing left that can refuse a zero spender is
      * the guard this test is about.
      *
-     * Worth being clear about what the guard prevents, since a mandate with no spender is
+     * What the guard prevents is narrower than it looks, since a mandate with no spender is
      * unspendable either way — `msg.sender` is never the zero address. It prevents a
      * grant that reads as live and can never be used: `isLive` returns true, `getMandate`
      * shows caps and a window, and every spend refuses. That is the shape this contract
@@ -279,8 +280,8 @@ contract CreationTest is Base {
     /**
      * Each flag must agree with the value it describes, in BOTH directions. A flag
      * set with a zero value would be a bound that never binds; a value set with no
-     * flag would be a limit that is silently ignored. Both are the failure mode
-     * this primitive exists to prevent, so both revert.
+     * flag would be a limit that is never read. Both are the failure mode this
+     * primitive exists to prevent, so both revert.
      */
     function test_createMandate_flagWithoutValue_reverts() public {
         MandateManager.MandateParams memory p = emptyParams();
@@ -333,19 +334,19 @@ contract CreationTest is Base {
      * The credential mirror of the two tests above, and the one agreement rule in
      * `createMandate` that had no revert test at all.
      *
-     * How that was found is worth recording, because reading the suite would not have
-     * shown it. `forge coverage` reports the contract at 100% of lines and 99.10% of
-     * branches, and the single unreached branch in the whole file was the revert arm of
-     * the credential rule. Its four neighbours — per-tx, total, cosigner, allowlist —
-     * each had at least one test that fired them; this one had none. A missing negative
-     * test is invisible to a green suite by construction, since nothing fails.
+     * Reading the suite would not have shown this. `forge coverage` reports the contract
+     * at 100% of lines and 99.10% of branches, and the single unreached branch in the
+     * whole file was the revert arm of the credential rule. Its four neighbours — per-tx,
+     * total, cosigner, allowlist — each had at least one test that fired them; this one
+     * had none. A missing negative test is invisible to a green suite by construction,
+     * since nothing fails.
      *
      * It also mattered more than the other four, because Gates.t.sol argues that the
      * documented no-agent-binding weakness stays bounded partly on the strength of
-     * "F_CREDENTIAL without a validator is refused at grant time". That claim was true
-     * and unpinned. Now it is pinned.
+     * "F_CREDENTIAL without a validator is refused at grant time". That claim was true and
+     * unpinned until this test pinned it.
      *
-     * Both directions are checked. A flag with no validator would be a gate that never
+     * Both directions are checked. A flag with no validator would be a check that never
      * runs while `getMandate` shows one. A validator with no flag is the shape that
      * misleads a reader in the other direction: an address sits in the struct, and
      * `spend` never consults it.
@@ -366,7 +367,7 @@ contract CreationTest is Base {
         mm.createMandate(bytes32("cr2"), p);
     }
 
-    // ------------------------------------------- the cosign gate as a whole
+    // ------------------------------------ the cosign requirement as a whole
     //
     // NEW IN v2. The two tests above check the flag against the cosigner ADDRESS, which
     // is where v1 stopped. Enumerating the question properly — in how many ways can a
@@ -375,12 +376,12 @@ contract CreationTest is Base {
     // cosigner and a plausible threshold in every case. The changelist named only the
     // third, and named it wrongly.
 
-    /// A threshold with no gate behind it. The field is stored, a reader sees a number,
-    /// and no spend is ever measured against it. Deliberately not folded into the
-    /// biconditional on the address, because zero is MEANINGFUL when F_COSIGN is set — it
-    /// means every spend needs a signature, since the gate tests `amount > threshold`
-    /// strictly and an amount is at least 1. So the threshold gets a one-directional rule
-    /// where the address gets an iff.
+    /// A threshold with no requirement behind it: the field is stored, a reader sees a
+    /// number, and no spend is ever measured against it. This is deliberately kept out of
+    /// the biconditional on the address, because zero is MEANINGFUL when F_COSIGN is set —
+    /// it means every spend needs a signature, since the check tests `amount > threshold`
+    /// strictly and an amount is at least 1. The threshold therefore gets a
+    /// one-directional rule where the address gets an iff.
     function test_createMandate_thresholdWithoutCosignFlag_reverts() public {
         MandateManager.MandateParams memory p = simpleParams();
         p.cosignThreshold = usd(10); // F_COSIGN not set, cosigner still zero
@@ -395,9 +396,9 @@ contract CreationTest is Base {
      *
      * `approveCosign` authorises on `msg.sender == m.cosigner` and nothing else, so a
      * mandate whose cosigner is its spender lets the agent approve its own spend hash and
-     * then spend it. Two transactions instead of one, and no second party anywhere. That
-     * is not a weaker control, it is the absence of one wearing its clothes, and it is
-     * exactly as invisible in `getMandate` as a supervised mandate would be.
+     * then spend it, taking two transactions instead of one with no second party anywhere.
+     * That is the absence of a control wearing the clothes of one, and it is exactly as
+     * invisible in `getMandate` as a supervised mandate would be.
      *
      * The distinction that makes this a rule rather than an over-reach: `cosigner ==
      * payer` is legitimate and stays legal, because the payer is a second party to the
@@ -416,10 +417,10 @@ contract CreationTest is Base {
     }
 
     /**
-     * The gate must be able to FIRE, measured against the whole policy.
+     * The requirement must be able to FIRE, measured against the whole policy.
      *
-     * `spend` demands a signature when `amount > cosignThreshold`, strictly, so the gate
-     * is dead unless the policy permits at least one amount above the threshold:
+     * `spend` demands a signature when `amount > cosignThreshold`, strictly, so the
+     * requirement is dead unless the policy permits at least one amount above the threshold:
      *
      *   effectiveMax = min(2^96 - 1, perTxCap if F_PER_TX, totalCap if F_TOTAL, every
      *                      window cap)   and the grant is refused when
@@ -427,10 +428,10 @@ contract CreationTest is Base {
      *
      * WHY THE CHANGELIST'S CONDITION WAS WRONG TWICE. It proposed `perTxCap <
      * cosignThreshold`. The comparison is backwards — equality is dead too, and this
-     * repository already held the receipt for that, at `DESIGN.md:1272`, where a 50,000
-     * spend against a 50,000 threshold did not trip the gate on Arc Testnet. And
-     * `perTxCap` is not the only ceiling, so the check misses whole families of dead
-     * configuration. `L3-VAULT.md` inherited the same error from the changelist.
+     * repository already held the receipt for that, at `DESIGN.md:981`, where a 50,000
+     * spend against a 50,000 threshold did not trip the requirement on Arc Testnet.
+     * `perTxCap` is also not the only ceiling, so the check misses whole families of
+     * dead configuration. `L3-VAULT.md` inherited the same error from the changelist.
      */
     function test_createMandate_deadCosignGate_perTxCapBoundaryIsExact() public {
         MandateManager.MandateParams memory p = withCosign(simpleParams(), boss, usd(100));
@@ -438,9 +439,9 @@ contract CreationTest is Base {
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("ct3"), p); // perTxCap 100 == threshold 100: dead
 
-        // One base unit lower and the gate is alive, which is what makes the bound exact
-        // rather than merely conservative. A guard written with `<` would accept the case
-        // above and this one, and the difference between them is the entire point.
+        // One base unit lower and the requirement is alive, which is what makes the bound
+        // exact rather than merely conservative. A guard written with `<` would accept the
+        // case above and this one, and the difference between them is the entire point.
         bytes32 id = grant(withCosign(simpleParams(), boss, usd(100) - 1));
         bytes32 nonce = nextNonce();
         bytes32 hash = mm.spendHash(id, vendor, usd(100), REF, nonce);
@@ -452,8 +453,9 @@ contract CreationTest is Base {
     /// With no per-transaction cap the LIFETIME cap binds. This shape passes both
     /// spellings of the naive check for the same reason: `perTxCap` is absent entirely,
     /// so a condition phrased against it compares zero to a threshold and concludes the
-    /// gate is fine. Evaluated at `totalSpent == 0` because reachability asks whether the
-    /// gate can EVER fire, and a lifetime cap is loosest on the first spend.
+    /// requirement is fine. Evaluated at `totalSpent == 0` because reachability asks
+    /// whether the requirement can EVER fire, and a lifetime cap is loosest on the first
+    /// spend.
     function test_createMandate_deadCosignGate_lifetimeCapBinds() public {
         MandateManager.MandateParams memory p = emptyParams();
         p.totalCap = usd(100);
@@ -464,9 +466,9 @@ contract CreationTest is Base {
         mm.createMandate(bytes32("ct4"), p);
     }
 
-    /// And so does a window cap — as a MINIMUM over the windows, not the first or the
-    /// last of them, and the minimum crosses cap KINDS: a generous per-transaction cap
-    /// does not rescue a threshold the tightest window has already put out of reach.
+    /// A window cap binds in the same way — as a MINIMUM over the windows, not the first
+    /// or the last of them, and the minimum crosses cap KINDS: a generous per-transaction
+    /// cap does not rescue a threshold the tightest window has already put out of reach.
     function test_createMandate_deadCosignGate_windowCapBinds() public {
         vm.startPrank(payer);
 
@@ -501,11 +503,11 @@ contract CreationTest is Base {
      * check is not simply a loop over the caps the payer set.
      *
      * A mandate bounded only by an expiry has no amount cap at all, so every threshold
-     * below the uint96 ceiling is reachable and the grant is fine. But the ceiling ITSELF
-     * is not reachable, because `spend` refuses amounts above it outright with
+     * below the uint96 ceiling is reachable and the grant is fine. The ceiling ITSELF is
+     * not reachable, because `spend` refuses amounts above it outright with
      * `AmountTooLarge` — the bound exists even where the payer set none. That term has no
      * analogue in a specification with arbitrary-precision integers, which is precisely
-     * the kind of thing the reference model cannot be trusted to have invented on its
+     * the class of rule the reference model cannot be trusted to have invented on its
      * own; it was added to `reference/policy.js` from this direction, not the reverse.
      */
     function test_createMandate_deadCosignGate_unboundedAmountIsStillAccepted() public {
@@ -520,7 +522,7 @@ contract CreationTest is Base {
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("ct8"), withCosign(p, boss, type(uint96).max));
 
-        // And one below it is fine, so this boundary is exact too.
+        // One below it is fine, so this boundary is exact too.
         mm.createMandate(bytes32("ct9"), withCosign(p, boss, type(uint96).max - 1));
         vm.stopPrank();
     }
@@ -555,7 +557,7 @@ contract CreationTest is Base {
     }
 
     /// minResponse of 0 would accept a FAILED attestation, since ERC-8004 uses 0
-    /// for a negative result. A credential gate that accepts failure is theater.
+    /// for a negative result. A credential check that accepts failure enforces nothing.
     function test_createMandate_credentialWithZeroMinResponse_reverts() public {
         MandateManager.MandateParams memory p = simpleParams();
         p = withCredential(p, boss, KYC_HASH, AGENT_ID, 0);
@@ -574,7 +576,7 @@ contract CreationTest is Base {
         grantReverts(p, MandateManager.BadConfig.selector);
     }
 
-    /// And exactly 100 stays creatable, so the bound above refuses the unmeetable values without
+    /// Exactly 100 stays creatable, so the bound above refuses the unmeetable values without
     /// taking the ordinary one with it.
     function test_createMandate_credentialMinResponseAtThePassScore_isAccepted() public {
         MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0);
@@ -592,9 +594,9 @@ contract CreationTest is Base {
     }
 
     /// F32. `flags` is caller-supplied and nothing tied it to the structs, so a payer who filled
-    /// the identity gate and forgot its flag got a mandate with no identity gate at all — the
-    /// data dropped on the floor here, and `MandateCreated` reporting flags rather than fields,
-    /// so nothing in the receipt said the gate was missing.
+    /// the identity gate and forgot its flag got a mandate with no identity gate at all: the
+    /// data was dropped on the floor here, and `MandateCreated` reports flags rather than
+    /// fields, so the receipt gave no sign that the identity gate was missing.
     function test_createMandate_identityDataWithoutTheFlag_reverts() public {
         MandateManager.MandateParams memory p = withIdentity(simpleParams(), AGENT_ID, agent);
         p.flags &= ~F_IDENTITY; // the struct stays filled; only the bit is gone
@@ -608,16 +610,16 @@ contract CreationTest is Base {
         grantReverts(p, MandateManager.BadConfig.selector);
     }
 
-    /// And the ordinary case is untouched: no gate data, no gate flags, still creatable. Without
-    /// this the two tests above would also pass against a `createMandate` that refused every
-    /// grant.
+    /// The ordinary case is untouched: a mandate with neither identity nor credential
+    /// data, and neither flag set, is still creatable. Without this the two tests above
+    /// would also pass against a `createMandate` that refused every grant.
     function test_createMandate_noGateDataAndNoGateFlags_isAccepted() public {
         bytes32 id = grant(simpleParams());
         assertTrue(mm.isLive(id));
     }
 
-    /// A gate that cannot be evaluated must not be grantable, or the mandate looks
-    /// gated and is not.
+    /// A requirement that cannot be evaluated must not be grantable, or the mandate
+    /// displays a control the contract will never enforce.
     function test_createMandate_gateWithoutRegistry_reverts() public {
         MandateManager bare = new MandateManager(address(token), address(0), address(0));
 

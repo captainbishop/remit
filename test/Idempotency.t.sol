@@ -55,7 +55,7 @@ contract IdempotencyTest is Base {
         mm.spend(id, other, usd(99), bytes32("different-ref"), nonce);
     }
 
-    /// The nonce is checked before the gates and the caps, so a replay of a nonce
+    /// The nonce is checked ahead of every policy check, so a replay of a nonce
     /// that is ALSO over the cap reports the replay. The agent's correct response
     /// differs — mint a new nonce versus spend less — so the order matters.
     function test_nonceIsCheckedBeforeTheCaps() public {
@@ -97,7 +97,7 @@ contract IdempotencyTest is Base {
     // ------------------------------------------------- a denial costs nothing
 
     /**
-     * The central atomicity claim, checked against every kind of policy denial.
+     * The central atomicity claim, checked against every class of policy denial.
      *
      * After each refused attempt: the nonce is still free, the window still has its
      * full headroom, and the mandate's counters are untouched. Then the same nonce is
@@ -225,7 +225,7 @@ contract IdempotencyTest is Base {
      * Some ERC-20s signal failure by returning false instead of reverting. Arc's USDC
      * does not, but this contract checks the return value anyway, and an unchecked
      * branch is indistinguishable from a missing one. Without this test that check is
-     * dead code that nobody can prove works.
+     * dead code with no evidence behind it.
      */
     function test_transferReturningFalse_raisesTransferFailed() public {
         bytes32 id = grant(simpleParams());
@@ -247,16 +247,16 @@ contract IdempotencyTest is Base {
      *
      * `test_transferReturningFalse_raisesTransferFailed` above already shows the nonce
      * survives such a failure. This shows the consequence that actually matters — the
-     * identical spend then settles, so a retry loop never has to invent a new nonce
-     * and risk double-paying. On Arc this is not hypothetical: the blocklist is
+     * identical spend then settles, so a retry loop never has to invent a new nonce or
+     * risk double-paying. On Arc this is not hypothetical: the blocklist is
      * enforced at runtime, so an otherwise valid spend can fail in the token and
      * succeed on a later attempt.
      *
      * The Spend event is emitted BEFORE the transfer, so an indexer sees the
-     * authorisation decision ahead of the money movement. Because the transfer can
-     * still revert, an emitted Spend only ever appears in a transaction that
-     * succeeded — which is what makes the event stream reconcilable against token
-     * transfers without needing Arc's Memo precompile at all.
+     * authorisation decision ahead of the money movement. The transfer can still
+     * revert, so an emitted Spend only ever appears in a transaction that succeeded,
+     * making the event stream reconcilable against token transfers without needing
+     * Arc's Memo precompile at all.
      *
      * That last property is worth stating and cannot be tested here. This test
      * previously tried, by asserting `vm.recordLogs()` returned nothing, and the

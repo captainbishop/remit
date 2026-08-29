@@ -10,8 +10,8 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  *
  * Two things make this different from the bounded loop in WindowFuzz.t.sol. The fuzzer
  * chooses the *sequence* — how many spends, interleaved with how many idle gaps, in
- * what order — rather than following a shape I decided on. And the sequence persists
- * across calls, so state accumulated by call 40 is still there at call 400.
+ * what order — rather than following a shape fixed in advance, and that sequence
+ * persists across calls, so state accumulated by call 40 is still there at call 400.
  *
  * The handler is itself the mandate's spender. Pranking from inside a handler is
  * possible but fragile once the fuzzer is choosing call order, so instead the mandate
@@ -39,10 +39,10 @@ contract WindowHandler {
     uint256 public refusals;
 
     /// The first refusal that was NOT a rolling-window denial, or zero if there has
-    /// never been one. This is the anti-vacuity guard: if the handler were silently
-    /// failing for some unrelated reason — an unset mandate, a dry account, a nonce
-    /// collision — every window property below would hold trivially and the run would
-    /// report success while testing nothing.
+    /// never been one. This is the anti-vacuity guard: if the handler were failing for
+    /// some unrelated reason — an unset mandate, a dry account, a nonce collision —
+    /// every window property below would hold trivially and the run would report
+    /// success while testing nothing.
     bytes4 public unexpectedRefusal;
 
     uint256 private _nonce;
@@ -207,14 +207,14 @@ contract WindowInvariantTest is Base {
         // so even the deep profile's depth of 256 lands near 25,000,000 — five orders of
         // magnitude short of the horizon. If that ever stopped being true,
         // `invariant_theWindowIsTheOnlyThingThatEverRefuses` below would report the
-        // `Expired` selector rather than let the run go quietly green.
+        // `Expired` selector instead of allowing a green run that proves nothing.
         p = withExpiry(p);
         id = grant(p);
         handler.setMandate(id);
 
         // Restrict the fuzzer to the handler's three moves. Left unrestricted it would
-        // also call MandateManager and the mocks directly and spend most of its budget
-        // on calls that revert at the front door and prove nothing.
+        // call MandateManager and the mocks directly as well, spending most of its
+        // budget on calls that revert at the front door and prove nothing.
         targetContract(address(handler));
         bytes4[] memory sels = new bytes4[](3);
         sels[0] = WindowHandler.spendSome.selector;
@@ -292,7 +292,7 @@ contract WindowInvariantTest is Base {
      * A stateful fuzz run that accepts nothing passes every invariant above.
      *
      * The invariants cannot assert "at least one spend happened" — that would fail on
-     * the first call if the fuzzer happened to pick `idle`. So the handler is driven
+     * the first call if the fuzzer happened to pick `idle`, so the handler is driven
      * by hand here instead, proving it can accept, can be refused, and is refused only
      * by the window. If this test fails, the invariant run is not testing the engine.
      */
@@ -307,7 +307,7 @@ contract WindowInvariantTest is Base {
         assertEq(bytes32(handler.unexpectedRefusal()), bytes32(0), "only the window may refuse");
     }
 
-    /// And the greedy move must reach the refusing state, or the cap is never actually
+    /// The greedy move must reach the refusing state, or the cap is never actually
     /// tested. With no time passing, the first greedy spend takes the entire cap and
     /// every probe after it must be denied.
     function test_greedyHandlerReachesTheCap_soRefusalIsExercised() public {

@@ -1,25 +1,25 @@
 # Evidence
 
 > *Line numbers into `contracts/MandateManager.sol` in this document refer to the **tagged
-> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — and here that is
-> not merely a convention but the only correct reading: every receipt in this folder was
-> produced by v1's bytecode, so v1's source is the thing being annotated. v2 work has shifted
-> the working tree's numbering; see FORGE.md.*
+> v1 source** — `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` — which is the
+> only correct reading here: every receipt in this folder was produced by v1's bytecode, so
+> v1's source is the thing being annotated. v2 work has shifted the working tree's
+> numbering; see FORGE.md.*
 
-Every number published in `DESIGN.md`, `CHANGELIST.md`, `PRIVACY.md`, `FORGE.md`
-and the comment block in `foundry.toml` was measured, not estimated. This folder
-is the raw output those numbers came from, kept so that a reader — or an auditor —
-can check a claim against the thing that produced it rather than taking it on
-trust.
+Every number published in `DESIGN.md`, `CHANGELIST.md`, `PRIVACY.md`, `FORGE.md`,
+together with the comment block in `foundry.toml`, was measured rather than
+estimated. This folder is the raw output those numbers came from, kept so that a
+reader — or an auditor — can check a claim against the thing that produced it
+rather than taking it on trust.
 
-It is curated. Five files were deliberately left out because they are compiler and
-CLI chatter that regenerates identically on demand and records no unique
-observation: `build.log`, `create-help.log`, `test.log`, `testcount.log`,
+Five files were deliberately left out of this curated folder because they are
+compiler and CLI chatter that regenerates identically on demand and records no
+unique observation: `build.log`, `create-help.log`, `test.log`, `testcount.log`,
 `pre-deploy.log`. Everything kept here is either a receipt from Arc Testnet, a
 state read against the live deployment, or a measurement that a document quotes.
 
-Two caveats on reading them. First, `forge --gas-report` treats the two kinds of
-call differently, and getting this backwards cost this project a published
+Two caveats apply when reading them. First, `forge --gas-report` treats the two
+kinds of call differently, and getting this backwards cost this project a published
 conclusion. For **state-changing** functions the figures are transaction-equivalent:
 they include the 21,000-gas intrinsic floor plus per-calldata-byte cost, so a row is
 directly comparable to a receipt's `gasUsed`, and three of them have now been
@@ -29,15 +29,15 @@ that, and a `staticcall` inside a test is not a transaction. Second, `gas.log` *
 now generated at a pinned `--fuzz-seed 5042002`, and pinning it is necessary but not
 sufficient: three runs at the same seed against the same bytecode still produced three
 different tables. What the seed pins is `# Calls`, `Max` in every row, and `Min` in 48
-of 49; `Avg` and both `Median` columns never reproduce. So compare **Min, Max and
+of 49; `Avg` and both `Median` columns never reproduce. Compare **Min, Max and
 `# Calls`** — never `Avg` or `Median` — and read `gas.log`'s own header before comparing
 it against anything.
 
 That caveat said "the fuzz seed is not pinned … compare the Min column" until
 2026-08-26, which had been false since the regeneration in `1f19221` and was
-contradicted by this file's own entry for `gas.log` two screens below. Same failure as
-`DESIGN.md` stating a guard at line 1011 and refuting it at 1272: the correction landed
-where the work happened and not in the summary at the top.
+contradicted by this file's own entry for `gas.log` two screens below. That is the same
+failure as `DESIGN.md` stating a guard at line 1069 and refuting it at 981: the
+correction landed where the work happened rather than in the summary at the top.
 
 Unless a row names a different contract, everything below is against `MandateManager` at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, Arc Testnet, chain 5042002.
@@ -93,12 +93,12 @@ explanation, and the 2,097 "unattributed cold-slot delta" left open in the
 `cosign-parity.log` row above is harness error too. The bespoke harness was the least
 accurate instrument used in this project and the accurate one was in the same folder.
 
-Two things the replacement measurement established that the original method could not
+The replacement measurement established two things that the original method could not
 have caught. The premium is **very nearly per-call, not per-slot**: `approve` costs the
 same 9,300 whether it writes a virgin slot or overwrites a live one, and a
 `transferFrom` touching three slots costs 13,110 rather than the ~27,900 a per-slot
 model predicts. DESIGN.md previously stated the opposite and instructed re-derivers to
-assume per-slot. And **17,100 was never a premium** — it is the storage-class gap,
+assume per-slot. **17,100 was never a premium** — it is the storage-class gap,
 identical on both tokens. The discarded route reached 10,757 + 6,337 = 17,094 and
 rounded, landing six gas from a constant with nothing to do with Arc. That near-collision
 is the reason this folder exists: arithmetic that lands on a famous number is a prompt
@@ -127,7 +127,7 @@ to re-derive, not a confirmation.
 | `cosign-spend.log` | The cosigned spend receipt. |
 | `subthreshold.log` | A spend below the threshold succeeding without any cosignature, which is what makes the gate meaningful rather than merely present. |
 
-## The ERC-8004 gates
+## The ERC-8004 identity and credential checks
 
 | File | What it establishes |
 |---|---|
@@ -172,7 +172,7 @@ Two corrections arrived with this run. The transaction total is **31**, not 27: 
 distinct `transactionHash` values across this directory and pairing each with its target shows
 MockUSDC's deployment was included in the old figure while `MandateManager`'s own was omitted
 — both seen here, the second in `deploy-check.log` and the first in the deploy output of
-`premium.log`. And the state-changing surface is **five** functions, not six: parsing every
+`premium.log`. The state-changing surface is **five** functions, not six: parsing every
 declaration in the contract for `external` or `public` without `view` or `pure` gives
 `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`, and the count beside
 that list had been wrong for weeks. All five now have live transactions.
@@ -181,11 +181,12 @@ that list had been wrong for weeks. All five now have live transactions.
 and must stay.** #28 deleted that function from the source tree and replaced it with
 `approveCosignFor`; the receipts here were produced by v1's bytecode at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, which still holds the old function and always
-will. Two consequences. The parse described above returns `approveCosignFor` if you run it on
-the working tree, so run it on `git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to
-reproduce the five names. And "all five now have live transactions" is true of v1 and **false of
-v2** — four of v2's five paths have a receipt for the same signature, and the cosign approval
-path has none.
+will. The first consequence is that the parse described above returns
+`approveCosignFor` if you run it on the working tree, so run it on
+`git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to reproduce the five names.
+The second is that "all five now have live transactions" is true of v1 and **false of
+v2** — four of v2's five paths have a receipt for the same signature, and the cosign
+approval path has none.
 
 A third correction came out of these logs a day later, and it reverses a published finding.
 Compare each receipt above against the corresponding row of `gas.log`, subtracting each
@@ -198,20 +199,21 @@ transaction's own intrinsic cost from both:
 | `approveCosign` | 53,114 | 53,102 | 31,026 |
 | `withdrawCosign` | 26,901 | 26,889 | 4,813 |
 
-Four exact agreements, with the twelve-gas receipt gaps accounted for by one zero calldata
-byte. **A mock gas report and an Arc receipt for a function that touches no token are the same
-number**, which is only possible if the report includes intrinsic gas — so the caveat at the
-top of this file was wrong for state-changing functions, and task #31's "coincidence" was
-never a coincidence. The practical upside: `forge test --gas-report` now predicts an Arc
-receipt to the gas for anything that does not touch USDC, which is how v2's `createMandate`,
-`revoke`, `approveCosign` and `withdrawCosign` costs can be known before deploying.
+The table shows four exact agreements, with the twelve-gas receipt gaps accounted for by one
+zero calldata byte. **A mock gas report and an Arc receipt for a function that touches no
+token are the same number**, which is only possible if the report includes intrinsic gas — so
+the caveat at the top of this file was wrong for state-changing functions, and task #31's
+"coincidence" was never a coincidence. The practical upside is that `forge test --gas-report`
+now predicts an Arc receipt to the gas for anything that does not touch USDC, which is how
+v2's `createMandate`, `revoke`, `approveCosign` and `withdrawCosign` costs can be known
+before deploying.
 
-*Three of those four, strictly.* The agreement is a property of the *report* — it includes
-intrinsic gas — so the method transfers to any function. The demonstration does not:
-`approveCosign` is gone, and `approveCosignFor` encodes 196 calldata bytes against 68, takes an
-extra cold SLOAD, computes an extra keccak and logs three data words instead of none. Its
-gas-report row is a prediction with no receipt to check it against, and there will not be one
-until v2 is deployed.
+*That applies to three of those four, strictly.* The agreement is a property of the
+*report* — it includes intrinsic gas — so the method transfers to any function. The
+demonstration does not: `approveCosign` is gone, and `approveCosignFor` encodes 196 calldata
+bytes against 68, takes an extra cold SLOAD, computes an extra keccak and logs three data
+words instead of none. Its gas-report row is a prediction with no receipt to check it
+against, and there will not be one until v2 is deployed.
 
 ## Toolchain
 

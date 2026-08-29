@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-vacuity-check.py — does every test in test/ actually assert something?
+vacuity-check.py — confirm that every test in test/ asserts something.
 
 A test body has no adversary. The only way it can hurt you is by passing without
 asserting anything, so this is the one sweep over the test suite that is worth
@@ -13,7 +13,7 @@ assertion volume, the vm.expectRevert breakdown, the custom-error orphan check,
 and a list of any test whose body cannot be shown to assert. Exit status is 1 if
 anything is vacuous or any error is orphaned, so it is usable in CI.
 
-WHY IT IS WRITTEN THIS WAY, which is the part worth keeping.
+WHY IT IS WRITTEN THIS WAY.
 
 Two earlier versions of this check hand-listed the assertion vocabulary, and both
 were wrong in the same direction. The first searched test bodies for the literal
@@ -22,19 +22,19 @@ in this suite route through Base.t.sol's payReverts helper, which contains no su
 string. The second added payReverts and a few others to the list, and two months of
 refactoring later it reported eight false positives, because five more helpers had
 been written in the meantime. A hand-maintained vocabulary decays every time
-somebody factors a repeated assertion out of a test.
+someone factors a repeated assertion out of a test.
 
-So this version derives the vocabulary instead. It extracts every function body
+This version derives the vocabulary instead. It extracts every function body
 under test/ by brace matching, seeds a set with the bodies that contain a Forge
-assertion primitive, then closes that set under calling — a function that calls a
-member of the set is itself a member — and only walks the tests afterwards. A
-helper written tomorrow is found tomorrow. A helper that quietly stops asserting
-drops out on its own, which is how trySpend came to be excluded: it makes a
-low-level call and hands back (ok, err) for the caller to judge, so crediting it
-as an assertion would let a test spend and assert nothing while passing this check.
+assertion primitive, then closes that set under calling — a function that calls
+a member of the set is itself a member — and only walks the tests afterwards. A
+helper written tomorrow is found tomorrow. A helper that stops asserting drops
+out on its own, which is how trySpend came to be excluded: it makes a low-level
+call and hands back (ok, err) for the caller to judge, so crediting it as an
+assertion would let a test spend and assert nothing while passing this check.
 
-The rule the two earlier versions cost us, stated once: a vacuity check has to
-know the harness's vocabulary, or it measures the harness instead of the tests.
+The rule both earlier versions establish: a vacuity check has to know the
+harness's vocabulary, or it measures the harness instead of the tests.
 """
 
 import re

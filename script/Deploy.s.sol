@@ -17,9 +17,9 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  * the explorer, `getMandate` answers, `isLive` answers — and moves no money, or worse,
  * moves the wrong token. A hand-typed hex string is the wrong place to put that risk.
  *
- * So the addresses live here, keyed by chain id, and `run()` refuses to deploy to a
- * chain it has no entry for. Refusing is the correct default: a deployment that does
- * not happen costs a minute, and a deployment wired to the wrong token cannot be
+ * The addresses therefore live here, keyed by chain id, and `run()` refuses to deploy
+ * to a chain it has no entry for. Refusing is the correct default: a deployment that
+ * does not happen costs a minute, and a deployment wired to the wrong token cannot be
  * undone.
  *
  * WHAT IT CHECKS, in order.
@@ -36,7 +36,7 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  * Reading them back does.
  *
  * The registries are allowed to be zero and the constructor accepts that; only USDC is
- * refused at zero. A zero registry disables the ERC-8004 credential gate rather than
+ * refused at zero. A zero registry disables the ERC-8004 credential check rather than
  * breaking it, which is why it is a configuration and not a mistake.
  */
 contract Deploy is Script {
@@ -52,7 +52,7 @@ contract Deploy is Script {
     // ---------------------------------------------------------------------
     // Pinned arguments. Every address below is commented with what it is and
     // how it was confirmed, because an uncommented constant in a deploy script
-    // is exactly the thing nobody re-checks.
+    // is exactly what a reviewer reads past without re-checking.
     // ---------------------------------------------------------------------
 
     /// Arc Testnet. The value `spend` hashes into every co-signature, so it is also
@@ -60,7 +60,7 @@ contract Deploy is Script {
     uint256 internal constant ARC_TESTNET = 5042002;
 
     /// Arc's native USDC, exposed as a standard ERC-20 at a fixed address rather than
-    /// deployed as an ordinary token. 6 decimals. This is the address the 31 live
+    /// deployed as an ordinary token, with 6 decimals. This is the address the 31 live
     /// transactions in evidence/ spent through, so it is confirmed by use, not by
     /// documentation alone.
     address internal constant ARC_TESTNET_USDC = 0x3600000000000000000000000000000000000000;
@@ -93,10 +93,10 @@ contract Deploy is Script {
      * published, and this project treats that as the larger risk. Arc's own tutorial
      * does it the other way; this is a considered deviation, not an oversight.
      *
-     * Because `--account` prompts, this command has to be the last line of anything
-     * pasted into a terminal. A hidden password prompt reads whatever is still queued
-     * in the input buffer, so a queued second command would be consumed as the password
-     * and then run as a command.
+     * The prompt from `--account` makes this command the last line of anything pasted
+     * into a terminal. A hidden password prompt reads whatever is still queued in the
+     * input buffer, so a queued second command would be consumed as the password and
+     * then run as a command.
      */
     function run() external returns (MandateManager mm) {
         if (block.chainid != ARC_TESTNET) revert UnknownChain(block.chainid);
@@ -112,9 +112,9 @@ contract Deploy is Script {
      *     --rpc-url <url> --account <keystore>
      *
      * Kept separate on purpose. Reading the arguments from the environment would let a
-     * stray variable silently replace the pinned set above, which would make the
-     * pinning decorative. Typing them makes the choice visible in shell history and in
-     * whatever log the run is teed to.
+     * stray variable replace the pinned set above without appearing anywhere in the
+     * output, which would make the pinning decorative. Typing them makes the choice
+     * visible in shell history and in whatever log the run is teed to.
      */
     function runWith(address usdc_, address identity_, address validation_) external returns (MandateManager mm) {
         console.log("runWith: pinned addresses bypassed, arguments taken from the command line");

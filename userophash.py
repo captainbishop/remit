@@ -10,7 +10,7 @@ Arc's paymaster documentation gives the EntryPoint v0.7 address but tells you to
 about *which* contract. The usual next step is to compare the codehash against a
 published reference, which needs network access this project's tooling does not have.
 
-So the check runs the other way round. v0.7's hash is fully specified:
+The check therefore runs the other way round. v0.7's hash is fully specified:
 
     UserOperationLib.encode(op) = abi.encode(
         op.sender, op.nonce,
@@ -37,7 +37,7 @@ down first.
 Standard library only, by design — there is no keccak256 in Python's hashlib
 (hashlib.sha3_256 is the NIST variant, which uses a different pad byte), so one is
 implemented here and checked against three published vectors before it is trusted.
-If those checks fail, nothing after them is worth reading.
+If those checks fail, the script exits before printing a hash.
 
 Usage:  python3 userophash.py
 """

@@ -10,8 +10,8 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  *
  * These are the parts a reader assumes are trivially correct, which is exactly why
  * they are tested at the boundary and one base unit past it. A cap that is off by
- * one in the permissive direction is not a rounding error, it is an unbounded
- * authority with a plausible-looking number attached.
+ * one in the permissive direction is an unbounded authority with a plausible-looking
+ * number attached.
  */
 contract BoundsTest is Base {
     // -------------------------------------------------------- happy path
@@ -57,8 +57,8 @@ contract BoundsTest is Base {
     // ------------------------------------------------------- per-tx cap
 
     /// The cap is INCLUSIVE. Spending exactly the cap is the normal case, not an
-    /// edge case, and a strict comparison here would silently make every mandate
-    /// one base unit smaller than the payer wrote down.
+    /// edge case, and a strict comparison here would make every mandate one base
+    /// unit smaller than the payer wrote down, with no error to show it.
     function test_perTxCap_isInclusiveAtTheCap() public {
         bytes32 id = grant(simpleParams());
         pay(id, usd(100));
@@ -123,16 +123,16 @@ contract BoundsTest is Base {
      *
      * v2 checks the lifetime cap without performing the addition, then guards the
      * counter with a named error. Three things deliberately did NOT change: the
-     * counter is still exact (not saturated — `totalSpent` rides in the Spend event,
-     * and a counter that quietly stops counting understates real flow), it still
-     * advances for mandates without F_TOTAL, and the mandate still becomes unusable
-     * at the ceiling, which is inherent to a bounded counter. What changed is that it
-     * now says why.
+     * counter is still exact (not saturated — `totalSpent` rides in the Spend event, so
+     * a counter that stops counting without saying so understates real flow), it still
+     * advances for mandates without F_TOTAL, and the mandate still becomes unusable at
+     * the ceiling, which is inherent to a bounded counter. What changed is that it now
+     * says why.
      *
      * Note for anyone reading the old comment in git history: it predicted this test
      * would start failing with `OverTotalCap`. It does not, and could not — this
-     * mandate has no F_TOTAL flag, so the cap is not what binds. Getting
-     * `OverTotalCap` here would mean the contract had invented a cap nobody granted.
+     * mandate has no F_TOTAL flag, so the cap is not what binds. Getting `OverTotalCap`
+     * here would mean the contract had invented a cap the payer never granted.
      */
     function test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic() public {
         // A window cap at the maximum, which is the loosest bound the type can express.
@@ -140,7 +140,7 @@ contract BoundsTest is Base {
         // from binding, because 1 + (2^96 - 1) exceeds 2^96 - 1 as surely as it exceeds any
         // smaller cap. Two bounds are violated by this request, and what decides which
         // error comes back is the ORDER of the checks — the ceiling guard sits with the
-        // amount narrowing, above `_checkAndCommitWindows`. That order is deliberate and
+        // amount narrowing, above `_checkAndCommitWindows`; that order is deliberate and
         // inherited from v1, where the counter arithmetic was in the same place, so the fix
         // moved no policy check relative to any other. The maximum cap is here to make the
         // window the *last* thing that could bind rather than the first, so a regression
@@ -153,14 +153,14 @@ contract BoundsTest is Base {
         // 1 + (2^96 - 1) would wrap the counter.
         payReverts(id, uint256(type(uint96).max), MandateManager.TotalSpentCeiling.selector);
 
-        // And one base unit less fits exactly, which is what proves the boundary is the
+        // One base unit less fits exactly, which is what proves the boundary is the
         // width of the counter rather than an off-by-one in something cheaper. The
         // reverting half alone cannot prove that: a guard at 2^96 - 2 would also refuse
         // the request above.
         //
         // This needs a mint, and the size of that mint is the point. Base.t.sol funds the
         // payer with 1e9 USDC — 1e15 base units — which is generous for every other test
-        // in the suite and about 79 trillion times too small to reach here. So the token
+        // in the suite and about 79 trillion times too small to reach here, so the token
         // balance, not the counter, is what binds at default funding, and the ceiling is
         // unreachable in the tests for the same reason it is unreachable in the world.
         // The JS model has no token and asserts this boundary without ceremony; that
@@ -192,8 +192,8 @@ contract BoundsTest is Base {
     }
 
     /// The uint96 ceiling is enforced explicitly, and BEFORE the caps, so an
-    /// absurd amount produces a legible error rather than a cast that silently
-    /// truncates a huge number into a small permitted one.
+    /// absurd amount produces a legible error rather than a cast that truncates
+    /// a huge number into a small permitted one with no error at all.
     function test_amountAboveUint96_reverts_beforeTheCapIsConsulted() public {
         bytes32 id = grant(simpleParams()); // perTxCap = 100
         uint256 tooBig = uint256(type(uint96).max) + 1;
@@ -250,9 +250,9 @@ contract BoundsTest is Base {
 
     // ---------------------------------------------------------- F19: self-payment
 
-    /// Before F19 this was a fully legal spend. It passed every gate, consumed `perTxCap`,
+    /// Before F19 this was a fully legal spend. It passed every check, consumed `perTxCap`,
     /// the window buckets and the lifetime cap, burned its nonce, emitted `Spend`, and then
-    /// called `transferFrom(payer, payer, amount)`, which moves nothing. The fund risk was
+    /// called `transferFrom(payer, payer, amount)`, which moves nothing; the fund risk was
     /// low — a delegate gains nothing by it — but the audit hole was not: Arc's system
     /// emitter writes no log for a self-transfer, so a reconciler diffing `Spend` against
     /// native transfers saw an event with no counterpart and concluded its indexer had
@@ -262,7 +262,7 @@ contract BoundsTest is Base {
     /// Deliberately asserted with `expectRevert` and not by counting `Transfer` logs. F25:
     /// `MockUSDC._move` emits unconditionally, including when `from == to`, so a log-counting
     /// test here would pass while demonstrating the opposite of production — the mock would be
-    /// answering a question about Arc with our own code.
+    /// answering a question about Arc with code from this repository.
     function test_f19_payingThePayer_reverts() public {
         payReverts(grant(simpleParams()), payer, usd(10), MandateManager.SelfPayment.selector);
     }
@@ -287,7 +287,7 @@ contract BoundsTest is Base {
         assertFalse(mm.isAllowedRecipient(id, payer), "F36: the view refuses the payer, list or no list");
         payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
 
-        // And the same code when the payer is absent from the allowlist, so the answer does
+        // The same code when the payer is absent from the allowlist, so the answer does
         // not depend on a configuration the caller cannot see.
         payReverts(grant(withAllowlist(simpleParams(), vendor)), payer, usd(10), MandateManager.SelfPayment.selector);
     }

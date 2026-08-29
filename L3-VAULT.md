@@ -1,7 +1,7 @@
 # L3 — the shielded vault, as a Remit payer
 
-Spec for privacy layer 3. Read `PRIVACY.md` first; this file assumes its position,
-its leak inventory, and its naming rule. Task #39.
+Spec for privacy layer 3, task #39. Read `PRIVACY.md` first; this file assumes its position,
+its leak inventory, and its naming rule.
 
 Status: **spec only.** Nothing here is built, and one of its conclusions is that L3
 should not be built until a prerequisite outside this document is solved.
@@ -29,7 +29,7 @@ correction has been applied to PRIVACY.md; this section records why.
 
 Once the vault has granted a mandate and approved the allowance, a spend runs with
 **no vault code executing at all**. The call path is
-`agent → MandateManager.spend → usdc.transferFrom(vault → recipient)`. ERC-20 gives
+`agent → MandateManager.spend → usdc.transferFrom(vault → recipient)`, and ERC-20 gives
 the token holder no hook: there is no callback, no veto, no observation point. The
 vault cannot be interposed as the spender either, because `spend` requires
 `msg.sender == m.spender` (line 454) and the spender is the autonomous agent by
@@ -39,15 +39,15 @@ different product.
 The whole contract contains exactly three external calls: `usdc.transferFrom` (514),
 `identityRegistry.ownerOf` (628), and `validationRegistry.getValidationStatus` (653).
 All three targets are `immutable` (151-153), set once in the constructor (311-313),
-with no setter — so **no per-mandate parameter can aim a call at the payer.** And both
-registry calls are `view` calls from `private view` functions, which solc compiles to
+with no setter — so **no per-mandate parameter can aim a call at the payer.** Both
+registry calls are also `view` calls from `private view` functions, which solc compiles to
 `STATICCALL`: even in the impossible world where MandateManager had been deployed with
 the vault as a registry address, a payer-as-registry could observe a spend but could
-not write during one. Two independent reasons, which is the standard this project
-holds itself to.
+not write during one. Two independent reasons support the conclusion, which is the
+standard this project holds itself to.
 
-So there is no moment at which the vault can debit anything atomically with a spend.
-Any design that needs that property is dead on arrival.
+The vault therefore has no moment at which it can debit anything atomically with a
+spend, and any design that requires that property cannot be built.
 
 The fix is to move the debit earlier: **escrow at grant time.** Nullify the
 depositor's commitment when the mandate is created, size `totalCap` to exactly the
@@ -56,10 +56,10 @@ nullified amount, and reclaim the unspent remainder afterwards from the public
 no atomicity the architecture cannot provide and it makes the safety property static
 instead of dynamic.
 
-The same fact that kills atomic debiting buys something real, and it is worth naming
-in the same breath: because the vault is not in the spend path, **L3 adds zero gas to
-a spend.** The measured 177,429-gas marginal spend is unchanged. The constraint and
-the benefit are one fact seen from two sides.
+The same fact that rules out atomic debiting also delivers a benefit: because the vault
+is not in the spend path, **L3 adds zero gas to a spend.** The measured 177,429-gas
+marginal spend is unchanged. The constraint and the benefit are one fact seen from two
+sides.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ The vault is a separate contract. It holds USDC, it grants an ERC-20 allowance t
 `Transfer` name the vault rather than the person. That is the whole privacy mechanism,
 and it is the one thing no commitment scheme can reach any other way.
 
-**The load-bearing fact is that line 371 hardcodes `payer = msg.sender`.** No third
+**The design rests on line 371, which hardcodes `payer = msg.sender`.** No third
 party can ever create a mandate whose payer is the vault. That, and not any check the
 vault performs, is what makes it safe to grant `MandateManager` a pooled allowance at
 all: the only mandates that can draw on the vault's balance are the ones the vault
@@ -102,7 +102,7 @@ m.flags    has F_TOTAL and F_EXPIRY set
 m.totalCap == escrow[mandateId]
 ```
 
-and across the whole vault:
+Across the whole vault:
 
 ```
 Σ unreleased mandates (escrow[id] − totalSpent(id))
@@ -111,22 +111,22 @@ and across the whole vault:
     ≤  usdc.balanceOf(vault)
 ```
 
-Three things about that sum are load-bearing and each was wrong in the first draft.
+Three properties of that sum decide whether it holds, and each was wrong in the first draft.
 
 **It runs over *unreleased* mandates, not live ones.** A mandate before its
 `notBefore` is not live (line 804) but its full `totalCap` is spendable later; a
 mandate that is dead but not yet released is no longer spendable but the depositor's
-claim to the remainder is not yet a commitment either. Summing over "live" mandates
-drops the first case — permitting the vault to lend that money to another depositor —
-and under-counts the second. Liveness plays no part in solvency. Only "has this escrow
-been returned to the commitment tree yet" does.
+claim to the remainder is not yet a commitment either. Summing over "live" mandates drops
+the first case — permitting the vault to lend that money to another depositor — and
+under-counts the second. Liveness plays no part in solvency; the only question that
+matters is whether a given escrow has been returned to the commitment tree.
 
 **`gasReserve` is not padding.** On Arc, USDC *is* the native asset, so the vault's
 USDC balance is also its gas balance. A contract cannot submit a transaction, so the
 vault never pays gas directly — but the relayer this design requires has to be paid,
 and the natural way to pay a relayer on Arc is in USDC out of the vault. Any such
 reimbursement comes out of the same balance the invariant bounds against. It must be a
-separate accounted term funded by fees or by the operator, never silently drawn from
+separate accounted term funded by fees or by the operator, and never drawn from
 depositor escrow. For the same reason the vault must expose no `payable` or
 value-forwarding path and must never contain `SELFDESTRUCT`: on Arc a native-value
 sweep moves depositors' USDC, and self-destruct hands the pool to the beneficiary.
@@ -134,14 +134,14 @@ sweep moves depositors' USDC, and self-destruct hands the pool to the beneficiar
 **Cross-depositor safety is a conjunction, and `MandateManager` supplies only half of
 it.** Line 486 (`newTotal > m.totalCap` reverts `OverTotalCap`) bounds each mandate
 *individually*, permanently — `totalSpent` is written only at line 497, initialised at
-377, and the cast at 485 cannot truncate because of the unconditional guard at 463. So
-`totalSpent ≤ totalCap` for all time, enforced by the audited contract. But the *sum*
-bound — the property that actually protects one depositor from another — exists only
-because the vault escrowed each `totalCap` against a nullified commitment.
-`MandateManager` has no concept of a pool and enforces nothing about the total. The
-first draft claimed the guarantee lived "in the audited contract rather than the new
-one"; that is the one reassurance this design cannot have, and pretending otherwise
-would be the most dangerous sentence in the file.
+377, and the cast at 485 cannot truncate because of the unconditional guard at 463 — so
+`totalSpent ≤ totalCap` holds for all time, enforced by the audited contract. The *sum*
+bound — the property that actually protects one depositor from another — exists only because
+the vault escrowed each `totalCap` against a nullified commitment. `MandateManager` has no
+concept of a pool and enforces nothing about the total. The first draft claimed the
+guarantee lived "in the audited contract rather than the new one"; that is the one
+reassurance this design cannot have, and pretending otherwise would be the most dangerous
+sentence in the file.
 
 Note that line 486 uses `>`, not `>=`, so `totalSpent` can reach exactly `totalCap`.
 The release path must handle a zero-value change commitment rather than assuming a
@@ -151,20 +151,20 @@ positive remainder.
 
 `policyHeadroom` (834-849) starts at `type(uint256).max` and mins in `perTxCap`,
 `totalCap − totalSpent`, and each `windowRemaining`; `spendable` (864-872) then clamps
-to `allowance(payer, MandateManager)` and `balanceOf(payer)`. With `F_TOTAL` forced,
+to `allowance(payer, MandateManager)` and `balanceOf(payer)`, so with `F_TOTAL` forced
 the result is bounded by that mandate's own remaining cap no matter how large the pool
 is.
 
 The first draft claimed the vault's invariant is what makes `spendable` "honest" for a
-pooled payer. That was the wrong word. `spendable` is already honest — for any single
+pooled payer, which is the wrong term. `spendable` is already honest — for any single
 call it reports what would actually succeed, because the balance and the allowance are
 real and the spend really would move pool USDC. What it cannot express is that the
 money is someone else's. The escrow accounting makes the number **attributable**, not
 truthful.
 
-Two corollaries. Under the exact-sum allowance policy below, the allowance clamp never
-binds for a vault mandate, since the allowance is the sum of all remaining caps and
-therefore at least any one of them. And without `F_TOTAL`, `policyHeadroom` returns
+Two corollaries follow. Under the exact-sum allowance policy below, the allowance clamp
+never binds for a vault mandate, since the allowance is the sum of all remaining caps and
+therefore at least any one of them. Without `F_TOTAL`, `policyHeadroom` returns
 `type(uint256).max` and `spendable` reports the **entire pool** as available to a
 single mandate — still technically honest, and exactly the disaster the next section
 prevents.
@@ -174,32 +174,31 @@ prevents.
 **`F_TOTAL` is mandatory, and `MandateManager` will not enforce it — in either version.**
 The `hasBound` check at line 353 is satisfied by `F_PER_TX` *or* `F_EXPIRY` *or* any
 window, so `F_TOTAL` is not required for a valid grant. A vault-granted mandate carrying
-only `F_PER_TX` would let the agent spend `perTxCap` repeatedly until the pool was empty,
-and `Unbounded()` would never fire. The vault must require it in its own code. One
-convenience: line 360 couples flag to value as a biconditional
+only `F_PER_TX` would let the agent spend `perTxCap` repeatedly until the pool was empty
+without `Unbounded()` ever firing, so the vault must require the flag in its own code.
+One convenience: line 360 couples flag to value as a biconditional
 (`(flags & F_TOTAL != 0) != (p.totalCap > 0)` reverts `BadConfig`), so requiring
 `totalCap > 0` is sufficient to force the flag.
 
-**v2 narrows that check and it still does not help the vault, which is worth being
-explicit about rather than leaving as an inference.** v2 accepts `F_TOTAL` *or*
-`F_EXPIRY` only — a per-transaction cap and a window are no longer bounds, which is
-finding F5 in `THREAT-MODEL.md`. But the next section requires the vault to force
-`F_EXPIRY` for escrow liveness, so a vault mandate satisfies v2's guard on the expiry
-alone and `F_TOTAL` remains unrequired by the contract. The narrowing removes the
+**v2 narrows that check, and the narrowed check still does not help the vault.** v2
+accepts `F_TOTAL` *or* `F_EXPIRY` only — a per-transaction cap and a window are no longer
+bounds, which is finding F5 in `THREAT-MODEL.md`. The next section requires the vault to
+force `F_EXPIRY` for escrow liveness, so a vault mandate satisfies v2's guard on the
+expiry alone and `F_TOTAL` remains unrequired by the contract. The narrowing removes the
 specific `F_PER_TX`-only shape described above and leaves the hole the vault actually
 cares about wide open: an expiry-only mandate against a *shared* pool lets the agent
 spend the whole pool before the deadline arrives, which is the entire failure the
-`F_TOTAL` requirement exists to prevent. This is a general property worth carrying into
-any other contract built on Remit — **a grant-time bound the platform enforces for its
-own reasons is not a substitute for the bound your own design needs**, and the two
-being spelled with the same error name makes that easy to miss.
+`F_TOTAL` requirement exists to prevent. The property generalises to any other contract
+built on Remit — **a grant-time bound the platform enforces for its own reasons is not a
+substitute for the bound your own design needs**, and the two being spelled with the same
+error name makes that easy to miss.
 
 **`F_EXPIRY` is mandatory for escrow liveness.** Escrow can only be released when no
 further spend is possible. Without the flag, `expiresAt` is ignored entirely — both
-line 452 in `spend` and line 806 in `isLive` gate the comparison on it, and line 364
-only validates `expiresAt > notBefore` when it is set — so an unrevoked mandate stays
-live forever and its escrow is locked forever, with the depositor's funds depending on
-the agent or the vault choosing to act. Requiring `F_EXPIRY` gives every escrow an
+line 452 in `spend` and line 806 in `isLive` compare it only when the flag is set, and
+line 364 only validates `expiresAt > notBefore` when it is set — so an unrevoked mandate
+stays live forever and its escrow is locked forever, with the depositor's funds depending
+on the agent or the vault choosing to act. Requiring `F_EXPIRY` gives every escrow an
 unconditional release date that needs no cooperation from anyone.
 
 The vault must also bound the term, because `expiresAt` is a `uint40` good past the
@@ -208,7 +207,7 @@ year 36000 and an unbounded one is a permanent lock dressed as a mandate. Cap
 `notBefore` transitively, because line 364 forces `notBefore < expiresAt` — so the
 pre-window lock worried about below cannot be stretched either.
 
-## The release condition, and a trap in the obvious helper
+## The release condition, and the pitfall in the obvious helper
 
 Release requires:
 
@@ -224,10 +223,10 @@ the same USDC again. That is a double spend of pool funds reachable by setting
 `notBefore` in the future — a parameter the depositor chooses.
 
 This is the sharpest edge in the design, and it comes from reaching for a helper whose
-name reads like the condition you want. `isLive` answers "can this spend right now",
-which is not the same question as "can this ever spend again".
+name reads like the condition you want. `isLive` answers "can this spend right now", which
+is not the same question as "can this ever spend again".
 
-**The flag test in that predicate is not decoration, and the first draft omitted it.**
+**The flag test in that predicate is necessary, and the first draft omitted it.**
 Written as bare `block.timestamp >= m.expiresAt`, the condition is *true from birth*
 for any mandate without `F_EXPIRY`, since `expiresAt` is then an unvalidated field
 that may be zero — an instant release of an escrow that can still be spent in full.
@@ -256,27 +255,26 @@ dead with `totalSpent == 0`, which releases correctly. A release and a spend in 
 same block read the same `block.timestamp`, so exactly one of the two succeeds.
 
 `totalSpent` also survives revocation — `revoke` (701-707) sets only `revoked = true`,
-with no zeroing — and `getMandate` (760-762) returns the whole struct. So the refund
+with no zeroing — and `getMandate` (760-762) returns the whole struct, so the refund
 figure is readable on chain by anyone.
 
 ## Depositor revocation: pooling removes it, and the spec has to give it back
 
-`revoke` requires `msg.sender == m.payer || msg.sender == m.spender` (line 704). The
-payer is the vault. **So the depositor cannot revoke their own mandate, and the vault
-can revoke anyone's.** Revocation is the headline feature of the primitive — the thing
-a payer relies on when an agent misbehaves — and pooling silently transfers it to the
-operator.
+`revoke` requires `msg.sender == m.payer || msg.sender == m.spender` (line 704), and the
+payer is the vault, so **the depositor cannot revoke their own mandate, and the vault can
+revoke anyone's.** Revocation is the headline feature of the primitive — the thing a payer
+relies on when an agent misbehaves — and pooling transfers it to the operator.
 
-Three ways out, and only one is acceptable. An open `revokeFor(mandateId)` on the
-vault lets anybody grief any depositor. No revocation path at all makes the vault
-strictly worse than direct Remit for the case that matters most. So the vault needs an
-*authenticated* per-mandate revoke, which means the circuit must also prove
+Three ways out exist, and only one is acceptable. An open `revokeFor(mandateId)` on the
+vault lets any caller grief any depositor. No revocation path at all makes the vault
+strictly worse than direct Remit for the case that matters most. The vault therefore needs
+an *authenticated* per-mandate revoke, which means the circuit must also prove
 authority-to-revoke for a given `mandateId` — a public input the first draft's list
 omitted entirely. Design the commitment so that a depositor retains a revocation
 secret bound to the mandate they created.
 
 One consolation and one caution: the spender can still revoke (line 704), so a
-compromised agent can shut itself off without asking anybody, exactly as in base
+compromised agent can shut itself off without asking anyone, exactly as in base
 Remit; and because a spender-initiated revoke forces early release, the vault's
 release path must tolerate revocation it did not initiate.
 
@@ -296,22 +294,22 @@ important line of the vault's code.
 `mandateId = keccak256(abi.encode(DOMAIN, block.chainid, <MandateManager address>, msg.sender, salt))`
 with `msg.sender` constant at the vault, so the id leaks nothing — unless the salt is
 a per-depositor counter or a hash of their address, in which case it leaks everything.
-Deriving it from the nullifier is safe, and for a reason worth stating precisely: the
+Deriving it from the nullifier is safe, for a precise reason: the
 nullification and the `createMandate` call happen in the same transaction, so they are
 already linked and `salt = f(nullifier)` reveals nothing new. A reused salt reverts
 `MandateExists()` at 346, which is correct but should be surfaced legibly.
 
-### The cosign footgun, stated correctly
+### The cosign footgun
 
-The vault should refuse a configuration whose cosign gate can never fire, since it is
-the depositor's own control being silently disabled. But the condition is **not**
+The vault should refuse a configuration whose cosign requirement can never fire, since
+that disables the depositor's own control with no error. The condition is **not**
 `perTxCap < cosignThreshold`, which is what the first draft wrote and what
 `CHANGELIST.md` said until this section was written.
 
 Line 492 tests `amount > m.cosignThreshold`, strictly, and line 476 caps
-`amount ≤ perTxCap`. So `perTxCap == cosignThreshold` is *also* dead, and this repo has
-a live receipt proving it: `DESIGN.md:1272` records a 50,000 spend against a 50,000
-threshold that did not trip the gate on Arc Testnet. The test is `perTxCap <=
+`amount ≤ perTxCap`, so `perTxCap == cosignThreshold` is *also* dead, and this repo has
+a live receipt proving it: `DESIGN.md:981` records a 50,000 spend against a 50,000
+threshold that did not trip the cosign check on Arc Testnet. The test is `perTxCap <=
 cosignThreshold`.
 
 It is also incomplete when `F_PER_TX` is unset, where the real ceiling is
@@ -322,27 +320,27 @@ whole policy, not against one field. **This also means the `CHANGELIST.md` entry
 the v2 grant-time revert is stated with the wrong operator and should be corrected
 there before v2 is cut.**
 
-**Superseded, in the best way: `MandateManager` v2 does this itself.** The correction was
-carried into `CHANGELIST.md` and then implemented, so the vault inherits the guard rather
-than reimplementing it — a grant that a depositor's vault forwards to `createMandate` is
+**Superseded: `MandateManager` v2 does this itself.** The correction was carried into
+`CHANGELIST.md` and then implemented, so the vault inherits the guard rather than
+reimplementing it — a grant that a depositor's vault forwards to `createMandate` is
 refused by the mandate contract before the vault has to have an opinion. Two amendments to
 the paragraphs above follow from the implementation. The effective maximum includes a term
-this section missed, `2^96 - 1`, which binds when the depositor set no amount bound at all;
-and the enumeration turned up two further dead-gate shapes the vault would also have
-forwarded happily, a threshold stored with `F_COSIGN` unset and `cosigner == spender`. The
+this section missed, `2^96 - 1`, which binds when the depositor set no amount bound at
+all; the enumeration also turned up two further dead cosign configurations the vault would
+have forwarded, a threshold stored with `F_COSIGN` unset and `cosigner == spender`. The
 second matters more here than in the base contract, because a vault that lets a depositor
-name the spender as its own cosigner has built a supervision gate the spender operates. Both
-are now refused underneath the vault. What the vault still owes its depositor is the *error
-message*: `BadConfig` arriving from a nested call is legible to a developer and not to a
-person, so the vault should pre-check and explain rather than forward and relay.
+name the spender as its own cosigner has built a supervision check the spender operates.
+Both are now refused underneath the vault. What the vault still owes its depositor is the
+*error message*: `BadConfig` arriving from a nested call is legible to a developer and not
+to a person, so the vault should pre-check and explain rather than forward and relay.
 
 ### The pass-through fields, and why "only narrows" is not the same as "harmless"
 
 Every remaining policy field can only *narrow* authority. Windows add a constraint
 (584), the allowlist restricts recipients (459), the identity gate adds
-`ownerOf(agentId) == msg.sender` (634-635), and the credential gate adds requirements
-(664-683). I looked specifically for a configuration that raises a cap and there is
-none. On authority, pass-through is safe.
+`ownerOf(agentId) == msg.sender` (634-635), and the credential check adds requirements
+(664-683). A search for a configuration that raises a cap found none, so pass-through is
+safe on authority.
 
 On **cost**, it is not, and the first draft's "without endangering the pool" overreached
 on three counts.
@@ -353,7 +351,7 @@ spend in the loop at 555-582. The live spend used one 24-bucket window and cost
 216,458; at the contract's own figure of ~2,150 gas per bucket (line 545), a maximal
 configuration more than doubles every spend.
 
-The credential gate makes spend gas effectively unbounded. The `getValidationStatus`
+The credential check makes spend gas effectively unbounded. The `getValidationStatus`
 tuple decoded at 653-655 contains a `string` that the contract does not even keep — it
 is unnamed in the destructuring and discarded — but it is decoded into memory before it
 can be discarded, and memory expansion is quadratic in length. The depositor selects
@@ -362,17 +360,17 @@ runs it out of gas, with the `catch` at 660 converting an OOG into `CredentialMi
 and hiding the cause. The cost is set by third-party registry state the depositor picks,
 not by any constant in `MandateManager`.
 
-The allowlist length is uncapped. Contrast line 368's `p.windows.length > MAX_WINDOWS`
+The allowlist length is uncapped: contrast line 368's `p.windows.length > MAX_WINDOWS`
 with the loop at 400-403, which has no length check and performs a cold SSTORE per
 entry. Grant cost is therefore unbounded depositor-chosen input.
 
 For a depositor with their own agent all three are self-harm. **They become
 cross-depositor the moment the vault adopts the shared agent that hazard 2 below
 recommends** — one depositor then sets the gas bill that a shared, vault-funded agent
-pays on everybody's spends. And the uncapped allowlist is paid by the relayer that
-this design makes a prerequisite. So the vault should cap allowlist length, cap total
-window buckets, and either forbid the credential gate or bound the attestation it will
-accept.
+pays on every depositor's spends, and the uncapped allowlist is paid by the relayer that
+this design makes a prerequisite. The vault should therefore cap allowlist length, cap
+total window buckets, and either forbid the credential check or bound the attestation it
+will accept.
 
 ## Allowance policy
 
@@ -389,20 +387,20 @@ damages other people's money rather than the granter's. The generic argument for
 infinite approval — that the payer only risks their own funds — does not apply to a
 vault.
 
-Two things the first draft left out. The allowance is a **single shared scalar**, so it
+The first draft left out two things. The allowance is a **single shared scalar**, so it
 must be recomputed from live state on every grant and release, never incremented or
 `approve`d to one mandate's figure — a naive `approve(newCap)` erases every other
-depositor's spendability at a stroke. And if it is ever under-set, the first mandates
-to spend consume it and the rest fail: no solvency loss, since a failed
+depositor's spendability at a stroke. If the allowance is ever under-set, the first
+mandates to spend consume it and the rest fail: no solvency loss, since a failed
 `transferFrom` reverts the whole spend at 514 consuming neither cap nor nonce, but a
 genuine shared liveness failure that the defence-in-depth argument does not mention.
 
 ## Hazard 2: the delegate is a pseudonym, and gas is the real problem
 
-`MandateCreated` and `Spend` are both indexed on the spender, so a depositor who
-brings their own agent has published a stable pseudonym and the vault's payer privacy
-is cosmetic. PRIVACY.md says delegates must be "one-time, or genuinely shared". Both
-options have a cost that was not stated:
+`MandateCreated` and `Spend` are both indexed on the spender, so a depositor who brings
+their own agent has published a stable pseudonym and the vault's payer privacy is
+cosmetic. PRIVACY.md requires a delegate to be either one-time or shared across enough
+payers to be uninformative, and both options have a cost that was not stated:
 
 A one-time agent per mandate has zero USDC, and on Arc USDC *is* gas, so a fresh agent
 cannot submit anything until it is funded — and whoever funds it creates the linking
@@ -411,11 +409,11 @@ bootstrapping problem reappearing one layer up, in the same shape.
 
 A shared agent across all depositors makes `spender` constant and uninformative, but
 it is then a single compromise point over every depositor's mandate; "bounded authority
-for *my* agent" quietly becomes "bounded authority for *everyone's* agent"; and, per
-the section above, it converts depositor-chosen gas inflation from self-harm into a
+for *one depositor's* agent" becomes "bounded authority for *everyone's* agent"; and,
+per the section above, it converts depositor-chosen gas inflation from self-harm into a
 cost imposed on the pool. The trust story changes rather than improving.
 
-Underneath both sits the finding that matters most in this document.
+Underneath both sits a stronger constraint.
 
 **L3's payer privacy is capped by gas-payer privacy, and it binds on the grant, not
 just the spend.** `createMandate` is a transaction. Whoever submits it appears as the
@@ -437,24 +435,25 @@ exchange. Gas abstraction — relayer, paymaster, or 7702-delegated submission �
 That is the same prerequisite L2 needs for sweeps. One dependency bounds both privacy
 layers.
 
-**But it is not a missing chain feature, and the first draft of this section assumed it
-was.** Researched against Arc's own documentation on 2026-08-25: ERC-4337 with EntryPoint
+**Gas abstraction is present on Arc, and the first draft of this section assumed it was
+missing.** Researched against Arc's own documentation on 2026-08-25: ERC-4337 with EntryPoint
 v0.7 and USDC-funded paymasters is live on Arc testnet, and EIP-7702 set-code transactions
 behave as on Ethereum. Under 4337 the grant originates from a smart account rather than the
-depositor's EOA, which is exactly the property this section demands. So the gate is open;
-what is missing is a sponsorship *policy* of ours, not a capability of Arc's. I inferred a
-chain limitation from the fact that Arc's tutorials use a plain EOA, which is not evidence
-of anything. Details, including the EntryPoint address and the caveat that Arc's own page
-flags it as needing verification, are in `GAS-ABSTRACTION.md`.
+depositor's EOA, which is exactly the property this section demands. The capability is
+therefore available, and what is missing is a sponsorship *policy* on Remit's side rather
+than a capability of Arc's. The first draft inferred a chain limitation from Arc's tutorials
+using a plain EOA, which is not evidence of anything. Details are in `GAS-ABSTRACTION.md`,
+including the EntryPoint address and the caveat that Arc's own page flags it as needing
+verification.
 
 Two costs come with the fix, and neither was in the first draft. **A sponsor sees who
 asked** — L3's payer privacy is *shifted to the sponsor*, not eliminated, and a depositor's
 privacy set is whoever shares their paymaster; Arc documents a single third-party bundler
-as the standard path, so disclose it and never let "relayed" be heard as "trustless". And
-**a blocklisted `from` or `to` reverts at runtime while consuming the submitter's gas**,
-which is documented Arc behaviour — so a sponsor that does not screen recipients before
-submitting is a free denial-of-wallet target, and the depositor-controlled gas inflation
-described above is charged to the sponsor rather than to the depositor.
+as the standard path, so disclose it and never let "relayed" be heard as "trustless". The
+second cost is that **a blocklisted `from` or `to` reverts at runtime while consuming the
+submitter's gas**, which is documented Arc behaviour — so a sponsor that does not screen
+recipients before submitting is a free denial-of-wallet target, and the depositor-controlled
+gas inflation described above is charged to the sponsor rather than to the depositor.
 
 ## Hazard 3: amounts, and four leaks the first draft missed
 
@@ -472,8 +471,8 @@ than advertised, for four reasons found on review.
 **The release amount is public, so the change commitment's value is known.** Both
 `totalCap` and `totalSpent` are public, so `e − totalSpent` is public — the commitment
 minted at release has a fully known value, and every later use of it is fingerprinted
-by that value. This follows directly from reclaiming the remainder from on-chain state,
-and it partly defeats quantisation, which produces *odd* residuals by construction.
+by that value. That follows directly from reclaiming the remainder from on-chain
+state, and it partly defeats quantisation, whose residuals are *odd* by construction.
 
 **Quantising `totalCap` alone does not build a crowd.** `MandateCreated` also carries
 `perTxCap`, `notBefore`, `expiresAt`, `flags` and `windowCount`. That tuple is a
@@ -485,9 +484,10 @@ visible parameter vector or it accomplishes very little.
 `p.allowlist` publishes the depositor's entire intended counterparty set at grant
 time — including their own withdrawal address, if allowlisted, long before any money
 moves. `p.identity.expectedOwner` is typically an address the depositor pins to
-themselves. `p.credential.validator` names a chosen third party. None of these has a
-getter — `_identity` and `_credential` are private with no accessor — which makes them
-easy to audit past, since they are visible only in the transaction that set them.
+themselves, and `p.credential.validator` names a chosen third party. None of these
+has a getter — `_identity` and `_credential` are private with no accessor — which
+makes them easy to audit past, since they are visible only in the transaction that
+set them.
 
 **`recipient == vault` WAS a legal spend, and stopped being one on 2026-08-28.** It consumed
 `totalSpent` and allowance while leaving the pool balance unchanged, so a compromised agent could
@@ -522,7 +522,7 @@ has published their own address as `recipient` and undone the vault. Withdrawals
 a distinct path — prove a commitment, transfer to a fresh address, submitted through a
 relayer — and the fresh-address requirement falls on the depositor, not the contract.
 
-So L3's amount story is: the escrow amount can be padded into a crowd only if the
+L3's amount story is: the escrow amount can be padded into a crowd only if the
 whole parameter vector is padded with it, the residual is public regardless, the
 payment amount cannot be hidden at all, and vault-internal transfers publish nothing
 but help only in proportion to how many counterparties are inside. Payer privacy on
@@ -542,12 +542,11 @@ For an EOA payer that is a statement about approvals. For a vault it is a statem
 about the vault's own code, which must therefore have **no other USDC-moving path at
 all**.
 
-Circle's freeze authority over USDC applies to the vault's address, and freezing the
-vault freezes **every depositor simultaneously**. PRIVACY.md notes that aggregate
-holdings stay visible and freezable; the part worth saying out loud is that pooling
-converts individual freeze risk into shared fate. A payer holding their own USDC is
-exposed to being frozen; a depositor in the vault is exposed to *anyone* in the vault
-causing a freeze.
+Circle's freeze authority over USDC applies to the vault's address, so freezing the vault
+freezes **every depositor simultaneously**. PRIVACY.md notes that aggregate holdings stay
+visible and freezable; pooling converts individual freeze risk into shared fate. A payer
+holding their own USDC is exposed to being frozen; a depositor in the vault is exposed to
+*anyone* in the vault causing a freeze.
 
 Revocation is no longer the depositor's, unless the circuit gives it back — see the
 section above.
@@ -561,10 +560,10 @@ among three is in a set of three, and the first depositor is in a set of one.
 0. **Ask Circle about the Arc Privacy Sector timeline.** Added 2026-08-25, and it precedes
    everything else: Arc documents a confidential execution environment that would deliver
    most of this document's purpose as a deployment target, marked "on the roadmap and not
-   yet available" with no date. Committing to a circuit without asking would be
-   negligent. See `PRIVACY.md` and `GAS-ABSTRACTION.md`. Everything below stays true
-   whatever the answer — the contract findings are facts about `MandateManager` — but the
-   order changes.
+   yet available" with no date. Committing to a circuit without asking would be negligent;
+   `PRIVACY.md` and `GAS-ABSTRACTION.md` carry the supporting detail. Everything below stays
+   true whatever the answer — the contract findings are facts about `MandateManager` — but
+   the order changes.
 1. Decide the sponsorship policy for grant *and* spend submission. This is no longer
    "solve gas abstraction": Arc already has 4337 and 7702. It is choosing a sponsor,
    screening recipients so a blocklisted address cannot burn the sponsor's gas, and
@@ -574,8 +573,8 @@ among three is in a set of three, and the first depositor is in a set of one.
    under the deep profile. All of it is testable against a placeholder verifier: the
    money-loss bugs in L3 are not cryptographic, and every error the review of this
    document caught was in this layer.
-3. Then the circuit, the verifier, nullifier handling, the revocation authenticator,
-   and the trusted-setup-or-transparent-proof decision.
+3. Then the circuit, the verifier, nullifier handling, the revocation authenticator, and
+   the trusted-setup-or-transparent-proof decision.
 4. Counsel before real money, per PRIVACY.md.
 
 The ordering matters: the security-critical part of L3 has nothing to do with ZK, so
@@ -596,9 +595,9 @@ the central architectural claim — no payer code runs during a spend — and st
 it with the STATICCALL argument. It also found four errors and eight omissions, all now
 folded in above. Four are worth naming, because of what they have in common.
 
-**The invariant summed over "live" mandates.** Same word, same trap, same document as
-the `isLive` warning. Having identified that liveness is the wrong question for escrow
-release, I then used liveness as the filter for escrow solvency, one section later.
+**The invariant summed over "live" mandates.** Same word, same trap, same document as the
+`isLive` warning: one section after establishing that liveness is the wrong question for
+escrow release, the first draft used liveness as the filter for escrow solvency.
 
 **The release predicate omitted the `F_EXPIRY` test**, making the copy-pasteable code
 block an instant release of a fully spendable escrow. Written into the very section
@@ -610,14 +609,15 @@ carried the whole guarantee was the most comfortable sentence in the draft and t
 least true.
 
 **The cosign check was off by one**, and this repository already held a live Arc
-receipt disproving it — a 50,000 spend against a 50,000 threshold that did not trip
-the gate, recorded at `DESIGN.md:1272`. The correct operator is `<=`, and the check is
-incomplete without `F_PER_TX` anyway. `CHANGELIST.md` carries the same error and needs
+receipt disproving it — a 50,000 spend against a 50,000 threshold that did not require
+a cosignature, recorded at `DESIGN.md:981`. The correct operator is `<=`, and the check
+is incomplete without `F_PER_TX` anyway. `CHANGELIST.md` carries the same error and needs
 correcting before v2.
 
 The pattern is the one this project keeps rediscovering: the claim that never got
 checked against a second method is the one that was wrong. Three of the four were
-reachable by reading the contract, which I had open. The lesson is not "read more
-carefully" — it is that a design document about a money-holding contract gets an
-adversarial second pass before anyone starts building from it, and that the pass should
-be given the contract rather than the document's own summary of it.
+reachable by reading the contract, which was open at the time. The remedy is
+procedural rather than a matter of reading more carefully: a design document about a
+money-holding contract gets an adversarial second pass before anyone starts building
+from it, and the pass should be given the contract rather than the document's own
+summary of it.

@@ -14,11 +14,11 @@ correct. Throughout this document, "a mandate" means one grant of authority.
 Status: reference implementation verified; Solidity compiles and passes its full Forge
 suite; gas measured against real Arc USDC; **live on Arc Testnet since 2026-08-24**, one
 mandate granted and one spend executed; unaudited. See
-[Honest status](#honest-status) before you trust anything here.
+[Status and limits](#status-and-limits) before you trust anything here.
 
 ---
 
-## Saturday, 2:14am
+## The 2:14am scenario
 
 A thirty-person freight forwarder pays roughly two hundred small vendors a month —
 customs brokers, port fees, drayage operators, bonded warehouses, across six
@@ -32,8 +32,8 @@ Ada gets her three days back.
 
 Week three, 2:14 on a Saturday morning, an invoice arrives from their Rotterdam
 customs broker. Right logo, right layout, the PDF named exactly the way that broker
-has named every file for two years. Two things are different. The payment address is
-new. And the amount is €48,000 rather than the usual €4,800. Further down the email
+has named every file for two years. Two things are different: the payment address is
+new, and the amount is €48,000 rather than the usual €4,800. Further down the email
 body, in text a human would skim past, is a note explaining that this invoice was
 pre-approved by the finance lead and that the standard verification step should be
 skipped for it.
@@ -48,8 +48,8 @@ version fixes it, no system prompt closes it. The consensus mitigation is not to
 the agent's judgment trustworthy; it is to make sure the agent's judgment cannot reach
 anything expensive.
 
-Note also what the agent removed: not a control, exactly, but a human who would
-plausibly have paused at a familiar vendor with an unfamiliar account number.
+Note also what the agent removed: less a control than a human who would plausibly have
+paused at a familiar vendor with an unfamiliar account number.
 Invoice-redirection and business-email-compromise fraud was already among the largest
 categories of business payment loss by dollar value before any of this was automated.
 *(Recalled from memory, not verified here — check current IC3 reporting before citing
@@ -72,29 +72,29 @@ verify.
 
 If they used **per-job escrow**, the attack fails — because Ada is approving every one
 of two hundred invoices by hand, which is precisely the job they automated away. That
-is not a control, it is a rollback.
+is a rollback rather than a control.
 
 ### What a mandate does at 2:14am
 
-The Rotterdam broker's actual settlement address is on the allowlist. The new address
-is not. The spend is refused at the allowlist check and the attack is over. One line
-of policy, written once, defeats the entire category.
+The Rotterdam broker's actual settlement address is on the allowlist and the new
+address is not, so the spend is refused at the allowlist check and the attack is over.
+One line of policy, written once, defeats the entire category.
 
 Suppose the attacker had done better and compromised a genuine vendor address already
-on the list. €48,000 exceeds the €5,000 per-transaction cap: refused. Suppose they
-split it into ten payments of €4,800 each, every one individually legal. The rolling
-24-hour cap of €15,000 stops them at the fourth — and *rolling* is doing real work
-there, because a calendar-day cap resets at midnight and 2:14am is on the wrong side
-of it, so a naive implementation would have paid €15,000 before midnight and another
-€15,000 after, in four minutes.
+on the list: €48,000 exceeds the €5,000 per-transaction cap and is refused. Suppose
+they split it into ten payments of €4,800 each, every one individually legal. The
+rolling 24-hour cap of €15,000 stops them at the fourth — and *rolling* is doing real
+work there, because a calendar-day cap resets at midnight and 2:14am is on the wrong
+side of it, so a naive implementation would have paid €15,000 before midnight and
+another €15,000 after, in four minutes.
 
 Suppose they aimed at €12,000, under every cap. That is above the €10,000 co-signature
 threshold, so Ada is asked — once, about one payment, rather than two hundred times a
 month. The bound she is enforcing is her judgment, applied where it is scarce.
 
-And on Monday there is an on-chain record of what was authorized, what was attempted,
-what was refused, and for which reason. Not a vendor's log. Something the company, the
-broker, their auditor, and their insurer can each read independently.
+On Monday there is an on-chain record of what was authorized, what was attempted, what
+was refused, and for which reason. It replaces a vendor's log with something the
+company, the broker, their auditor, and their insurer can each read independently.
 
 > **Do not copy this configuration. As written it cannot be created by v2, for two
 > independent reasons, and the second of them also makes the co-signature step above
@@ -106,10 +106,10 @@ broker, their auditor, and their insurer can each read independently.
 > the gate could never have fired: the €12,000 spend two paragraphs up is refused by
 > the per-transaction cap, not escalated to Ada. Both are recorded as finding F2 in
 > `THREAT-MODEL.md`, which carries the corrected numbers, and rewriting this section
-> is task #26. It is left standing rather than quietly patched because the two defects
-> are the clearest illustration in the repository of a real cost: every grant-time
-> refusal added to the contract re-audits every configuration the project has ever
-> printed, including its own flagship example.
+> is task #26. It is left standing rather than corrected without comment because the
+> two defects are the clearest illustration in the repository of a real cost: every
+> grant-time refusal added to the contract re-audits every configuration the project
+> has ever printed, including its own flagship example.
 
 ### The urgency
 
@@ -142,10 +142,10 @@ anyone, forever, and nothing on chain distinguishes that from what you intended.
 **Unified Balance delegation** is binary. A delegate either can move the balance or
 cannot. There is no notion of *how much*, *how fast*, or *to whom*.
 
-**Per-job escrow** — the ERC-8183 pattern — is genuinely safe and genuinely not
-delegation. The payer must `approve` and `fund` each job individually, which means
-signing for every job. That is a payment rail, not an authority. If a human has to
-approve each spend, the agent is a form, not an agent.
+**Per-job escrow** — the ERC-8183 pattern — is safe precisely because it delegates
+nothing. The payer must `approve` and `fund` each job individually, which means signing
+for every job, so it is a payment rail rather than an authority. If a human has to
+approve each spend, the agent is a form rather than an agent.
 
 **Off-chain policy in a custodial vendor's API** is where most of this actually lives
 today, and it is the most subtly bad option. The caps exist in a database neither
@@ -153,9 +153,9 @@ counterparty controls. The payer cannot verify the cap was enforced; the agent c
 prove it stayed inside one; neither can demonstrate anything to a third party
 afterwards. When a $40,000 spend is disputed, the only artifact is a vendor's word.
 
-The gap all four share is **non-repudiation, in both directions**. A payer needs to
-prove what was authorized. An agent needs to prove it acted within authority. Those
-are the same object viewed from two sides, and nothing currently deployed provides it.
+The gap all four share is **non-repudiation, in both directions**: a payer needs to prove
+what was authorized, and an agent needs to prove it acted within authority. Those are the
+same object viewed from two sides, and nothing currently deployed provides it.
 
 ## What a mandate is
 
@@ -164,15 +164,15 @@ payer's own USDC. Concretely, the payer names a spender and then constrains it a
 seven independent axes.
 
 A **per-transaction cap** limits any single spend. **Rolling window caps** limit
-spending rate over trailing periods — $500/day and $2,000/week simultaneously, and
-"rolling" is load-bearing, as explained below. A **total cap** limits lifetime
-spending across the mandate's whole life. An **allowlist** restricts recipients to
-addresses the payer named at grant time. A **validity window** gives the mandate a
-`notBefore` and an `expiresAt`, so authority expires by default rather than
-persisting by default. An **identity gate** requires the spender to hold a specific
-ERC-8004 agent identity. A **credential gate** requires a live attestation from a
-named validator about that specific agent. And above a configurable threshold, a
-**co-signature** from a second party is required per spend.
+spending rate over trailing periods — $500/day and $2,000/week simultaneously, and the
+distinction between "rolling" and a calendar period matters, as explained below. A
+**total cap** limits lifetime spending across the mandate's whole life. An
+**allowlist** restricts recipients to addresses the payer named at grant time. A
+**validity window** gives the mandate a `notBefore` and an `expiresAt`, so authority
+expires by default rather than persisting by default. An **identity check** requires
+the spender to hold a specific ERC-8004 agent identity. A **credential check**
+requires a live attestation from a named validator about that specific agent. Above a
+configurable threshold, a **co-signature** from a second party is required per spend.
 
 The seven axes are independent but they are not all optional. **v2 requires that at
 least one of the total cap or an `expiresAt` be set**, and refuses the grant with
@@ -182,7 +182,7 @@ rolling window limits a rate and permits unlimited cumulative spending given eno
 time, so a mandate carrying either of those and nothing else is a standing instruction
 to keep paying forever. This is the sense in which authority expires by default rather
 than persisting by default — under v2 it is a rule the contract enforces, not a habit
-the documentation recommends. v1, deployed and immutable at
+the documentation recommends. v1, which is deployed and immutable at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, accepted a per-transaction cap or a
 window as sufficient; that is finding F5 in `THREAT-MODEL.md`.
 
@@ -244,13 +244,13 @@ money. Here there is one number to bound.
 
 **Deterministic finality makes revocation real.** Arc's docs put one confirmation at
 the settlement guarantee of 64+ Ethereum blocks — roughly thirteen minutes — and
-describe reorgs as impossible. `safe` and `finalized` both resolve to `latest`. So a
-revocation is effective the moment it confirms. On a probabilistic-finality chain the
-same revocation spends several minutes in a state where it is not yet economically
-final, and that window is exactly when a compromised counterparty is draining you. A
-kill switch that takes thirteen minutes to become certain is a different product from
-one that takes half a second, and the difference matters most when the counterparty
-is an automated system reacting in milliseconds.
+describe reorgs as impossible, with `safe` and `finalized` both resolving to `latest`, so
+a revocation is effective the moment it confirms. On a probabilistic-finality chain the
+same revocation spends several minutes in a state where it is not yet economically final, and
+that window is exactly when a compromised counterparty is draining you. A kill switch that
+takes thirteen minutes to become certain is a different product from one that takes half a
+second, and the difference matters most when the counterparty is an automated system
+reacting in milliseconds.
 
 **The CallFrom precompile preserves sender identity through delegation.** Arc's Memo
 contract routes through CallFrom, so an agent can call
@@ -264,7 +264,7 @@ the one thing an authority check cannot afford to lose.
 identities and validators can attest about them, so "this agent passed a compliance
 check within the last hour" is a condition a contract can actually evaluate.
 
-## Design decisions worth defending
+## Design decisions and their reasons
 
 ### Rolling windows, not calendar periods
 
@@ -282,11 +282,11 @@ The subtle part, and the source of a real bug: how many buckets to sum. Summing 
 most recent `K` buckets is wrong. With `b = now/S` as the current sub-bucket, the
 range `[b-K+1, b]` covers `L` seconds *ending at the end of bucket b*, which is in
 the future relative to now. The counted span is therefore shifted forward by up to
-one sub-period, and bucket `b-K` falls out of the ring while it is still genuinely
-inside the trailing window — its end at `(b-K+1)·S = b·S + S − L` is later than
-`t − L` for every `t` in the current bucket. A spend late in bucket `b-K` stops being
-counted, and a second spend exactly `K` buckets later passes when it should not. The
-fuzzer found this: `trueUsage=1267 > cap=1000`.
+one sub-period, and bucket `b-K` falls out of the ring while it is still inside the
+trailing window — its end at `(b-K+1)·S = b·S + S − L` is later than `t − L` for every
+`t` in the current bucket. A spend late in bucket `b-K` stops being counted, and a
+second spend exactly `K` buckets later passes when it should not. The fuzzer found
+this: `trueUsage=1267 > cap=1000`.
 
 Summing `K+1` buckets fixes it, and the proof is short. Any spend at time `u` in
 `(t−L, t]` has bucket `floor(u/S) ≤ b` because `u ≤ t`, and `≥ b−K` because
@@ -310,50 +310,50 @@ model, because the *reason* a spend was refused is part of the product. A caller
 gets `OverWindowCap` should retry later; one who gets `RecipientNotAllowed` should
 not retry at all.
 
-The co-signature requirement is checked **last**. If a spend is over the per-tx cap
-*and* over the co-sign threshold, reporting `CosignRequired` would send the operator
-off to collect a signature that cannot help. Cheaper failures report themselves first.
+The co-signature requirement is checked **last**. If a spend is over the per-tx cap *and*
+over the co-sign threshold, reporting `CosignRequired` would send the operator off to
+collect a signature that cannot help. Cheaper failures report themselves first.
 
 Expiry is **exclusive**: a mandate expiring at `T` is dead *at* `T`. Arc's
 sub-second blocks can share a timestamp, so an inclusive bound would leave an
 ambiguous final instant where liveness depends on which block within that second
 happened to include the transaction.
 
-### The credential gate had to be built twice
+### The credential check had to be built twice
 
 ERC-8004's `getValidationStatus` takes a `requestHash` and nothing else. The first
-version of the gate read the returned `response` field, checked it was ≥ 100, and
-considered the agent validated. That gate is decorative, in two independent ways.
+version of the check read the returned `response` field, checked it was ≥ 100, and
+considered the agent validated. That check was decorative, in two independent ways.
 
-An attacker can pick any `requestHash` and have a cooperative validator answer it —
-the payer named a validator at grant time, but the gate never checked that the
-validator who *answered* was that one. And an attacker can point at a real, honest,
-passing attestation that a legitimate validator issued **about a different agent**,
-because the returned `agentId` was also never checked.
+An attacker can pick any `requestHash` and have a cooperative validator answer it,
+because the payer named a validator at grant time while the check never verified that
+the validator who *answered* was that one. An attacker can also point at a real,
+honest, passing attestation that a legitimate validator issued **about a different
+agent**, because the returned `agentId` was also never checked.
 
 Both fields come back in the same tuple. Both are now verified against what the payer
 named, with distinct errors (`CredentialWrongValidator`, `CredentialWrongAgent`) and
-an attack test for each. The general lesson: when a registry lookup is keyed on
+an attack test for each. The general rule: when a registry lookup is keyed on
 something the caller chooses, everything else in the response is an assertion the
 caller can influence, and must be checked rather than trusted.
 
-**One configuration still skips the agent check, and it does so silently.** The
-expected agent is resolved as `c.agentId != 0 ? c.agentId : _identity[mandateId].agentId`,
-and the comparison is guarded by `expectedAgent != 0`. So a mandate that sets
-`F_CREDENTIAL`, leaves `credential.agentId` at zero, and sets no identity gate has no
-agent id to compare against, and the wrong-agent check that the paragraph above exists
-to describe does not run at all. Zero is the default value of a struct field, so this
-is reachable by omission rather than by intent — which is the worst way for a security
-check to be optional.
+**One configuration still skips the agent check, and produces no error when it does.**
+The expected agent is resolved as `c.agentId != 0 ? c.agentId : _identity[mandateId].agentId`,
+with the comparison itself conditional on `expectedAgent != 0`, so a mandate that sets
+`F_CREDENTIAL`, leaves `credential.agentId` at zero, and sets no identity requirement
+has no agent id to compare against, and the wrong-agent check that the paragraph above
+exists to describe does not run at all. Zero is the default value of a struct field, so
+this is reachable by omission rather than by intent — which is the worst way for a
+security check to be optional.
 
 What still holds in that configuration is narrower than it looks, but it is not nothing.
 `createMandate` refuses `F_CREDENTIAL` without a validator, so the attestation must come
-from the validator the payer named. And `requestHash` is stored in `_credential[mandateId]`
-at grant time, so the spender cannot choose which attestation is consulted — unlike the
-original broken gate, where the caller picked the key. The residual exposure is therefore
-one specific mistake: a payer who pins a `requestHash` that turns out to attest a
-*different* agent than the one being granted authority gets no warning, and the gate
-passes on the strength of somebody else's good behaviour.
+from the validator the payer named. The `requestHash` is also stored in
+`_credential[mandateId]` at grant time, so the spender cannot choose which attestation is
+consulted — unlike the original broken version, where the caller picked the key. The
+residual exposure is therefore one specific mistake: a payer who pins a `requestHash`
+that turns out to attest a *different* agent than the one being granted authority gets no
+warning, and the check passes on the strength of another party's good behaviour.
 
 This is left in rather than fixed, and the reasoning is worth stating because it cuts
 the other way from most of this document. The obvious fix is to reject the combination
@@ -362,20 +362,21 @@ about a *thing*, not an agent" — a KYB attestation about the payer's own count
 say, or a compliance check on the recipient — and validation requests in ERC-8004 are
 not required to be agent-scoped. Refusing the configuration would forbid a legitimate
 use to prevent a foreseeable mistake. The choice made here is to document it and pin it
-with a test named so that nobody reads the behaviour as a bug:
+with a test whose name records the behaviour as intended rather than as a bug:
 `test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent` in
 `test/Gates.t.sol`. A payer who wants the agent bound should set `credential.agentId`
-explicitly, or enable the identity gate, which supplies the id as a side effect.
+explicitly, or enable the identity check, which supplies the id as a side effect.
 
 ### Identity is transferable, so holding it is not enough
 
-ERC-8004 identities are ERC-721 tokens. They can be sold. So requiring
+ERC-8004 identities are ERC-721 tokens and can be sold, so requiring
 `ownerOf(agentId) == msg.sender` is necessary but not sufficient — if the payer
 granted authority to the holder of identity #42, and #42 is transferred, spending
-authority would silently follow it to a stranger. The gate therefore lets the payer
-pin an `expectedOwner` at grant time, which must *still* match. Also, `ownerOf`
-reverts for a nonexistent or burned token rather than returning the zero address, so
-the call is wrapped to produce a legible denial rather than an opaque revert.
+authority would follow it to a stranger, and nothing would revert. The identity check
+therefore lets the payer pin an `expectedOwner` at grant time, which must *still*
+match. In addition, `ownerOf` reverts for a nonexistent or burned token rather than
+returning the zero address, so the call is wrapped to produce a legible denial rather
+than an opaque revert.
 
 ### The audit trail does not depend on Memo
 
@@ -411,7 +412,7 @@ encourages aggressive retry logic in off-chain workers, which makes double-payme
 live risk rather than a theoretical one.
 
 A spend that reverts for *any* reason consumes nothing — not the nonce, not the
-window budget, not the total. All of it is rolled back with the transaction. So
+window budget, not the total. All of it is rolled back with the transaction, so
 retrying after a transient failure such as insufficient allowance or a blocklisted
 recipient is correct and safe. This is also why the Solidity implementation can fuse
 the window check and the window write into a single pass where the reference model
@@ -452,17 +453,17 @@ must keep them separate: JavaScript has no rollback, Solidity gets it free from
                                             (authority) (money) (context)
 ```
 
-Funds move payer → recipient. They never touch MandateManager. Revoking either the
+Funds move payer → recipient and never touch MandateManager. Revoking either the
 mandate or the ERC-20 allowance independently stops all spending.
 
 ## Files
 
 `reference/policy.js` is the **normative specification** — a dependency-free
-executable model of every decision the contract makes. It is the source of truth
-because it is the artifact that has actually been executed.
+executable model of every decision the contract makes. It is the source of truth because
+it is the artifact that has actually been executed.
 
 `reference/policy.test.js` is 57 tests over that model: construction guards, each
-cap and gate, named attack tests, and property-based fuzzers. It includes a greedy
+cap and check, named attack tests, and property-based fuzzers. It includes a greedy
 adversary that aims spends at bucket boundaries across `K ∈ {2,3,4,6,12,24}` × 25
 seeds × 200 steps, checked against a brute-force exact ledger. This is the primary
 correctness evidence for the whole project.
@@ -475,12 +476,12 @@ ground plus the three properties a model structurally cannot express — transac
 rollback, storage aliasing in the bucket ring, and packed-`uint96` arithmetic. See
 FORGE.md. As of 2026-08-24 it compiles and all 140 pass.
 
-## Honest status
+## Status and limits
 
 The reference model is real, executed, and passing: `node --test
 reference/policy.test.js` reports 57 tests, 57 pass, 0 fail. It found six genuine
 cap-bypass bugs during development, four in the window algorithm and two in the
-credential gate, each of which is now a named regression test.
+credential check, each of which is now a named regression test.
 
 The model has also been reconciled against the contract in ten places where the two
 disagreed and the contract was right. Four came out of writing the Forge suite (the
@@ -497,20 +498,21 @@ with no validator, and `minResponse == 0`.
 That last one is worth stating separately, because it is the only one that made the
 model *less safe* rather than merely less strict. ERC-8004 encodes a failed validation
 as a low `response` and 100 as passing, so a `minResponse` of zero does not loosen the
-credential gate — it inverts it into a gate that accepts precisely the attestations it
-exists to reject. Zero is also the default value of the on-chain `uint8`, so the
-configuration is reachable by omission. The contract refuses it at grant time, and now
-so does the model.
+credential check — it inverts it into a check that accepts precisely the attestations
+it exists to reject. Zero is also the default value of the on-chain `uint8`, so the
+configuration is reachable by omission. The contract refuses it at grant time, and now so
+does the model.
 
-Six of the ten share one root cause, which is the part worth carrying into the audit: a
-field whose zero doubles as "unset" gives a JavaScript model with real nulls one more
-expressible state than the bytecode has, and every extra state is a place the
-specification can be quietly wrong. `maxStaleness`, `credential.agentId`, `minResponse`,
-`window.cap`, `credential.validator`, and allowlist entries are all that shape. The other
-four are unrelated: two are semantics the model simply had backwards (co-signature
-strictness, who may revoke), one is a type width the model does not have (`uint96`), and
-one is an ordering constraint (`expiresAt` versus `notBefore`). Anywhere the zero-as-unset
-shape appears is worth auditing mechanically rather than reasoning about case by case.
+Six of the ten share one root cause that carries into the audit: a field whose zero
+doubles as "unset" gives a JavaScript model with real nulls one more expressible state
+than the bytecode has, and every extra state is a place the specification can be wrong
+while every test passes. The fields of that shape are `maxStaleness`,
+`credential.agentId`, `minResponse`, `window.cap`, `credential.validator`, and allowlist
+entries. The other four are unrelated: two are semantics the model simply had backwards
+(co-signature strictness, who may revoke), one is a type width the model does not have
+(`uint96`), and one is an ordering constraint (`expiresAt` versus `notBefore`). Anywhere
+the zero-as-unset shape appears is worth auditing mechanically rather than reasoning
+about case by case.
 
 **The Solidity compiles and passes its suite, as of 2026-08-24.** It was authored in an
 environment with no `solc` and no network access, so this was the first mechanical check
@@ -535,10 +537,10 @@ about Foundry rather than something true about Remit. Details in FORGE.md.
 
 `forge test --gas-report`, 2026-08-24, `solc` 0.8.28 at 200 optimizer runs. Arc prices gas
 in USDC and documents a **minimum base fee floor of 20 Gwei**, with
-`cost_usdc = gas_used × price / 10^18`
-(`arc/references/gas-and-fees`, `integrate/exchanges/withdrawals`). The conversion
-reproduces Arc's own worked example exactly — 21,000 gas at 20 Gwei is 0.00042 USDC —
-which is the check that it is being applied correctly.
+`cost_usdc = gas_used × price / 10^18` (`arc/references/gas-and-fees`,
+`integrate/exchanges/withdrawals`). The conversion reproduces Arc's own worked example
+exactly — 21,000 gas at 20 Gwei is 0.00042 USDC — which is the check that it is being
+applied correctly.
 
 **The USDC column below uses 21 Gwei, not the documented floor.** Every one of the four
 live transactions settled at an `effectiveGasPrice` of exactly 21,000,000,000, and an
@@ -561,7 +563,7 @@ document, is a property of v1's bytecode and stays as v1 evidence — but **v2's
 path is unmeasured**, and nothing here may be read as its cost. The new function encodes 196
 calldata bytes against 68, takes an extra cold SLOAD, computes an extra keccak, and emits a log
 with three data words instead of none, so it is a different computation and not a revision of
-this one. #14 owns the re-measurement.
+this one, and #14 owns the re-measurement.
 
 **These rows are now generated with a pinned fuzz seed, and two of them moved when that
 happened.** `evidence/gas.log` was regenerated on 2026-08-25 with
@@ -593,7 +595,7 @@ is not a transaction. See "The 53,114 was never a coincidence" at the end of thi
 
 `test/ArcParity.t.sol` exists because comparing one real receipt against the median above
 would measure almost nothing — that median aggregates mandates with four windows, with
-none, with credential gates, and spends denied before they touch the token. The parity
+none, with credential checks, and spends denied before they touch the token. The parity
 suite runs the *same transactions* with the same constants, each in its own test contract so
 that storage is cold in each, and computes intrinsic gas from the real encoded
 calldata so its predictions are directly comparable to a receipt. Three contracts were
@@ -642,8 +644,8 @@ rides in the transaction's `to` field and not in calldata, so intrinsic gas canc
 within each pair and the whole receipt difference is Arc's own accounting.
 
 The comparison is only valid if every storage slot is in the same class on both tokens,
-since EIP-2200 charges 20,000 to write a slot that held zero and 2,900 to overwrite one that
-did not — a 17,100 gap, the same size as the number being measured. `evidence/premium-check.log`
+since EIP-2200 charges 20,000 to write a slot that held zero and 2,900 to overwrite a live
+one — a 17,100 gap, the same size as the number being measured. `evidence/premium-check.log`
 establishes the preconditions: the vendor's balance is non-zero on Arc (0.35 USDC), so the
 mock's vendor was minted to match, and `allowance(payer → agent)` is zero on Arc, so the
 mock's is too.
@@ -667,19 +669,19 @@ the shortfall to slot count when it belonged to the non-constant harness deviati
 
 **The old 17,100 was never a premium.** It is the EIP-2200 storage-class gap, and it appears
 identically on *both* tokens: 46,138 − 29,038 = 17,100 on the mock, 55,438 − 38,338 = 17,100
-on Arc. Being identical, it cancels. The discarded derivation reached 10,757 + 6,337 = 17,094
+on Arc, and being identical it cancels. The discarded derivation reached 10,757 + 6,337 = 17,094
 and rounded, landing six gas from a constant that has nothing to do with Arc — which is
 precisely what made a broken figure look independently corroborated. Treat arithmetic that
 lands on a famous constant as a prompt to re-derive, not as confirmation.
 
-Two incidental confirmations. The Arc receipts reproduce
+The same measurement produced two incidental confirmations. The Arc receipts reproduce
 `evidence/approve.log` and `evidence/approve-lo.log` to the gas — 55,438 and 38,338 — with a
 different spender and a different amount, days apart. That is forced rather than lucky:
 intrinsic gas depends only on the *count* of zero and non-zero calldata bytes, and both
-spender addresses contain no `0x00` byte (20 non-zero each) while 2,000,000, 200,000, 90,000
-and 100,000 all encode to exactly 3 non-zero bytes.
+spender addresses contain no `0x00` byte (20 non-zero each) while 2,000,000, 200,000, 90,000 and
+100,000 all encode to exactly 3 non-zero bytes.
 
-And the mock itemises exactly, which is what licenses attributing the residual to Arc.
+The mock also itemises exactly, which is what licenses attributing the residual to Arc.
 Intrinsic for `approve` is 21,000 + 16(27) + 4(41) = 21,596, leaving 7,442 of execution on
 the live slot — 5,000 (cold `SLOAD` 2,100 + `SSTORE_RESET` 2,900) + 1,756 (`LOG3`) + 686 of
 dispatch — and 24,542 on the virgin slot, which is 22,100 (2,100 + `SSTORE_SET` 20,000) +
@@ -691,7 +693,7 @@ attributing the residual to Arc: 22,304 predicted and 22,304 charged for the spe
 calldata bytes, and 24,828 against the suite's 24,816 for `createMandate` — a 12-gas gap
 caused by one byte of the spender address differing between the mock and the real agent.
 
-**So the real price of the policy machinery is about 103,479 gas, or 0.217 cents.** The
+**The real price of the policy machinery is therefore about 103,479 gas, or 0.217 cents.** The
 steady-state marginal spend, measured inside an already-written window bucket, is 177,429
 (`evidence/marginal-a.log`); a bare `transfer` to a fresh account on the same chain is
 73,950. The difference buys a per-transaction cap, a lifetime cap, a 24-bucket rolling daily
@@ -759,10 +761,10 @@ against the live chain to 0.009% — so the conclusion below is unaffected.
 Fifty times the optimizer effort bought six gas on a spend — 0.02% — for 27% of the
 bytecode budget. The reason is structural rather than incidental, and it was already
 visible in the cost model above: a spend's gas is `(K+1)` cold `SLOAD`s per window at 2,100
-each plus an external `transferFrom`. Those prices are set by the EVM, not by codegen. The
-optimizer can only win on instruction selection and layout, which is noise at this scale;
-it cannot make a storage read cheaper. `200` stays, and the 13,004 spare bytes stay
-available for the EIP-712 cosign variant.
+each plus an external `transferFrom`, and those prices are set by the EVM rather than by
+codegen. The optimizer can only win on instruction selection and layout, which is noise at
+this scale; it cannot make a storage read cheaper. `200` stays, and the 13,004 spare bytes
+stay available for the EIP-712 cosign variant.
 
 Deploying to Arc confirmed this from the other direction, though less forcefully than first
 claimed. **13,110 gas** of a real spend is Arc's own native-USDC accounting — a cost no
@@ -772,9 +774,8 @@ supporting argument without touching the decision: `runs = 200` stays because 10
 **six gas** for 27% more bytecode, and that measurement is independent of anything Arc's
 token does.
 
-The general lesson is worth more than the setting. "This is the hot path, so optimise it
-harder" is not an argument unless the hot *cost* is the kind of thing the optimiser can
-reach. Here it never was.
+The rule generalises past this one setting. "This is the hot path, so optimise it harder" is an
+argument only where the hot *cost* is something the optimiser can reach, and here it never was.
 
 **A methodological correction, which matters for anyone repeating this — and it was itself
 corrected on 2026-08-25.** The original note said the fuzz seed was not pinned, so two runs
@@ -799,7 +800,7 @@ The contract is deployed and verified on Arc Testnet at
 `0x3744E93B9e796E05CB66311d897559B6F3860196`, and a delegate has executed a real spend
 against a real mandate — so the claims that used to sit here about never having run on a
 live chain are retired, and the gas figures above are reconciled against real receipts.
-What remains genuinely open is narrower but not smaller.
+What remains open is narrower but not smaller.
 
 It has not been audited. A passing test suite says the logic does what the model says; it
 does not say the model is right about the world, and it says nothing about what happens
@@ -807,23 +808,24 @@ under an adversary with a budget. **Remit is intended to hold real money**, whic
 audit a scheduled requirement rather than a disclaimer.
 
 ~~The live exercise covered exactly one mandate shape.~~ **Superseded 2026-08-24, and closed
-2026-08-25.** Five mandate shapes have now been exercised live: ungated, cosigned,
-identity-gated, and credential-gated both with and without a staleness bound. The cosignature
-path has three live transactions, and both ERC-8004 gates have fired against Arc's real
-registries with their predicted selectors and a passing ungated control beside them.
+2026-08-25.** Five mandate shapes have now been exercised live: unrestricted, cosigned,
+identity-checked, and credential-checked both with and without a staleness bound. The cosignature
+path has three live transactions, and both ERC-8004 checks have fired against Arc's real
+registries with their predicted selectors and a passing unrestricted control beside them.
 ~~**`revoke` is the only path left with zero live transactions.**~~ **`revoke` has now run
-three times** — the two gate-blocked mandates were spent on it, one revoked by its payer and
-one by its own delegate, and every function this contract exposes has been exercised on Arc.
+three times** — the two mandates blocked by those checks were spent on it, one revoked by
+its payer and one by its own delegate, and every function this contract exposes has been
+exercised on Arc.
 
-What remains open is narrower than "untested paths", and worth naming precisely rather than
+What remains open is narrower than "untested paths", and naming it precisely is better than
 letting the old sentence stand as a stale proxy for it. The ERC-8004 registries are
-ERC-1967 proxies whose behaviour can change under us: one already reverts with
-`Error(string) = "unknown"` where the design had hedged it might return a zero tuple, and
-the live attestation we found carries response 1 under the tag `"verified"` while being 97
-days stale. Neither is a contract defect — the gate correctly refused it — but neither is
-pinned by anything we control. Separately, the identity gate's *positive* path stays
-untestable, because it needs an identity NFT minted to our delegate and agent 16330 belongs
-to someone else.
+ERC-1967 proxies whose behaviour can change independently of this project: one already
+reverts with `Error(string) = "unknown"` where the design had hedged it might return a zero
+tuple, and the live attestation on Arc Testnet carries response 1 under the tag `"verified"`
+while being 97 days stale. Neither is a contract defect — the check correctly refused it — but
+neither is pinned by anything this project controls. Separately, the identity check's *positive*
+path stays untestable, because it needs an identity NFT minted to this project's delegate and
+agent 16330 belongs to another owner.
 
 Two Arc behaviours remain asserted from documentation rather than observed: sub-second
 blocks sharing a timestamp, and the CallFrom precompile. Whether an EIP-7702-delegated EOA
@@ -834,19 +836,19 @@ paths on testnet, resolve the three documented soft spots as decisions, and get 
 Three of those four have since happened — the deep profile has been run, the live phase is
 closed at 31 receipts covering all five state-changing functions, and all three soft spots
 are resolved the strict way in v2 (which turned up two more, both fixed). Two paths are
-still unexercised on chain and the phase was closed knowing it: the identity gate and the
-credential gate, both blocked on external facts rather than on effort — no ERC-8004 identity
-is minted to our agent wallet, and the only real attestation on Arc Testnet carries a
-failing response of 1. The audit is the fourth item, and it is the one that was always going
+still unexercised on chain and the phase was closed knowing it: the identity check and the
+credential check, both blocked on external facts rather than on effort — no ERC-8004 identity
+is minted to this project's agent wallet, and the only real attestation on Arc Testnet carries
+a failing response of 1. The audit is the fourth item, and it is the one that was always going
 to be a hard requirement.
 
 Two factual questions remain open and should not be presented as settled. Whether
 Circle's `agent-wallet-policy` already implements equivalent caps off-chain in its
 custodial API is unverified — so the claim to make is "non-custodial, on-chain,
-independently verifiable", not "first". And whether an EIP-7702-delegated EOA still
-counts as an EOA for the Memo and Multicall3From paths is unverified; it matters for
-smart-account agents, and given the real-money intent it needs an answer before launch
-rather than before publication.
+independently verifiable", not "first". Whether an EIP-7702-delegated EOA still counts as an
+EOA for the Memo and Multicall3From paths is unverified; it matters for smart-account
+agents, and given the real-money intent it needs an answer before launch rather than before
+publication.
 
 ## Verification worksheet
 
@@ -865,9 +867,9 @@ against. All nine were verified in the Arc docs; none are inferred.
 | Value transfers can revert despite sufficient balance — zero address, blocklisted counterparty, or any transfer that would burn value; blocklisted transfers revert at runtime after consuming gas | `/arc/references/evm-differences`, `/integrate/wallets/add-arc-to-a-wallet` §5.2 |
 | ERC-8004 registry addresses, and `getValidationStatus(bytes32)` returning `(address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)` | `/arc/tutorials/register-your-first-ai-agent` L15-17, L529-545 |
 
-The `getValidationStatus` return tuple is worth restating because it is what made the
-credential gate fixable: the validator and the agent are both in the response, so
-both can be checked. A gate that reads only `response` is not a gate.
+The `getValidationStatus` return tuple is what made the credential check fixable: the
+validator and the agent are both in the response, so both can be checked. A check that
+reads only `response` verifies neither the validator nor the agent.
 
 ### What has since been observed rather than read (2026-08-24)
 
@@ -891,18 +893,18 @@ hedge is why nothing needs changing now. `_checkCredential` wraps the registry c
 tests. The live chain has now picked one. Both stay tested regardless — the registries
 sit behind upgradeable proxies, so today's answer is not permanently today's answer.
 
-Two incidental findings from the same probe, both worth keeping. There is a real
+Two incidental findings came out of the same probe. There is a real
 attestation filed under `requestHash == bytes32(0)` — validator
 `0xB152c3B6436318aD340153f1d30C9BBb8634681A`, agent `16330`, response `1`, tag
 `"verified"`. Under the ERC-8004 convention Arc's own tutorial states four times
-(`100 = passed, 0 = failed`) a response of `1` is a *failure*. So there is already a
+(`100 = passed, 0 = failed`) a response of `1` is a *failure*, so there is already a
 failing attestation on-chain wearing the label "verified", which is the argument for
 reading the numeric response and ignoring the tag — made by the chain instead of by
-assertion. And `spendable()` reads `balanceOf`, the 6-decimal view of an 18-decimal
-balance, so it truncates: a real balance of `100.0000001` USDC reports as `100`. That
-error runs one way only, under-reporting by at most 1e-6 USDC, and `spend` never reads
-a balance at all, so it cannot affect what a policy permits. Noted in the contract at
-the call site.
+assertion. The second finding is that `spendable()` reads `balanceOf`, the 6-decimal view
+of an 18-decimal balance, so it truncates: a real balance of `100.0000001` USDC reports as
+`100`. That error runs one way only, under-reporting by at most 1e-6 USDC, and `spend`
+never reads a balance at all, so it cannot affect what a policy permits. Noted in the
+contract at the call site.
 
 ### What has since been observed by transacting (2026-08-24)
 
@@ -926,7 +928,7 @@ The double-`Transfer` row is the one with a consequence for anyone building on t
 **An indexer that reconciles payments by counting `Transfer` logs will double-count every
 Remit spend**, because the same payment appears once in 18 decimals and once in 6. Remit's
 own `Spend` event is the deduplicated authoritative record. That was previously a matter of
-taste — a nice audit trail to have — and is now a requirement with an observed failure mode
+taste — a useful audit trail to have — and is now a requirement with an observed failure mode
 behind it.
 
 The non-custody row deserves the same emphasis for the opposite reason: it is the central
@@ -938,20 +940,20 @@ structurally guaranteed besides — the contract contains no `payable` function,
 ### What transacting has since established beyond the first spend (2026-08-24)
 
 The table above stops at the first live payment. Everything below came from continuing to
-transact against the same deployment: the cosignature flow end to end, both ERC-8004 gates
+transact against the same deployment: the cosignature flow end to end, both ERC-8004 checks
 against Arc's real registries, the allowance ceiling, and a spend carrying a commitment
 instead of a label. **At the close of 2026-08-24, twenty-five live transactions existed and
 every one had `status 1`** — two contract deployments, eleven calls to `MandateManager`, seven
 to Arc's own USDC, and five to a stand-in ERC-20 deployed alongside it to measure the token
-premium. Five mandates, four spends. This paragraph said twenty-four until 2026-08-25, short by
-the one transaction that created `MandateManager` itself; the recount is described two sections
-below. Only `revoke` and `withdrawCosign` had never run; the next two sections close both,
-taking the total to thirty-one.
+premium, and the twenty-five cover five mandates and four spends. This paragraph said
+twenty-four until 2026-08-25, short by the one transaction that created `MandateManager`
+itself; the recount is described two sections below. Only `revoke` and `withdrawCosign` had
+never run; the next two sections close both, taking the total to thirty-one.
 
-The gate results below were obtained with `cast call` rather than `cast send`, which costs
-nothing and is the right instrument: a gate's whole output is which error selector comes back,
-and a dry run returns it without paying for a reverted transaction. Those are consequently not
-counted among the twenty-four.
+The check results below were obtained with `cast call` rather than `cast send`, which costs
+nothing and is the right instrument: the whole output of a policy check is which error
+selector comes back, and a dry run returns it without paying for a reverted transaction.
+Those are consequently not counted among the twenty-four.
 
 #### The cosignature flow, end to end on chain
 
@@ -964,16 +966,16 @@ spend failed with `CosignRequired`, whose revert data was `0x6a39578f` followed 
 revert alone — no follow-up call, no indexer, no event subscription.
 
 **A delegate cannot approve its own spend.** `approveCosign` from the agent and from the
-vendor both reverted `NotCosigner()` (`0x1cf89d6f`). Only the named cosigner succeeded.
-(v1's name and v1's receipts. `approveCosignFor` guards this identically — `msg.sender !=
+vendor both reverted `NotCosigner()` (`0x1cf89d6f`), and only the named cosigner succeeded.
+(Those are v1's name and v1's receipts. `approveCosignFor` guards this identically — `msg.sender !=
 m.cosigner` — but has no live evidence of its own, and #11 closed the harder version of this
 hole at grant time by refusing `cosigner == spender` outright, which no approval-time check
 could reach.)
 
 **One signature authorises exactly one payment, locked twice over.** After the cosigned spend
-`isCosignApproved` reads false — the approval was consumed. And re-submitting the same
+`isCosignApproved` reads false — the approval was consumed. Re-submitting the same
 payment with a *fresh nonce* produces a different hash and demands a fresh signature, because
-the hash binds the nonce. So a human's approval cannot be recycled onto a second payment even
+the hash binds the nonce, so a human's approval cannot be recycled onto a second payment even
 by a delegate that controls the amount and the recipient.
 
 **The threshold is strictly greater, pinned live from both sides.** 50,000 passes with no
@@ -983,10 +985,10 @@ The second, third and fourth of those are exactly the properties a local suite c
 controlling `msg.sender` or by never thinking about nonce rebinding. They now have chain
 evidence instead.
 
-**A measurement trap worth publishing, because it inverted a conclusion.** The cosigned spend
-cost *less* than the first live payment — 194,225 against 216,458 — and on first reading I
-scored requiring a human signature as a net saving. It is not. EIP-3529 refunds are settled at
-the end of a transaction and are already deducted from `gasUsed`, so **a receipt is a
+**A measurement trap that inverted a conclusion.** The cosigned spend
+cost *less* than the first live payment — 194,225 against 216,458 — and on first reading that
+scores requiring a human signature as a net saving, which it is not. EIP-3529 refunds are
+settled at the end of a transaction and are already deducted from `gasUsed`, so **a receipt is a
 post-refund number, and two receipts are not comparable unless both earn the same refund.**
 Clearing `_cosignApproved` earns a 4,800 refund that no other spend earns.
 
@@ -998,18 +1000,18 @@ a fresh bucket and the window cost cancels exactly. The third spend re-entered b
 dropped 16,408, within 692 of the 17,100 storage-class gap and nothing to do with cosigning. A
 reader who assumed all three shared one bucket would compute a contradiction here.
 
-So: **the observed net cost of the cosignature gate is 388 gas** — 194,225 less 193,837 — which
-is what the payer actually paid, refund included. Adding the 4,800 back gives a gross delta of
-5,188 against 5,012 predicted: cold `SLOAD` of `_cosignApproved` 2,100, `SSTORE` non-zero→zero
-2,900, and 12 gas of calldata (100,000 carries one more non-zero byte than 50,000). The 176
-residual is branch evaluation plus the nested-mapping keccak.
+**The observed net cost of the cosignature requirement is 388 gas** — 194,225 less 193,837 —
+which is what the payer actually paid, refund included. Adding the 4,800 back gives a gross
+delta of 5,188 against 5,012 predicted: cold `SLOAD` of `_cosignApproved` 2,100, `SSTORE`
+non-zero→zero 2,900, and 12 gas of calldata (100,000 carries one more non-zero byte than
+50,000). The 176 residual is branch evaluation plus the nested-mapping keccak.
 
 The model's *predicted* net is 5,012 − 4,800 = **212**, and the 176 residual is precisely what
-separates it from the observed 388. Both numbers are worth keeping, but only one of them is a
+separates it from the observed 388. Both numbers belong in the record, but only one of them is a
 measurement — and the project's working notes had been carrying the 212 as if it were the
-observed figure, which is how a predicted number quietly becomes a published one.
+observed figure, which is how a predicted number becomes a published one.
 **Requiring a human signature costs 388 gas: under two tenths of one percent of the
-transaction.** The refund is what makes it that cheap — the gate sets a slot and then clears it
+transaction.** The refund is what makes it that cheap — the check sets a slot and then clears it
 in the same transaction, and the EVM pays most of it back.
 
 #### Storage packing, proven by observation rather than asserted
@@ -1029,9 +1031,9 @@ already-non-zero slot, so a spend pays one `SSTORE_RESET` for it rather than two
 `getWindow` also returned `subLength = 3600` = 86400/24, confirming that bucket width is
 precomputed at grant time and `spend` never divides.
 
-#### Both ERC-8004 gates fire against Arc's live registries
+#### Both ERC-8004 checks fire against Arc's live registries
 
-Three gated mandates were granted, then spends dry-run against each.
+Three mandates carrying these checks were granted, then spends dry-run against each.
 
 | mandate | gate configuration | result |
 |---|---|---|
@@ -1041,34 +1043,35 @@ Three gated mandates were granted, then spends dry-run against each.
 
 **The headline is M4.** A real attestation exists on Arc Testnet tagged `"verified"` whose
 numeric response is `1`, where Arc's own tutorial states four times that 100 = passed. The
-credential gate rejects it. Had the gate trusted the free-text tag instead of the number, it
+credential check rejects it. Had the check trusted the free-text tag instead of the number, it
 would have accepted a failing attestation as proof of a passing one. The comment at
-`MandateManager.sol:639` — that reading `response` alone makes this gate theater — is now
+`MandateManager.sol:639` — that reading `response` alone makes this check theater — is now
 backed by live data rather than by reasoning about a hypothetical.
 
 M3 is the **impersonation** case rather than a missing-token case, which is the stronger
-test: agent 16330 is real and registered, owned by `0x2F061aA5…`, and the gate refuses our
-delegate precisely because it does not hold that identity. M5 shows staleness working against
-a real timestamp — with `minResponse` relaxed to 1 the response check passes, and the
-attestation's 8,417,882-second age then fails it.
+test: agent 16330 is real and registered, owned by `0x2F061aA5…`, and the check refuses this
+project's delegate precisely because it does not hold that identity. M5 shows staleness
+working against a real timestamp — with `minResponse` relaxed to 1 the response check passes, and
+the attestation's 8,417,882-second age then fails it.
 
 **The control is what makes those three reverts evidence.** The same call shape against
-ungated mandate 1 *succeeded*, returning a spendHash. Without it, three reverts would have
+unrestricted mandate 1 *succeeded*, returning a spendHash. Without it, three reverts would have
 been indistinguishable from a malformed call.
 
-Two incidental findings, both worth keeping. Gate structs are written **conditionally**
-(lines 405-409), so an ungated mandate pays nothing at all for gate storage — visible in the
-grant costs of 127,834 for M3 against 151,036 and 151,072 for M4 and M5. And line 407
-*already* reverts `BadConfig` when `minResponse == 0`, commented that 0 would accept a failed
-attestation. The contract therefore already refuses one gate configuration that could never
-fire, which is the same principle the unreachable-cosign-threshold guard applies — so v2
-extended an existing pattern rather than inventing one, and this paragraph is the reason the
-guard was easy to argue for. (That guard was written here and in `CHANGELIST.md` as `perTxCap
-< cosignThreshold`, which is off by one: line 492 is strict, so equality is dead too, as this
-document goes on to demonstrate with a live receipt 260 lines below. **v2 implements it as
-`effectiveMax <= cosignThreshold` where `effectiveMax = min(2^96 - 1, perTxCap, totalCap,
-every window cap)`**, and the boundary is pinned one base unit either side in
-`test/Creation.t.sol`. Implementing it also turned up two dead-gate configurations that
+Two incidental findings came out of the same runs. The identity and credential structs are
+written **conditionally** (lines 405-409), so a mandate with no checks pays nothing at all for
+that storage — visible in the grant costs of 127,834 for M3 against 151,036 and 151,072 for
+M4 and M5. Line 407 *already* reverts `BadConfig` when `minResponse == 0`, commented that 0
+would accept a failed attestation. The contract therefore already refuses one credential
+configuration that could never fire, which is the same principle the unreachable-cosign-threshold
+guard applies, so v2 extended an existing pattern rather than inventing one, and that precedent
+is what made the new guard straightforward to justify. (That guard was written here and in
+`CHANGELIST.md` as `perTxCap < cosignThreshold`, which is off by one: line 492 is strict, so
+equality is dead too, as this document goes on to demonstrate with a live receipt further below.
+**v2 implements it as `effectiveMax <= cosignThreshold` where
+`effectiveMax = min(2^96 - 1, perTxCap, totalCap, every window cap)`**, and the boundary is
+pinned one base unit either side in
+`test/Creation.t.sol`. Implementing it also turned up two dead configurations that
 neither this document nor `CHANGELIST.md` had listed — see the README.)
 
 One further assumption confirmed rather than discovered: `ownerOf` on a nonexistent token
@@ -1076,7 +1079,7 @@ reverts with `ERC721NonexistentToken(uint256)` (`0x7e273289`), so Arc's identity
 OpenZeppelin v5 and the `try/catch` at line 628 has a real failure shape to catch. That was
 written from the documentation; it now has an observation behind it.
 
-#### The shared-allowance ceiling is a race between delegates, and `spendable()` is silent about it
+#### The shared-allowance ceiling is a race between delegates, and `spendable()` does not report it
 
 This is the one live finding that produces a **documented limitation** rather than a
 confirmation, and it belongs in the design rather than the changelist because it is not a
@@ -1105,35 +1108,35 @@ fix the race, only expose it.
 
 **Built in v2, and it needed three refusals and a clamp the changelist did not anticipate.**
 `spendableAcross(bytes32[] mandateIds)` now returns `min(Σ min(policyHeadroom(id), 2^96 - 1),
-allowance(payer, manager), balanceOf(payer))` for up to `MAX_JOINT = 8` mandates. The paragraph
-above still stands unaltered on the substance: it exposes the overlap and does not fix the
-race. What was not anticipated is how many ways a joint view can return a *plausible* wrong
-number, which is worse than reverting. Summing `policyHeadroom` naively **panics** on two
-expiry-only mandates from one payer, because that function correctly returns
+allowance(payer, manager), balanceOf(payer))` for up to `MAX_JOINT = 8` mandates.
+The paragraph above still stands unaltered on the substance: it exposes the overlap and does
+not fix the race. What was not anticipated is how many ways a joint view can return a
+*plausible* wrong number, which is worse than reverting. Summing `policyHeadroom` naively
+**panics** on two expiry-only mandates from one payer, because that function correctly returns
 `type(uint256).max` when the payer set no amount bound while `spend` still refuses anything
 above `type(uint96).max` — so the fix is to clamp each term at the largest single spend that
 could actually occur, after which the sum provably cannot overflow (`8 × (2^96 − 1) < 2^99`).
 Mixed payers, duplicate ids and unknown ids all revert, by `MixedPayers`, `DuplicateMandate`
 and `UnknownMandate` — the first two are new errors, and they are the first in this contract to
 report a badly formed *question* rather than a refused action. Revoked and expired mandates
-contribute zero without reverting, because they are the ordinary contents of any real list. The
-divergence worth noting: `spendable` returns 0 for an unknown id and the joint view refuses
-one, deliberately, because a single zero is unambiguous while one bad id among eight is
-invisible inside a total that still looks right.
+contribute zero without reverting, because they are the ordinary contents of any real list.
+The divergence is deliberate: `spendable` returns 0 for an unknown id and the joint view
+refuses one, because a single zero is unambiguous while one bad id among eight is invisible
+inside a total that still looks right.
 
 #### `ref` carries a commitment for 240 gas, and needs no contract change
 
 Spend #4 passed `ref = keccak256(abi.encode(invoiceId, poNumber, amountMinor, vendor, salt))`
 in place of a plaintext label, and two independent implementations produced the same digest:
-`0x4fa8c8c1c61e17f007f3c9e485abc8e332bcdcad37f2552f0a8f0fac8b98077a`. It went on chain as
-mandate 1's second spend and the event carries it verbatim, where every earlier spend carries
+`0x4fa8c8c1c61e17f007f3c9e485abc8e332bcdcad37f2552f0a8f0fac8b98077a`. It went on chain as mandate
+1's second spend and the event carries it verbatim, where every earlier spend carries
 readable ASCII.
 
-**It is not free, and the reason is a nice illustration of how calldata is priced.** A digest
+**It is not free, and the reason lies in how calldata is priced.** A digest
 has no zero bytes to discount — all 32 are non-zero, at 16 gas each, so the `ref` word costs
 512. `"invoice-0002"` is 12 ASCII bytes zero-padded to 32, so it costs 12×16 + 20×4 = 272.
 **Committing rather than labelling therefore costs 240 gas**, about 0.13% of a spend and about
-half a millionth of a cent at 21 gwei. Worth stating as a number rather than as "nothing":
+half a millionth of a cent at 21 gwei. It is a number rather than "nothing":
 padding is what makes short plaintext cheap, and any privacy measure that fills a field with
 high-entropy bytes gives that discount up. It is the smallest privacy premium in this document
 by three orders of magnitude, and it is still not zero.
@@ -1143,8 +1146,8 @@ change, no new flag, and no new storage. A payer who does not want invoice numbe
 orders and internal identifiers standing in public commits to them and keeps the preimage;
 anyone holding the preimage can verify a payment against its paperwork exactly, and anyone else
 sees 32 bytes of noise. That is a real improvement available to every mandate that exists
-today, which is worth saying plainly, because every other layer in `PRIVACY.md` requires work
-that this one does not.
+today, and it stands alone in `PRIVACY.md`: every other layer there requires work that this
+one does not.
 
 ### Revoke closes the live phase (2026-08-25)
 
@@ -1162,17 +1165,17 @@ change state — `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawC
 the time of writing this paragraph four of them had live transactions. The next section closes
 the fifth, and corrects two counts while it is at it.
 
-Reading it turns up something worth documenting independently of the gap. `approveCosign` at
-726 checks three things: the mandate exists, it has `F_COSIGN` set, and the caller is the
-cosigner. `withdrawCosign` at 736 checks **only the last of those**. On an unknown mandate
-`m.cosigner` is the zero address, so a caller is refused with `NotCosigner()` rather than
-`UnknownMandate()` — safe, but misleading. And `delete _cosignApproved[mandateId][hash]`
-succeeds whether or not anything was there, so withdrawing an approval that never existed emits
-`CosignWithdrawn` describing the removal of authority that was never granted. The asymmetry is
-defensible on the same reasoning that lets a spender revoke — giving up authority cannot harm
-the payer, so it needs fewer guards than granting it — but the event is a trap for an indexer
-reconstructing who approved what, and neither the asymmetry nor its consequence was written
-down anywhere before now.
+Reading it turns up a property that belongs in the record independently of the gap.
+`approveCosign` at 726 checks three things: the mandate exists, it has `F_COSIGN` set, and the
+caller is the cosigner, while `withdrawCosign` at 736 checks **only the last of those**. On an
+unknown mandate `m.cosigner` is the zero address, so a caller is refused with `NotCosigner()`
+rather than `UnknownMandate()`, which is safe but misleading. The statement
+`delete _cosignApproved[mandateId][hash]` also succeeds whether or not anything was there, so
+withdrawing an approval that never existed emits `CosignWithdrawn` describing the removal of
+authority that was never granted. The asymmetry is defensible on the same reasoning that lets a
+spender revoke — giving up authority cannot harm the payer, so it needs fewer guards than
+granting it — but the event is a trap for an indexer reconstructing who approved what, and
+neither the asymmetry nor its consequence was written down anywhere before now.
 
 | tx | signer | mandate | `gasUsed` | outcome |
 |---|---|---|---|---|
@@ -1180,8 +1183,8 @@ down anywhere before now.
 | `0x12d905a4…` | **agent** | M4 | **32,945** | revoked by its own delegate |
 | `0xe1d054e9…` | payer | M3 again | **28,008** | succeeded, re-emitted the event |
 
-**The delegate can revoke, and that was a correction to my own reading rather than a design
-change.** I had planned this test to prove that only the payer may revoke, and line 704 says
+**The delegate can revoke, and that corrected a misreading of the source rather than a design
+change.** The test was planned to prove that only the payer may revoke, and line 704 says
 `msg.sender != m.payer && msg.sender != m.spender` — the spender is authorised too,
 deliberately, as the doc comment above it explains: giving up your own authority can never harm
 the payer, and it lets a compromised agent shut itself off without waiting for its payer to
@@ -1189,7 +1192,7 @@ notice. That deserved a live transaction rather than a footnote, so M4 was revok
 from the agent's own key. A third party is still refused: the vendor address gets `NotPayer()`
 **`0x1435e357`**, before and after revocation alike.
 
-Which makes the error's *name* wrong. `NotPayer()` is thrown on a path the spender may
+That makes the error's *name* wrong. `NotPayer()` is thrown on a path the spender may
 legitimately take, so it describes the check inaccurately to anyone reading a decoded revert.
 `NotAuthorised()` is truthful, and **v2 has renamed it** — the selector moves from
 **`0x1435e357`** to **`0x1648fd01`**, which is an ABI change, so a client that decodes v2's
@@ -1201,7 +1204,7 @@ Two things about how that change got made are worth more than the change itself.
 for keeping the wrong name was that it was already in a deployed ABI — a real reason, and one
 that **expired the moment the tag `v1.0.0-arc-testnet` existed**, because the tag pins v1's ABI
 at v1's address and v2 is a different contract at a different address. The blocker was
-bookkeeping, not compatibility, and one `git tag` dissolved it. And the fix was filed as
+bookkeeping, not compatibility, and one `git tag` dissolved it. The fix was also filed as
 "cosmetic" for weeks, which undersold it: a misleading error name is a real cost paid by
 whoever debugs against it at 3am, and the cheapness of a change is not the same as the
 smallness of its consequence.
@@ -1210,17 +1213,17 @@ smallness of its consequence.
 
 Revocation is invisible in balances, so it has to be proven some other way. Before revocation a
 dry-run spend on M3 reverted `IdentityNotHeld()` **`0x6eab756c`** and on M4
-`CredentialMissing()` **`0x9e586322`**, both from the ERC-8004 gates at lines 473-474.
+`CredentialMissing()` **`0x9e586322`**, both from the ERC-8004 checks at lines 473-474.
 Afterwards both revert `Revoked()` **`0x44825a4b`**, from line 444. The selector *changing* is
-the finding: revocation is not merely one more failing check among many, it is the **first
-substantive one** — only the existence test at line 443 precedes it — and it short-circuits the
-expiry check, the spender check, the allowlist, the amount bounds, the idempotency nonce, both
-ERC-8004 gates and every cap and window behind it. A payer's remedy therefore costs one storage
-write and consults nothing else: no clock, no registry, no external call.
+the finding: revocation is the **first substantive check** in the sequence — only the existence
+test at line 443 precedes it — and it short-circuits the expiry check, the spender check, the
+allowlist, the amount bounds, the idempotency nonce, both ERC-8004 checks and every cap and
+window behind it. A payer's remedy therefore costs one storage write and consults nothing
+else: no clock, no registry, no external call.
 
 Two controls make that reading legitimate rather than assumed. M5, untouched, still reverts
 `CredentialStale()` **`0xca36b069`**; M1, untouched, still returns a `spendHash` from a
-successful dry run. Exactly two mandates changed.
+successful dry run, so exactly two mandates changed.
 
 `getMandate(M3)` confirms revocation is one bit and not a deletion: `perTxCap` 500,000,
 `expiresAt` 1790726400, `flags` 25, `totalSpent` 0 and `spendCount` 0 all survive verbatim,
@@ -1229,16 +1232,16 @@ which is what makes a revoked mandate auditable — a design that cleared the st
 gas would destroy the record of what had been authorised.
 
 Both views notice. `spendable(M3)` and `policyHeadroom(M3)` each fell from 500,000 to **0**,
-because `policyHeadroom` opens with `if (!isLive(mandateId)) return 0` at line 836 and `isLive`
-tests `m.revoked` at line 784. This is worth contrasting with the two silences documented
-above: the allowance race and the ERC-8004 gates are genuinely invisible to `spendable`, but
+since `policyHeadroom` opens with `if (!isLive(mandateId)) return 0` at line 836 and `isLive`
+tests `m.revoked` at line 784. That contrasts with the two silences documented
+above: the allowance race and the ERC-8004 checks are invisible to `spendable`, but
 revocation is not. `isLive` returns false for M3 and M4 and true for M1 and M5.
 
 #### Three receipts reconcile to a constant residual, and the second address comparison is visible
 
 All three transactions carry identical intrinsic gas — 21,000 plus 36 non-zero calldata bytes
 at 16 each = **21,576**, since the `revoke(bytes32)` selector `0xb75c7dc6` and both mandate IDs
-happen to contain no zero byte at all. So every difference between the three is execution.
+happen to contain no zero byte at all, so every difference between the three is execution.
 
 ```
                         gasUsed   execution   model    residual
@@ -1291,15 +1294,16 @@ saving; subtracting the two receipts gives 2,800, which is what the storage mode
 exactly. **The 342-gas discrepancy was entirely an artefact of comparing estimates.** This is
 the third time in this project that a number obtained by the wrong instrument nearly became a
 published one — after a predicted cosign cost quoted as measured, and a `ref` commitment called
-free. Estimates size a transaction. Receipts measure it. They are not interchangeable, and the
-rule now standing is that no gas figure enters this document unless a receipt produced it.
+free. Estimates size a transaction while receipts measure it, so the two are not
+interchangeable, and the rule now standing is that no gas figure enters this document unless a
+receipt produced it.
 
 #### The allowance that governs a spend is payer → contract, not payer → delegate
 
-A loose end from the reconnaissance run, recorded because the mistake was mine and the shape of
-it recurs. `spendable(M3)` reported 500,000 while a live allowance of 100,000 was on record,
+A loose end from the reconnaissance run, recorded because the misreading behind it recurs.
+`spendable(M3)` reported 500,000 while a live allowance of 100,000 was on record,
 which looked like `spendable` failing to intersect the allowance — a bug in the one view an
-agent is told to trust. It was not. Line 868 reads
+agent is told to trust. The view is correct, and line 868 reads
 `usdc.allowance(m.payer, address(this))`: the delegate never holds an allowance, because the
 delegate never calls `transferFrom`. `MandateManager` does, on the delegate's instruction, so
 the approval that matters flows payer → contract. The 100,000 was an unrelated payer → agent
@@ -1311,21 +1315,21 @@ the deployment is bound to Arc's real token and not a stand-in. `spendable(M1)` 
 then `min(policyHeadroom 500,000, allowance 1,650,000, balance 18,547,508)`, exactly as the
 comment at 851-854 describes.
 
-The generalisable part: a three-argument allowance is easy to query with the wrong pair, and
+That generalises: a three-argument allowance is easy to query with the wrong pair, and
 doing so produces a plausible number rather than an error. It also means a payer who revokes
 authority by zeroing an approval must zero the one held by `MandateManager` — revoking the
-delegate's own approval, if any exists, does nothing to Remit. Both remedies are worth
-documenting for payers, because they are not interchangeable and only one of them is
+delegate's own approval, if any exists, does nothing to Remit. Both remedies belong in the
+payer documentation, because they are not interchangeable and only one of them is
 per-mandate.
 
 One documentation gap follows from the same run. `policyHeadroom`'s comment at lines 827-828
 says it ignores "the allowlist and any co-signature requirement" — accurate as far as it goes,
-but it also ignores the ERC-8004 identity and credential gates, which M3 demonstrated by
-reporting 500,000 while being gate-blocked at every attempt. An agent trusting that view would
+but it also ignores the ERC-8004 identity and credential checks, which M3 demonstrated by
+reporting 500,000 while every attempt to spend was refused. An agent trusting that view would
 build a transaction that cannot succeed. The behaviour is fine; the comment is incomplete, and
-naming the gates in it is on the changelist.
+naming those checks in it is on the changelist.
 
-### `withdrawCosign` actually closes it, and two counts were wrong (2026-08-25)
+### `withdrawCosign` closes it, and two counts were wrong (2026-08-25)
 
 The section above ends by admitting that four of five state-changing functions had live
 transactions. `withdrawCosign` now has three-quarters of an hour of history and the count is
@@ -1337,43 +1341,43 @@ stand-in token used for the premium measurement.
 forward in prose instead of derived.** The transaction total said twenty-seven an hour earlier;
 counting distinct `transactionHash` values across `evidence/` and pairing each with its target
 address gives thirty-one, and shows the old figure had counted MockUSDC's deployment while
-silently omitting `MandateManager`'s own. One creation was in the total and the other was not,
+omitting `MandateManager`'s own. One creation was in the total and the other was not,
 which is also why the 2026-08-24 figure above was twenty-four rather than twenty-five: the same
 missing transaction, inherited. Separately, the paragraph above this section said "six functions
 change state" while listing five names — the arity was never checked against the source. Parsing
 every declaration in `MandateManager.sol` for `external` or `public` without `view` or `pure`
 returns exactly five: `createMandate`, `spend`, `revoke`, `approveCosign`, `withdrawCosign`.
 There is no `receive`, no `fallback`, and the constructor is not a function that can be called
-again. Ten public views make up the rest of the surface. Both errors survived several passes,
-which is the argument for deriving counts from the artefacts rather than restating them.
+again; ten public views make up the rest of the surface. Both errors survived several
+passes, which is the argument for deriving counts from the artefacts rather than restating them.
 
-**And the same trap caught the same document a second time, 2026-08-27 — this paragraph is where
-it was aimed.** The parse named above is a rule about *the source file you run it on*, and after
-#28 running it on the working tree returns `approveCosignFor`, not `approveCosign`, plus twelve
-views rather than ten. The names above are v1's and stay v1's, because the thirty-one receipts
-they explain came from v1's bytecode; run the parse against
-`git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to reproduce them. The banner in
-`MandateManager.sol` was **not** so lucky: #28 substituted `approveCosignFor` into its version of
-this same sentence, and so claimed a live receipt for a function that has never executed on any
-chain. It was corrected the same day. The lesson refines the one this paragraph already draws —
-deriving a count from the artefact is necessary but not sufficient, because the *right* artefact
-is the one the claim is about, and "the current file" is the wrong one for a claim about a
-deployment. A derivation can be executed perfectly against the wrong input.
+**The same trap caught the same document a second time, 2026-08-27, and it caught the
+paragraph above.** The parse named above is a rule about *the source file you run it on*, and
+after #28 running it on the working tree returns `approveCosignFor`, not `approveCosign`, plus
+twelve views rather than ten. The names above are v1's and stay v1's, because the thirty-one
+receipts they explain came from v1's bytecode; run the parse against
+`git show v1.0.0-arc-testnet:contracts/MandateManager.sol` to reproduce them.
+The banner in `MandateManager.sol` was **not** so lucky: #28 substituted `approveCosignFor` into
+its version of this same sentence, and so claimed a live receipt for a function that has never
+executed on any chain. It was corrected the same day. That refines the rule this paragraph
+already draws — deriving a count from the artefact is necessary but not sufficient, because the
+*right* artefact is the one the claim is about, and "the current file" is the wrong one for a
+claim about a deployment. A derivation can be executed perfectly against the wrong input.
 
 #### An approval can be taken back, and the hash is discoverable rather than guessed
 
-The gap was awkward to close honestly, because `withdrawCosign` takes a `bytes32` that has to
-be a *real* pending approval for the test to mean anything. Passing an invented value would
-have exercised the function without exercising the property. Two features of the contract make
-the real one obtainable: `spendHash` at line 747 is a public view, and `CosignRequired` at line
-294 is declared `error CosignRequired(bytes32 spendHash)` — it carries the required hash in the
-revert payload. So the same 32 bytes were obtained three independent ways and agreed every
+The gap was difficult to close convincingly, because `withdrawCosign` takes a `bytes32` that
+has to be a *real* pending approval for the test to mean anything. Passing an invented value
+would have exercised the function without exercising the property. Two features of the contract
+make the real one obtainable: `spendHash` at line 747 is a public view, and `CosignRequired` at
+line 294 is declared `error CosignRequired(bytes32 spendHash)` — it carries the required hash in
+the revert payload, so the same 32 bytes were obtained three independent ways and agreed every
 time: from the view, from the revert data behind selector `0x6a39578f`, and from the return
 value of the dry-run spend once it succeeded.
 
 The loop, on M2, whose cosigner is the payer and whose threshold is 50,000, using 60,000 —
 `amount > m.cosignThreshold` at line 492 is **strict**, which is why the 50,000 spend recorded
-earlier never tripped the gate:
+earlier never required a cosignature:
 
 | step | call | result |
 |---|---|---|
@@ -1384,20 +1388,21 @@ earlier never tripped the gate:
 | 5 | dry-run spend again | `CosignRequired(0x47c56daa…)` |
 | 6 | `withdrawCosign(M2, 0x93c75437…)` | tx `0x7e10b4bd…`, **28,901** |
 
-Step 5 is the security property, and it is worth stating plainly because it is the only place
-in Remit where authority is granted by someone other than the payer and can be taken back
-before it is used. A cosignature is consumed by the spend it authorises — line 494 deletes it —
-so the window in which it can be withdrawn is exactly the window between approving and
-spending. Inside that window the cosigner can change their mind, and nothing else about the
-mandate moves: `totalSpent` stayed at 200,000, `policyHeadroom` and `spendable` stayed at
-500,000, the nonce stayed unused, `isLive` stayed true.
+Step 5 is the security property, and it is the only place in Remit where authority is granted
+by someone other than the payer and can be taken back before it is used. A cosignature is
+consumed by the spend it authorises — line 494 deletes it — so the window in which it can be
+withdrawn is exactly the window between approving and spending. Inside that window the
+cosigner can change their mind, and nothing else about the mandate moves: `totalSpent` stayed
+at 200,000, `policyHeadroom` and `spendable` stayed at 500,000, the nonce stayed unused,
+`isLive` stayed true.
 
 Both event signatures were confirmed against locally computed keccaks rather than read off the
 ABI: `CosignApproved(bytes32,bytes32,address)` is
 `0x237a993f56f52f6e0716ac9bebbfe49539bb7cf87788f563120f6b27ecbd0a6f` and
 `CosignWithdrawn(bytes32,bytes32,address)` is
-`0x9c1eb928bb591a528a7015e72205402c7672cca208a96ddb70a79dbfd0194a92`. Both carry `data: 0x`,
-all three arguments being indexed. `withdrawCosign(bytes32,bytes32)` is selector `0x3cb99427`.
+`0x9c1eb928bb591a528a7015e72205402c7672cca208a96ddb70a79dbfd0194a92`.
+Both carry `data: 0x` because all three arguments are indexed, and
+`withdrawCosign(bytes32,bytes32)` is selector `0x3cb99427`.
 
 #### `approveCosign` reproduced to the gas, which re-validates the 53,114
 
@@ -1420,11 +1425,11 @@ It also, unnoticed at the time, contains the number that overturned task #31's a
 subtraction, which is only possible if the report is on the same basis as a receipt. The
 argument is at the end of this document.
 
-#### The cheaper call cost 2,012 more, and that is the point
+#### The refund that makes the cheaper call cost 2,012 more
 
 Step 6 withdraws a hash that was never approved. It does strictly less work than step 4: the
 slot is already zero, so the `SSTORE` is a no-op at 100 gas rather than `SSTORE_RESET` at
-2,900. It cost **2,012 more**.
+2,900, and it cost **2,012 more**.
 
 Twelve of that is calldata again — the ghost hash happens to contain no zero bytes where the
 real one contained one. The remaining **2,000 is exact**, and it is EIP-3529: step 4 cleared a
@@ -1468,7 +1473,7 @@ the event to distinguish the real withdrawal in step 4 from the spurious one in 
 
 Two free probes settle the guard asymmetry alongside it. Called by the agent, which is M2's
 spender and not its cosigner, `withdrawCosign` reverts `NotCosigner()` **`0x1cf89d6f`**. Called
-against a mandate that does not exist at all, it reverts `NotCosigner()` as well — because line
+against a nonexistent mandate, it reverts `NotCosigner()` as well — because line
 738 checks only the cosigner, and on an absent mandate `m.cosigner` is the zero address, so the
 existence failure is reported as an authorisation failure. `approveCosign` at 728 would have
 said `UnknownMandate()`. Neither is unsafe and neither is worth gas on the common path to fix,
@@ -1482,12 +1487,12 @@ This section reverses a conclusion this document and three others published, and
 came out of the revoke and `withdrawCosign` receipts above rather than out of a new experiment.
 
 The story so far. The mock table earlier in this chapter lists `approveCosign max = 53,114` from
-`forge test --gas-report`. The first live `approveCosign` on Arc cost **exactly 53,114**. That
-looked too good, and it was investigated as task #31, which concluded the match was an accident
-— that a gas report measures execution inside the call frame while a receipt includes the
-21,000-gas intrinsic floor plus calldata, so the two are 22,088 gas apart in basis and merely
-happened to print the same digits. The argument offered for that was `spendHash` appearing in
-the same table at **1,003 gas**, which no transaction can cost.
+`forge test --gas-report`. The first live `approveCosign` on Arc cost **exactly 53,114**, and
+that looked too good: it was investigated as task #31, which concluded the match was an
+accident — that a gas report measures execution inside the call frame while a receipt includes
+the 21,000-gas intrinsic floor plus calldata, so the two are 22,088 gas apart in basis and
+merely happened to print the same digits. The argument offered for that was `spendHash`
+appearing in the same table at **1,003 gas**, which no transaction can cost.
 
 **That argument is about views, and it was generalised to functions it does not describe.** Every
 figure it was applied to belongs to a state-changing function.
@@ -1521,11 +1526,11 @@ sixteenth, `spendableAcross`, which is unmeasured until the re-run and is a view
 The five state-changing functions have **minima** of 23,773 (`revoke`), 23,979
 (`approveCosign`), 24,677 (`withdrawCosign`), 24,898 (`spend`) and 28,630 (`createMandate`) —
 every one just above 21,000 plus its own calldata. The ten views have minima from 238 to 10,425,
-every one far below it. There is no overlap.
+every one far below it, and the two ranges do not overlap.
 
-The decisive case is a revert. `revoke`'s cheapest recorded call is
+The decisive case is a revert. `revoke`'s least expensive recorded call is
 `test_revoke_unknownMandate_reverts`, which loads one cold slot, fails the existence check and
-stops. Its execution cannot plausibly exceed about 2,300 gas. The report says **23,773**, and
+stops, and its execution cannot plausibly exceed about 2,300 gas. The report says **23,773**, and
 23,773 − 21,576 = 2,197 — one cold `SLOAD` at 2,100 plus dispatch. A function that does one
 storage read cannot cost 23,773 to execute; it can cost 23,773 to *transact*.
 
@@ -1535,9 +1540,9 @@ storage read cannot cost 23,773 to execute; it can cost 23,773 to *transact*.
 26,898. **The state-changing figures barely move, by three to fifteen gas, because most of what
 they report is a constant the optimizer cannot touch.** That constant is the intrinsic cost.
 
-And the alternative explanation fails on arithmetic. For the report to be execution-only, a local
+The alternative explanation also fails on arithmetic. For the report to be execution-only, a local
 EVM would have to cost exactly 21,576 more than Arc on a 36-byte call and exactly 22,088 more on
-a 68-byte call. Those differ by 512, which is 32 bytes at 16 gas each. Nothing inside a call
+a 68-byte call, and those differ by 512, which is 32 bytes at 16 gas each. Nothing inside a call
 frame is priced per calldata byte of the enclosing transaction. Intrinsic gas is, by definition.
 
 #### The consequence, which is larger than the correction
@@ -1555,12 +1560,12 @@ premium figures were built from. Their retraction earlier in this chapter rested
 deviations being non-constant; it now also rests on their being artefacts. The replacement
 figures — 9,300 on an `approve` and 13,110 on a `transferFrom` — are untouched, because
 `premium.log` compared two receipts against two tokens on the same chain and never used a
-harness at all. The lesson generalises: **the harness was the least trustworthy instrument in the
+harness at all. That generalises: **the harness was the least trustworthy instrument in the
 room, and the trustworthy one was in the same file, dismissed on a bad argument.**
 
 There is also something useful here rather than merely corrective. For any function that does not
 touch USDC, `forge test --gas-report` predicts an Arc receipt to the gas, adjusting only for the
-zero-byte count of the real calldata. Three functions confirm it. That makes v2's cost knowable
+zero-byte count of the real calldata, as three functions confirm. That makes v2's cost knowable
 before it is deployed for `createMandate`, `revoke`, `approveCosign` and `withdrawCosign`;
 `spend` still needs Arc's 13,110 `transferFrom` premium added on top.
 
@@ -1573,11 +1578,11 @@ report rather than about any one function. The confirmation does not: `approveCo
 against none. Its gas-report row is a prediction whose matching receipt cannot exist until v2
 deploys, so do not cite it with the same confidence as the other three.
 
-#### How this was found, since the method is the reusable part
+#### Provenance of the correction
 
-Not by re-opening #31. By noticing, while filing a memory note, that a line quoting the mock
-`revoke` figure of 32,945 was the same number as a live receipt written down three sections
-earlier — the second such collision in one project. The first was investigated and explained
-away. Two unrelated exact collisions is not a coincidence, it is a signal that the model is
-wrong, and the check took one subtraction each. **A near-miss on a famous constant is a prompt to
-re-derive; an exact hit on your own earlier measurement is a stronger one.**
+The finding did not come from re-opening #31. It came from noticing, while filing a memory
+note, that a line quoting the mock `revoke` figure of 32,945 was the same number as a live
+receipt written down three sections earlier — the second such collision in one project. The
+first was investigated and explained away. Two unrelated exact collisions are a signal that
+the model is wrong, and the check took one subtraction each. **A near-miss on a famous constant
+is a prompt to re-derive; an exact hit on your own earlier measurement is a stronger one.**

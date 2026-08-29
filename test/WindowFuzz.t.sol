@@ -256,8 +256,8 @@ contract WindowFuzzTest is Base {
 
     // ---------------------------------------------------- scalar bounds too
 
-    /// The lifetime cap is not a window and needs no ring, but it is worth fuzzing
-    /// because it is the one bound with an unchecked-looking addition in front of it.
+    /// The lifetime cap uses no ring buffer, and it is fuzzed anyway because it is
+    /// the one bound with an unchecked-looking addition in front of it.
     /// Total spending must never exceed the cap regardless of how the spends arrive.
     function testFuzz_lifetimeCapIsNeverExceeded(uint256 seed) public {
         uint96 total = usd(500);

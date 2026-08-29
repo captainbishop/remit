@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 #
-# Mutation gate for the CONTRACT. Run from the project root:
+# Mutation gate for the CONTRACT, run from the project root:
 #
 #     python3 reference/mutation-gate-sol.py [functionName]     # default: approveCosignFor
 #
@@ -14,8 +14,8 @@
 # tests reported [PASS] and that is all anyone knew about them. A passing test is not evidence
 # its assertion bites.
 #
-# The two gates are deliberately siblings in the same directory, because the second is only
-# findable by someone who read the first, and the idea is one idea in two languages.
+# The two mutation gates are deliberately siblings in the same directory, because the second
+# is only findable by someone who read the first, and the idea is one idea in two languages.
 #
 # It checks BOTH directions, because F17 is a claim in both directions.
 #
@@ -25,22 +25,22 @@
 #               `{}`), and it removes only the refusal. A mutant that survives means no test
 #               asserts that revert, or a neighbouring guard is shadowing it.
 #
-#               Shadowing is not hypothetical here. Neutering `BadConfig` leaves a mandate
-#               with no cosigner failing one line lower under `NotCosigner`, because nobody is
-#               the zero address's cosigner. That is exactly the pair that survived the JS
-#               sweep. It should be caught here — `Cosign.t.sol` asserts the two selectors in
-#               separate tests — and the interesting outcome is if it is not.
+#               Shadowing is already present in this file: neutering `BadConfig` leaves a
+#               mandate with no cosigner failing one line lower under `NotCosigner`, because
+#               the zero address has no cosigner. That is exactly the pair that survived the
+#               JS sweep. It should be caught here — `Cosign.t.sol` asserts the two
+#               selectors in separate tests — and the interesting outcome is if it is not.
 #
 #   INJECTION — add a guard the function is REQUIRED NOT to have. Removal cannot reach a
 #               "must not refuse" requirement, and F17's harder half is exactly that: a start
 #               date in the future, a currently full rolling window and an unfiled ERC-8004
 #               credential must all CLEAR, because refusing them turns our caution into
-#               somebody's unapprovable payment. Each injection must be caught.
+#               someone's unapprovable payment, and each injection must be caught.
 #
 # A survivor is a HYPOTHESIS, not a verdict. The first window injection written for the JS
-# gate compared an object to a BigInt and was never true, so it "survived" while proving
-# nothing. Probe a survivor (an `emit log_uint` or a `console.log` in the injected line is
-# enough) before believing it.
+# mutation gate compared an object to a BigInt and was never true, so it "survived" while
+# proving nothing. Probe a survivor (an `emit log_uint` or a `console.log` in the injected
+# line is enough) before believing it.
 #
 # SAFETY. Every mutation is written into a throwaway copy of the project under the OS temp
 # directory; the working tree is never modified. That is a claim, so the script also hashes
@@ -119,8 +119,8 @@ REVERT = re.compile(r"revert\s+\w+\s*\([^;]*\);")
 # failure ends `counterexample: calldata=0x…, args=[1]]`. The first version of this used
 # `\[FAIL[^\]]*\]`, whose character class terminates on the `]` of `args=[1]` and therefore
 # matched nothing at all on exactly the lines carrying the most information. It cost only the
-# report — `Expired (line 1136)` came back `caught … by: (unnamed)` — but a gate whose evidence
-# line degrades silently is a gate you stop reading.
+# report — `Expired (line 1136)` came back `caught … by: (unnamed)` — but a mutation gate
+# whose evidence line degrades with no error is one you stop reading.
 KILLER = re.compile(r"\]\s+([A-Za-z_]\w*)\s*\(")
 
 
@@ -137,7 +137,7 @@ def is_code(line):
     """A `revert` inside a comment is text, not a guard. This repo's comments discuss reverts
     at length — the prologue of the target function contains the word twice — so a raw grep
     over the line range overcounts by exactly those. Counting text and calling it a count of
-    guards is the standing trap in this project."""
+    guards is the error this function exists to prevent."""
     s = line.lstrip()
     return not (s.startswith("//") or s.startswith("*") or s.startswith("/*"))
 

@@ -7,7 +7,7 @@ import {MandateManager} from "../contracts/MandateManager.sol";
 /**
  * The rolling-window engine.
  *
- * This is the only genuinely novel part of the contract and the only part where a
+ * This is the only novel part of the contract and the only part where a
  * plausible implementation is wrong in a way that costs money. The naive version is
  * a TUMBLING window: keep a counter, reset it when the period rolls over. It is
  * cheap, it reads correctly, and it lets an adversary spend the full cap in the last
@@ -347,8 +347,8 @@ contract WindowsTest is Base {
     // ---------------------------------------------------------- isolation
 
     /// Two mandates from the same payer to the same spender share no window state.
-    /// The ring is keyed by mandateId first, so this is structural — but it is the
-    /// kind of structural that a refactor to save a mapping level would break.
+    /// The ring is keyed by mandateId first, so the isolation is structural, and it
+    /// is structure of the sort a refactor to save a mapping level would break.
     function test_windowsAreIsolatedPerMandate() public {
         bytes32 a = grant(windowOnlyParams(DAY, usd(100), uint8(K)));
         bytes32 b = grant(windowOnlyParams(DAY, usd(100), uint8(K)));

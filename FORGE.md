@@ -48,17 +48,17 @@ was really paid for. **What the repository lost is its only same-function compar
 Foundry prediction and a real Arc receipt on a USDC-free operation** — that check does not come
 back until v2 deploys and earns a new anchor for the new function.
 
-It also carries the two most useful lessons in this file, both in comments. The header
-records that it silently measured the wrong thing on its first version, passed every
-assertion while doing so, and reported an `approve` costing 3,185 gas when the SSTORE
-alone is 20,000. The comment above `ArcParityApproveCosignTest` records something more
-uncomfortable, added on 2026-08-25: **this harness was less accurate than the tool it was
-built to check.** Its `gasleft()` figure for `approveCosign` overstates real execution by
-about 5,205 gas, while `forge test --gas-report` — which includes intrinsic gas for
-state-changing functions, the fact the whole episode turned on — reproduces four Arc
-receipts to the gas with no adjustment at all. The superseded reasoning is kept inside
-delimiters in that comment rather than deleted, because the reasoning failure is worth
-more than the number. The closing section of `DESIGN.md` has the full argument.
+Two further findings sit in that file's comments. The header records that its first
+version measured the wrong thing, passed every assertion while doing so, and reported an
+`approve` costing 3,185 gas when the SSTORE alone is 20,000. The comment above
+`ArcParityApproveCosignTest`, added on 2026-08-25, records the more uncomfortable of the
+two: **this harness was less accurate than the tool it was built to check.** Its
+`gasleft()` figure for `approveCosign` overstates real execution by about 5,205 gas, while
+`forge test --gas-report` — which includes intrinsic gas for state-changing functions, the
+fact the whole episode turned on — reproduces four Arc receipts to the gas with no
+adjustment at all. The superseded reasoning is kept inside delimiters in that comment
+rather than deleted, because the reasoning failure matters more than the number. The
+closing section of `DESIGN.md` has the full argument.
 
 This document used to open by warning that none of it had ever been compiled. That is no
 longer true, and the sections that were written as predictions are now labelled as such
@@ -79,19 +79,19 @@ Those are bash commands. On Windows they belong in WSL rather than PowerShell, a
 `START-HERE.md` has the step-by-step for setting that up.
 
 Vendoring is deliberate, and the reason is reproducibility rather than convenience.
-Every gas figure in `DESIGN.md` and all 140 tests are properties of exact bytes compiled
-by solc 0.8.28 at `optimizer_runs = 200`. Re-resolving the dependency — whether by
-`forge install`, a submodule, or a fresh clone of a moving branch — risks silently
-fetching different bytes and invalidating the whole baseline. `forge install` is the
+Every gas figure in `DESIGN.md` and all 140 tests are properties of exact bytes compiled by
+solc 0.8.28 at `optimizer_runs = 200`, and re-resolving the dependency — whether by
+`forge install`, a submodule, or a fresh clone of a moving branch — risks fetching
+different bytes with no error and invalidating the whole baseline. `forge install` is the
 idiomatic route and was considered; it wants a git repository, manages submodules, and
 the flag controlling whether it commits has changed across Foundry versions.
 `libs = ["lib"]` in `foundry.toml` makes the `forge-std/` remapping resolve either way.
 
-**Which bytes, precisely.** This paragraph used to say the deployment at
-`0x3744E93B9e796E05CB66311d897559B6F3860196` is verified on-chain against *these* bytes,
-meaning whatever is in the working tree. That was true while `contracts/MandateManager.sol`
-was frozen and it stopped being true the moment v2 work began, so the claim now names a
-commit instead:
+**The bytes the verification claim covers.** An earlier version of this section said the
+deployment at `0x3744E93B9e796E05CB66311d897559B6F3860196` is verified on-chain against
+*these* bytes, meaning whatever is in the working tree. That was true while
+`contracts/MandateManager.sol` was frozen and it stopped being true the moment v2 work
+began, so the claim now names a commit instead:
 
 ```
 git checkout v1.0.0-arc-testnet && forge build
@@ -108,9 +108,9 @@ The cost, stated plainly: `forge update` will fight this, and the diff on any fu
 forge-std bump will be large. Bump deliberately, in its own commit, and re-run the full
 suite plus `forge test --profile deep` afterwards.
 
-**And the same reasoning governs every line number in this repo.** Sixty `line NNN`
+**The same reasoning governs every line number in this repo.** Sixty `line NNN`
 references across `DESIGN.md`, `CHANGELIST.md`, `L3-VAULT.md`, `PRIVACY.md`,
-`GAS-ABSTRACTION.md` and `evidence/README.md` point into
+`GAS-ABSTRACTION.md`, `IMMUTABILITY.md` and `evidence/README.md` point into
 `contracts/MandateManager.sol`. All sixty were written against v1 and all sixty shifted
 the moment v2 edits began — the header banner alone moved everything below it by sixteen
 lines. **Unqualified line numbers therefore refer to the tagged v1 source**, which is
@@ -159,7 +159,7 @@ forge lint                        # run 2026-08-24; expect 0 — see the section
 The default profile is tuned to finish while you watch it. The deep profile is the
 pre-audit setting and takes minutes.
 
-**The deep gate was run on 2026-08-25 and it passes: 140 passed, 0 failed, 0 skipped,
+**The deep profile was run on 2026-08-25 and it passes: 140 passed, 0 failed, 0 skipped,
 exit 0, in 15m51.857s wall.** Full output including the config dump is
 `evidence/deep.log`. What that actually bought, stated in calls rather than in runs: each
 of the three `invariant_` functions in `WindowInvariant.t.sol` ran 2,000 sequences of 256
@@ -171,12 +171,12 @@ name of a test that asserts a panic.
 
 Note the invocation. It is written above as `FOUNDRY_PROFILE=deep forge test` rather than
 `forge test --profile deep`, and the reason is a failure mode this repo has already been
-bitten by twice: a flag or glob that Foundry does not accept can fail *quietly* and leave
-you reading a run that used the default settings while looking like success. The env-var
-form is the one guaranteed across versions. Whichever you use, put `forge config` in front
-of it and check that `runs = 20000` and `depth = 256` actually come back — that dump is the
-first thing in `evidence/deep.log` for exactly this reason. Do not infer that the deep
-profile was live from the fact that the run took a long time.
+bitten by twice: a flag or glob that Foundry does not accept can fail with no error,
+leaving you reading a run that used the default settings while looking like success. The
+env-var form is the one guaranteed across versions. Whichever you use, put `forge config`
+in front of it and check that `runs = 20000` and `depth = 256` actually come back — that
+dump is the first thing in `evidence/deep.log` for exactly this reason. Do not infer that
+the deep profile was live from the fact that the run took a long time.
 
 Two timing figures for planning, and they disagree, so use the right one. `time` measured
 `user 81m27.476s, sys 0m3.112s` against `real 15m51.857s`, which is about 5.1× parallelism.
@@ -184,7 +184,7 @@ Foundry's own self-reported aggregate is lower, 4124.55s (68m45s), because it su
 time and does not account for compilation or its own overhead. By Foundry's accounting the
 load is wildly lopsided: `WindowFuzz` 1,757s and `WindowInvariant` 2,086s, which is 93% of
 its total between two files, while every other suite finished in milliseconds. If the deep
-gate ever needs to be faster, those two files are the only ones worth looking at.
+profile ever needs to be faster, those two files are the only ones worth looking at.
 
 Two commands are worth running before believing any of the rest:
 
@@ -196,8 +196,8 @@ forge test --match-test test_handlerCanActuallySpend_soTheInvariantsAreNotVacuou
 The first catches the failure mode where the test suite's mirrored flag constants drift
 from the contract's, which would leave every flag-dependent test passing while asserting
 against the wrong bit. The second catches the classic stateful-fuzzing lie: a handler
-that silently fails on every call satisfies every invariant, and the run reports success
-having tested nothing.
+that fails on every call with no error satisfies every invariant, and the run reports
+success having tested nothing.
 
 ## Layout
 
@@ -220,12 +220,12 @@ Nine of the 140 are named attack simulations (`test_ATTACK_*`), one is a regress
 a bug that shipped into the model (`test_REGRESSION_*`), and four pin behaviour that is
 deliberately weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
-**`forge test` prints `Ran 13 test suites`, and the arithmetic is worth writing down once
-so the number never looks wrong.** Forge counts *contracts with test functions*, not files.
+**`forge test` prints `Ran 13 test suites`, and the arithmetic reconciling that count with
+eleven files is as follows.** Forge counts *contracts with test functions*, not files.
 Eleven files hold fourteen non-abstract contracts; `ArcParity.t.sol` alone declares four,
 one per measured transaction, because each needs cold storage. Subtract `WindowHandler` —
 non-abstract but a fuzzing handler with no test functions of its own — and you get 13.
-`Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. So: 11 files,
+`Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. In total: 11 files,
 13 suites, 140 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
@@ -251,18 +251,18 @@ arbitrary-precision, so the model cannot have this class of bug or find it. In v
 computed `m.totalSpent + uint96(amount)` unconditionally, *before* the `F_TOTAL` check, so the
 addition was evaluated even for a mandate with no lifetime cap at all, and a cumulative total
 near 2^96 base units — roughly 7.9e22 USDC — produced an arithmetic **panic** rather than a
-denial. `test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping` pinned exactly that,
-using `stdError.arithmeticError`.
+denial, which `test_totalSpent_nearTwoToTheNinetySix_panicsRatherThanWrapping` pinned
+exactly, using `stdError.arithmeticError`.
 
 **v2 fixed it, so neither that test nor that import exists in this tree.** The lifetime cap is
 now consulted without performing the addition (`totalSpent > totalCap - amount`, whose first
 clause proves its own subtraction cannot underflow), and the counter itself is guarded by a
-named `TotalSpentCeiling()`. The two replacement tests are
-`test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic` and
-`test_totalSpent_withMaximumLifetimeCap_deniesWithOverTotalCap` — the second pinning that the
-ceiling guard is *unreachable* once `F_TOTAL` is set, because a lifetime cap is itself a `uint96`
-and therefore binds first. The reachability boundary is the part worth pinning; the panic was
-only ever the symptom.
+named `TotalSpentCeiling()`.
+The two replacement tests are `test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic` and
+`test_totalSpent_withMaximumLifetimeCap_deniesWithOverTotalCap` — the second pinning that
+the ceiling guard is *unreachable* once `F_TOTAL` is set, because a lifetime cap is itself
+a `uint96` and therefore binds first. The reachability boundary is what these tests pin;
+the panic was only ever the symptom.
 
 The point survives the fix, and is in fact sharpened by it: **the model could not express a
 panic, which is how this divergence stayed invisible.** Closing it meant giving the model a
@@ -272,23 +272,23 @@ leaking into a specification that has no widths.
 **A ceiling that lives outside every mandate.** NEW WITH v2's `spendableAcross`. The model has
 no token, so it cannot hold the fact that matters most about several mandates at once: they draw
 on one ERC-20 allowance, which belongs to neither of them. `reference/policy.js` can compute the
-policy half — `headroomAcross` sums each mandate's largest single spend and refuses mixed payers
-and duplicate ids — and that is genuinely all a specification of *policy* can say, because the
-allowance is not policy. It is the reason two mandates on Arc each honestly reported 90,000
-against an allowance of 90,000. `Views.t.sol` closes the gap by asserting both halves in the same
+policy half — `headroomAcross` sums each mandate's largest single spend and refuses mixed
+payers and duplicate ids — and that is all a specification of *policy* can say, because the
+allowance is not policy. It is the reason two mandates on Arc each reported 90,000 against
+an allowance of 90,000. `Views.t.sol` closes the gap by asserting both halves in the same
 test: that `spendable(a) + spendable(b)` is 180,000 and that `spendableAcross([a, b])` is 90,000,
 against a real `MockUSDC` whose approval a real payer can change without touching this contract
 at all. Note the shape this shares with the packed-struct case above — in both, the thing the
 model cannot represent is the thing the contract has to be careful about, and in both the model
 still had to be extended so the halves it *can* check cannot drift.
 
-There is one deliberate asymmetry inside that, worth knowing before somebody files it as drift:
-`MAX_JOINT = 8` is in the contract and **not** in the model, unlike `MAX_WINDOWS`,
-`MAX_BUCKETS` and `MAX_AMOUNT`. The rule is that a bound constraining the state machine gets
-mirrored, because it changes which mandates can exist and therefore which spends are legal,
-whereas a bound that only rations a **read** has nothing downstream depending on it. `MAX_JOINT`
-exists to keep 139 cold storage reads per mandate inside one call's gas budget, and JavaScript
-has no gas budget.
+One asymmetry inside that is deliberate rather than drift: `MAX_JOINT = 8` is in the
+contract and **not** in the model, unlike `MAX_WINDOWS`, `MAX_BUCKETS` and `MAX_AMOUNT`.
+The rule is that a bound constraining the state machine gets mirrored, because it changes
+which mandates can exist and therefore which spends are legal, whereas a bound that only
+rations a **read** has nothing downstream depending on it. `MAX_JOINT` exists to keep 139
+cold storage reads per mandate inside one call's gas budget, and JavaScript has no gas
+budget.
 
 The exact-ledger property tests are the crown of the port. `WindowFuzz.t.sol` records
 every accepted spend and brute-forces the true trailing window after each step, asserting
@@ -297,9 +297,9 @@ than the exact window — the second being the direction that would constitute a
 rather than mere stinginess. `WindowInvariant.t.sol` checks the same property with the
 fuzzer choosing the call sequence, which reaches states a written loop does not.
 
-## What the first compile actually found
+## What the first compile found
 
-Recorded because the predictions below were mostly wrong, which is worth knowing before
+Recorded because the predictions below were mostly wrong, which the reader needs before
 trusting the rest of this section. On 2026-08-23 the project compiled for the first
 time. Three things stood between it and `solc`, and none of them were on the list.
 
@@ -310,8 +310,8 @@ parse error and stops Foundry before it looks at any Solidity at all.
 as a keyword and not as an identifier — and it was the name of the fifth field of
 `event Spend`, its matching `spend()` parameter, and the corresponding entry in the hash
 preimage. Renamed to `ref` in six places in the contract and five in `reference/policy.js`
-so the two keep identical names. This does not change any `spendHash`: only field order
-and values are hashed, and both are unchanged.
+so the two keep identical names. This does not change any `spendHash`: only field order and
+values are hashed, and both are unchanged.
 
 `WindowFuzz.t.sol` hit **Stack too deep** in the legacy code generator. Nothing was
 wrong with it; each of its replay functions simply kept eighteen to twenty-one values
@@ -329,11 +329,11 @@ below flagged as suspect turned out to be fine: the `try/catch` destructuring of
 encoded correctly, the memory-returning views compiled, and the `abi.encodeCall` type
 strictness in the tests caught nothing because the casts were already explicit.
 
-## What the first run actually found
+## What the first run found
 
 On 2026-08-24 the suite ran for the first time: 125 passed, 4 failed. All four failures
 were in the tests. That is the direction you want, but it is also the direction that
-flatters the contract, so it is worth being precise about what each one was.
+flatters the contract, so each of the four is set out precisely below.
 
 Two were the same mistake. `vm.prank(x)` applies to the *next call*, and Solidity
 evaluates arguments before the outer call — so `mm.approveCosign(id, mm.spendHash(...))`
@@ -367,11 +367,11 @@ true one about Remit. It was replaced with the observable form of the same prope
 nothing was consumed, nothing moved, the nonce is still free, and the identical spend
 then settles exactly once.
 
-Also worth knowing before you read an invariant report: `reverts: 0` on all three
-invariants is correct, not a sign the fuzzer never tripped anything. `WindowHandler`
-wraps each attempt in a low-level call and tallies refusals in `handler.refusals()`, so a
-policy denial is counted rather than propagated. Non-vacuity is established separately,
-by the two guard tests named under "Running".
+Before reading an invariant report, note that `reverts: 0` on all three invariants is
+correct rather than a sign the fuzzer never tripped anything. `WindowHandler` wraps each
+attempt in a low-level call and tallies refusals in `handler.refusals()`, so a policy
+denial is counted rather than propagated. Non-vacuity is established separately, by the
+two guard tests named under "Running".
 
 ## What `forge lint` found, and why 91 warnings became five annotations
 
@@ -383,15 +383,16 @@ There were **91**, not the five this document's author remembered: 5 in
 
 The gap between the remembered number and the real one is the useful part. Warnings you
 have decided to ignore stop being read, and a count you carry in your head instead of in
-a file drifts. `forge lint` is now a clean gate rather than a stream — it should print
+a file drifts. `forge lint` is now a clean check rather than a stream — it should print
 nothing and exit 0 — so a single new warning is visible instead of arriving into noise.
 The decision that got it there is written down below rather than left as a habit. (The
 working `*.log` captures from that session are gitignored and local; the numbers that
 matter are in this document.)
 
-**The contract's five are annotated individually, in place.** Three `unsafe-typecast`
-and two `block-timestamp`, each with a `// forge-lint: disable-next-line(...)` pragma
-sitting under a comment that gives the actual reason:
+**The contract's five are annotated individually, in place.** They are three
+`unsafe-typecast` and two `block-timestamp`, each with a
+`// forge-lint: disable-next-line(...)` pragma sitting under a comment that gives the
+actual reason:
 
 The two `uint96(amount)` casts in `spend` cannot truncate because `amount` is bounded by
 an unconditional `AmountTooLarge` guard that runs before any policy check — and the
@@ -423,9 +424,9 @@ a *widening* cast, which is arguably a forge-lint bug. Suppressing 76 provably i
 cases one line at a time would be noise pretending to be rigour, and noise is precisely
 how a real finding hides six months later.
 
-**That glob is empirical, and the obvious spelling silently does nothing.** Worth knowing
-before editing it. Measured by swapping the one line and re-running, against a baseline of
-85:
+**That glob is empirical, and the obvious spelling does nothing, with no error to say so.**
+Read this before editing it. Measured by swapping the one line and re-running, against a
+baseline of 85:
 
 | `ignore` pattern | warnings left |
 | --- | --- |
@@ -438,16 +439,17 @@ before editing it. Measured by swapping the one line and re-running, against a b
 
 Matching is against the path relative to the project root, `*` stops at a path separator,
 and a leading `**/` is required to reach into a directory. The trap is that a pattern
-matching nothing fails silently *and* `forge config` echoes it straight back at you, so
-the exclusion looks applied when it isn't. Check the warning count, never the config dump.
+matching nothing fails with no error *and* `forge config` echoes it straight back at
+you, so the exclusion looks applied when it is not. Check the warning count, never the
+config dump.
 
-Two further notes for anyone repeating that measurement. `forge lint --config-path <file>`
-is not the way to test candidates: it demands the file be named exactly `foundry.toml` and
-**panics with a backtrace** if it isn't, which exits non-zero, emits no warnings, and
-therefore looks exactly like a pattern that worked. Swap `foundry.toml` in place instead.
-And include a control pattern that must come back non-zero — `test/Views.t.sol → 65` is
-what proved the harness was sound, and its absence is what made a first attempt at this
-report five identical crashes misread as five successes.
+Two further notes apply to anyone repeating that measurement.
+`forge lint --config-path <file>` is not the way to test candidates: it demands the file be
+named exactly `foundry.toml` and **panics with a backtrace** if it is not, which exits
+non-zero, emits no warnings, and therefore looks exactly like a pattern that worked. Swap
+`foundry.toml` in place instead. Include a control pattern that must come back non-zero —
+`test/Views.t.sol → 65` is what proved the harness was sound, and its absence is what made
+a first attempt at this report five identical crashes misread as five successes.
 
 The pattern deliberately covers test *files* rather than the test *directory*, so
 `test/mocks/` stays linted. `MockUSDC` reproduces Arc's real failure modes and is
@@ -471,14 +473,14 @@ with the history recorded.
 
 Three helpers in `Base.t.sol` — `micro`, `payAs`, `balanceOfVendor` — were defined and
 never called once. `micro`'s doc comment claimed it was "used to probe boundaries", which
-was not true of this codebase. All three are deleted. A harness that documents behaviour
-nobody exercises is a harness that will mislead somebody.
+was not true of this codebase. All three are deleted, since a harness documenting
+behaviour that no test exercises will mislead its next reader.
 
 One warning class was checked and left alone on its own merits: `uint8(buckets)` indexes
-a fixed six-element array `{2,3,4,6,12,24}` with `idx % 6`, so it is safe by
-construction. And `uint96(room)` in a view was initially suspected of being safe only if
-the contract's cap invariant holds — the very thing the test checks, which would have
-been circular. Reading `windowRemaining` settled it: the return is `used >= w.cap ? 0 :
+a fixed six-element array `{2,3,4,6,12,24}` with `idx % 6`, so it is safe by construction.
+`uint96(room)` in a view was initially suspected of being safe only if the contract's cap
+invariant holds — the very thing the test checks, which would have been circular.
+Reading `windowRemaining` settled it: the return is `used >= w.cap ? 0 :
 w.cap - used` and `w.cap` is a `uint96` field, so the result is either zero or strictly
 less than a `uint96`, which holds from the *types* regardless of whether the cap logic is
 correct. That earned a written reason rather than a defensive `assert` that would have
@@ -501,11 +503,11 @@ frame, and none of the three appear below.
 The `try/catch` around `getValidationStatus` destructures six return values, one of them
 a `string memory`, so the arity or the ordering might not have matched. Next,
 `MandateParams` is an external `calldata` parameter carrying a nested dynamic array plus
-nested structs, which is legal but easy to get wrong. Then the external views returning
-`Mandate memory` and `WindowSpec memory`. Then event-signature drift: `vm.expectEmit`
-comparisons encode `MandateCreated` with nine parameters and `Spend` with eight, and a
-mismatch there surfaces as a failing assertion rather than a compile error — which is why
-only `forge test` could ever have spoken to it.
+nested structs, which is legal but easy to get wrong. The external views returning
+`Mandate memory` and `WindowSpec memory` were also on the list, as was event-signature
+drift: `vm.expectEmit` comparisons encode `MandateCreated` with nine parameters and `Spend`
+with eight, and a mismatch there surfaces as a failing assertion rather than a compile
+error — which is why only `forge test` could ever have spoken to it.
 
 In the tests specifically, `abi.encodeCall` type strictness was the suspicion — it
 type-checks against the real signature, so a `uint96` where the function takes `uint256`
@@ -515,9 +517,9 @@ uses assembly; if a new comparison is added inline it will still fail.
 
 ## When a test fails, which side is wrong
 
-Usually the contract. But five tests pin behaviour a reader is likely to mistake for a
-bug, so a failure there may mean somebody helpfully "fixed" something deliberate. All
-five are labelled in-file.
+Usually the contract is the wrong side. Five tests, however, pin behaviour a reader is
+likely to mistake for a bug, so a failure there may mean a later edit has helpfully
+"fixed" something deliberate; all five are labelled in-file.
 
 Three of them were places the contract was right and `reference/policy.js` was wrong.
 Writing the Forge suite is what surfaced them, and the model has since been reconciled,
@@ -535,8 +537,8 @@ and an unchecked downcast would truncate a huge amount into a small one that pas
 The other two are not divergences — the model and the contract agree, and both were
 arguably wrong together, which is the interesting part: no amount of cross-checking two
 implementations against each other can find a hole they share. `perTxCap < cosignThreshold`
-makes the co-signature branch unreachable, so the policy silently never asks for a
-signature, and v1's `createMandate` accepts the configuration anyway. **v2 refuses it, in
+makes the co-signature branch unreachable, so the policy never asks for a signature, and
+v1's `createMandate` accepts the configuration anyway. **v2 refuses it, in
 both implementations**, and the condition is not the one written here: it is `<=` rather
 than `<`, and it compares against `min(2^96 - 1, perTxCap, totalCap, every window cap)`
 rather than against `perTxCap` alone. Fixing it properly meant enumerating the whole
@@ -549,11 +551,11 @@ The remaining one: with `F_CREDENTIAL` set, `credential.agentId == 0`, and no id
 there is no agent id to compare against, so the wrong-agent check is skipped entirely —
 bounded only by the fact that the payer fixes `requestHash` at grant time. That one is still
 recorded in DESIGN.md rather than fixed, because the fix is a grant-time refusal that would
-reject configurations somebody may want. Note that this was the reasoning offered for both,
+reject configurations a payer may want. Note that this was the reasoning offered for both,
 and for the cosign case it did not survive contact with the real-money decision: a grant
-that appears to carry a control it does not carry is not a configuration somebody wants.
+that appears to carry a control it does not carry is not a configuration any payer wants.
 
-That second one has a footnote worth reading before touching `_checkCredential`. Writing
+That second one has a footnote to read before touching `_checkCredential`. Writing
 the DESIGN.md caveat for it turned up a model divergence that no test had caught: the
 model resolved the expected agent with `??`, which treats `0` as a real value, so
 `agentId: 0n` meant "require the attestation to be about agent 0" while the contract's
@@ -567,10 +569,10 @@ each of them, and the model simply lacked the check. A window with `cap == 0`, a
 `expiresAt` at or before `notBefore`, the zero address on an allowlist, a credential with
 no validator, and `minResponse == 0`. The last is the one to remember, because it is not
 a loosening: ERC-8004 encodes failure as a *low* response and 100 as passing, so a zero
-threshold turns the credential gate into one that accepts exactly the attestations it
-exists to reject. `test_createMandate_credentialWithZeroMinResponse_reverts` is the test
+threshold turns the credential check into one that accepts exactly the attestations it
+exists to reject; `test_createMandate_credentialWithZeroMinResponse_reverts` is the test
 that would have caught it on a first run, and did not get the chance.
 
-The general shape is worth carrying into the audit: every `uint` field whose zero doubles
-as "unset" is a place a model with real nulls will quietly disagree with the bytecode, and
-a place a client encoder will quietly disagree with both.
+One general shape carries into the audit: every `uint` field whose zero doubles as
+"unset" is a place a model with real nulls can disagree with the bytecode without a test
+failing, and a place a client encoder can disagree with both.

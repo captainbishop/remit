@@ -10,8 +10,8 @@ pragma solidity 0.8.28;
  * away:
  *
  *   - Transfers to the zero address REVERT. Arc forbids burning value, so a
- *     contract that lets address(0) through does not fail gracefully, it fails at
- *     runtime after consuming gas. MandateManager rejects it up front; this mock
+ *     contract that lets address(0) through fails at runtime after consuming gas.
+ *     MandateManager rejects it up front; this mock
  *     exists so that claim can be tested rather than asserted.
  *   - A blocklisted sender or recipient REVERTS at runtime. There is no way to
  *     pre-check it. The correct outcome is that the whole spend unwinds — no cap
@@ -32,10 +32,10 @@ pragma solidity 0.8.28;
  * `from == to`. Arc's `usdc-system-events` reference states the opposite for the
  * system emitter at 0xffff...fffe: "Self-transfers (from == to) emit no log."
  *
- * So NO LOG-COUNTING ASSERTION ABOUT A SELF-PAYMENT MEANS ANYTHING HERE. A test
+ * NO LOG-COUNTING ASSERTION ABOUT A SELF-PAYMENT MEANS ANYTHING HERE. A test
  * that watched for a `Transfer` on a spend where recipient == payer would pass
- * while demonstrating the precise opposite of production, and it would be this
- * mock — our own code — answering a question about Arc. That is not a hypothetical
+ * while demonstrating the precise opposite of production, with this
+ * mock — code from this repository — answering a question about Arc. That is not a hypothetical
  * test: it is the one F19 invites, since F19's claim is that a self-payment is
  * invisible in the transfer log and must be reconciled from
  * `getMandate(id).totalSpent` instead. F19's guard is therefore asserted with

@@ -9,26 +9,26 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  *
  * The design decision worth defending is WHAT gets signed. A co-signature that
  * authorises "a spend on this mandate" is nearly worthless — the agent picks the
- * recipient and the amount afterwards. So the cosigner signs a hash committing to
- * the mandate, the spender, the recipient, the exact amount, the reference and the
+ * recipient and the amount afterwards. The cosigner therefore signs a hash committing
+ * to the mandate, the spender, the recipient, the exact amount, the reference and the
  * nonce, on this chain, at this contract address. Changing any of those produces a
  * different hash and the approval simply does not apply.
  *
  * TWO THINGS CHANGED IN v2 and they change what this file has to prove.
  *
- * F15 removed the opaque `approveCosign(mandateId, hash)`. Approving now means naming the
- * recipient, amount, reference and nonce, and the contract derives the hash itself — so the
+ * F15 removed the opaque `approveCosign(mandateId, hash)`, so approving now means naming the
+ * recipient, amount, reference and nonce, with the contract deriving the hash itself: the
  * cosigner's transaction shows them what they are authorising instead of 32 opaque bytes.
  * It was deleted rather than kept alongside `approveCosignFor`, because whoever asks for the
  * signature chooses the entry point and that party is usually the agent: a legibility
  * control the adversary can opt out of on the victim's behalf is not a control. `spendHash`
  * lost its `spender_` parameter in the same change and reads the mandate's own spender, so
- * the hash of a spend nobody can perform is no longer constructible.
+ * the hash of a spend no account can perform is no longer constructible.
  *
  * F16 gave every approval a deadline. There is no way to write a live-forever approval any
  * more: `validUntil` is required, must be strictly in the future, and may not sit further
  * ahead than `MAX_COSIGN_TTL`. The deadline is written out at each call site below rather
- * than defaulted by a local helper — a helper that quietly supplied one would also hide
+ * than defaulted by a local helper — a helper that supplied one implicitly would also hide
  * that a real cosigner has to choose it, which is the whole of the finding.
  */
 contract CosignTest is Base {
@@ -124,10 +124,10 @@ contract CosignTest is Base {
     /**
      * An approval must survive a spend that failed for an unrelated reason.
      *
-     * If a transient window breach burned the signature, every retry would need the
-     * human again — which in practice means the human starts pre-approving in bulk,
-     * and the control stops meaning anything. The approval is deleted only on the
-     * path where the spend actually succeeds, and a revert unwinds the delete anyway.
+     * If a transient window breach burned the signature, every retry would need the human
+     * again, which in practice means the human starts pre-approving in bulk and the control
+     * stops meaning anything. The approval is deleted only on the path where the spend
+     * actually succeeds, and a revert unwinds the delete anyway.
      *
      * THIS TEST IS THE FLOOR ON `MAX_COSIGN_TTL` and the reason it is 30 days rather than
      * something tidy like an hour. The retry happens after `t0 + DAY + DAY/12` — about 26
@@ -153,10 +153,10 @@ contract CosignTest is Base {
         vm.prank(boss);
         bytes32 hash = mm.approveCosignFor(id, vendor, usd(90), REF, nonce, uint40(t0 + 3 days));
 
-        // 20 is genuinely under the 25 threshold, so it needs no signature — and it
-        // has to be over 10 for 20 + 90 to breach the 100 window cap, which is what
-        // makes the retry below an *unrelated* failure. The threshold sits between
-        // the two for exactly that reason.
+        // 20 is under the 25 threshold, so it needs no signature, and it has to be over
+        // 10 for 20 + 90 to breach the 100 window cap, which is what makes the retry
+        // below an *unrelated* failure. The threshold sits between the two for exactly
+        // that reason.
         pay(id, usd(20));
         payReverts(id, usd(90), overWindowCap(DAY, usd(100), usd(20)));
         assertTrue(mm.isCosignApproved(id, hash), "the signature is still good");
@@ -201,10 +201,10 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(vendor), 0);
     }
 
-    /// An expired approval reports EXPIRED, not REQUIRED. "Nobody approved this" and "the
-    /// cosigner approved it and you were too slow" call for different next actions — obtain a
-    /// signature versus obtain a fresh one — and collapsing them sends an operator to chase
-    /// the wrong party. The pair below is the whole point of splitting the error.
+    /// An expired approval reports EXPIRED, not REQUIRED. "No cosigner approved this" and
+    /// "the cosigner approved it and you were too slow" call for different next actions —
+    /// obtain a signature versus obtain a fresh one — and collapsing them sends an operator
+    /// to chase the wrong party. The pair below is the whole point of splitting the error.
     function test_expiredAndAbsent_areDifferentErrors() public {
         bytes32 id = grant(cosignParams());
 
@@ -355,15 +355,15 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(other), 0, "neither attempt moved money");
     }
 
-    /// ATTACK: inflate an approved amount. Same idea, different field.
+    /// ATTACK: inflate an approved amount, which is the same attack against a different field.
     function test_ATTACK_inflatingAnApprovedSpend_isRefused() public {
         bytes32 id = grant(cosignParams());
         bytes32 nonce = nextNonce();
 
         // The inflated hash is computed BEFORE the prank. `vm.prank` applies to the next
-        // call, and an `mm.spendHash(...)` sitting in an argument list is that call — it
-        // would consume the prank and leave the approval arriving from the test contract,
-        // which is not the cosigner. Same hazard `Base.payReverts` exists to contain.
+        // call, and an `mm.spendHash(...)` sitting in an argument list is that call: it would
+        // consume the prank and leave the approval arriving from the test contract rather than
+        // from the cosigner, which is the hazard `Base.payReverts` exists to contain.
         //
         // v2 (F15) narrows this hazard without removing it: `approveCosignFor` no longer
         // takes a hash, so the pranked call cannot swallow a `spendHash` of its own — but
@@ -394,7 +394,7 @@ contract CosignTest is Base {
 
     /// ATTACK: reuse the approval for a different invoice by changing the reference.
     /// The reference is the payer's own bookkeeping field and it is signed too, so an
-    /// approval for one invoice cannot silently settle another.
+    /// approval for one invoice cannot be used to settle another.
     function test_ATTACK_swappingTheReference_isRefused() public {
         bytes32 id = grant(cosignParams());
         bytes32 nonce = nextNonce();
@@ -445,14 +445,14 @@ contract CosignTest is Base {
     }
 
     /**
-     * ATTACK (F15): ask a cosigner to approve a spend nobody can make.
+     * ATTACK (F15): ask a cosigner to approve a spend no account can make.
      *
      * v1's `spendHash` took the spender as an argument and the two-argument `approveCosign`
-     * took the resulting 32 bytes with no way to look inside them. So an agent could compute
-     * the hash of a spend by SOMEBODY ELSE, hand it over, and collect a signature for an
+     * took the resulting 32 bytes with no way to look inside them, so an agent could compute
+     * the hash of a spend by ANOTHER ACCOUNT, hand it over, and collect a signature for an
      * authorisation that no `spend` call can ever match — `spend` refuses `WrongSpender`
-     * before it hashes anything. The cosigner had no way to notice: the argument was opaque
-     * and the transaction succeeded.
+     * before it hashes anything. The cosigner had no way to notice, because the argument was
+     * opaque and the transaction succeeded.
      *
      * That is now unconstructible rather than merely detectable. `spendHash` reads
      * `m.spender`, so there is no argument to poison, and `approveCosignFor` derives the hash
@@ -485,7 +485,7 @@ contract CosignTest is Base {
             "the spender is still inside the preimage"
         );
 
-        // And the real spend still goes through, so the narrowing cost nothing functional.
+        // The real spend still goes through, so the narrowing cost nothing functional.
         payWithNonce(id, vendor, usd(50), nonce);
         assertEq(token.balanceOf(vendor), usd(50));
     }
@@ -508,9 +508,9 @@ contract CosignTest is Base {
         vm.expectRevert(MandateManager.NotCosigner.selector);
         mm.approveCosignFor(id, vendor, usd(50), REF, bytes32("n"), validUntil);
 
-        // Nor can the payer, without being named as the cosigner. If the payer wants
-        // that power they name themselves at grant time — silently accepting it here
-        // would make the cosigner field advisory.
+        // Nor can the payer, without being named as the cosigner. If the payer wants that
+        // power they name themselves at grant time; accepting the approval here without an
+        // error would make the cosigner field advisory.
         vm.prank(payer);
         vm.expectRevert(MandateManager.NotCosigner.selector);
         mm.approveCosignFor(id, vendor, usd(50), REF, bytes32("n"), validUntil);
@@ -525,7 +525,7 @@ contract CosignTest is Base {
 
     /// Existence is checked before configuration and before authorisation, so a typo'd id
     /// reports the typo rather than `NotCosigner` — which on an empty struct is technically
-    /// true (nobody is the zero address's cosigner) and completely unhelpful.
+    /// true (no account is the zero address's cosigner) and completely unhelpful.
     function test_approveCosignFor_onUnknownMandate_reverts() public {
         vm.prank(boss);
         vm.expectRevert(MandateManager.UnknownMandate.selector);
@@ -576,7 +576,7 @@ contract CosignTest is Base {
      * never be exercised, because the only spend it matches carries a nonce already burned.
      *
      * The co-signer saw an approval, the payer saw a spend, and the 50 USDC the human actually
-     * agreed to never moved. Nobody was robbed, which is why it survived four mutation gates and
+     * agreed to never moved. No party lost funds, which is why it survived four mutation gates and
      * 76/76 model parity — `reference/policy.js` adds the nonce unconditionally too, and the
      * model was where this would have been caught.
      */
@@ -643,10 +643,10 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(vendor), 1, "the nonce is free again");
     }
 
-    /// A second approval on the same nonce for a different request is refused, rather than
-    /// silently orphaning the first. Same reasoning as F17: the co-signer must not be able to
-    /// create authority that cannot be consumed, and after this write the first approval's nonce
-    /// would point somewhere else.
+    /// A second approval on the same nonce for a different request is refused rather than
+    /// accepted with no error, which would orphan the first. The reasoning matches F17: the
+    /// co-signer must not be able to create authority that cannot be consumed, and after this
+    /// write the first approval's nonce would point somewhere else.
     function test_f30_twoApprovalsOnOneNonce_areRefused() public {
         bytes32 id = grant(cosignParams());
         bytes32 nonce = nextNonce();
@@ -761,7 +761,7 @@ contract CosignTest is Base {
         // 90 is over the window cap AND over the cosign threshold. The window wins.
         payReverts(id, usd(90), overWindowCap(DAY, usd(50), 0));
 
-        // And over the per-tx cap too — that wins over both.
+        // A spend over the per-tx cap too is refused by that cap, which outranks both.
         payReverts(id, usd(500), MandateManager.OverPerTxCap.selector);
     }
 
@@ -777,10 +777,10 @@ contract CosignTest is Base {
      * Two things retired that reasoning. Remit is now intended to hold real money, which
      * turns "merely useless" into "advertises a control it does not have" — `getMandate`
      * returns a populated cosigner and a plausible threshold either way, so a payer
-     * auditing their own grant cannot tell the difference. And v1's immutability means a
+     * auditing their own grant cannot tell the difference. v1's immutability also means a
      * combination left legal now is legal forever at that address; the cost of the rule
-     * is one comparison at grant time, paid once per mandate, against a supervision gate
-     * that silently never fires.
+     * is one comparison at grant time, paid once per mandate, against a supervision check
+     * that never fires and produces no error.
      *
      * The refusal is deliberately NOT `perTxCap < cosignThreshold`, which the changelist
      * proposed and which is wrong twice over — see `Creation.t.sol`, where the whole
@@ -791,29 +791,29 @@ contract CosignTest is Base {
         p.perTxCap = usd(10);
         p.flags = F_PER_TX;
         p = withCosign(p, boss, usd(100)); // threshold above the per-tx cap
-        // The horizon is load-bearing for the ASSERTION, not just for the second grant
-        // below. `Unbounded()` is checked before every `BadConfig()` in `createMandate`,
-        // so without it this test would still revert and would still pass a bare
-        // `vm.expectRevert()` — while proving nothing about the cosign gate.
+        // The horizon is required by the ASSERTION, not just by the second grant below.
+        // `Unbounded()` is checked before every `BadConfig()` in `createMandate`, so without
+        // it this test would still revert and would still pass a bare `vm.expectRevert()`
+        // while proving nothing about the cosign check.
         p = withExpiry(p);
 
         vm.prank(payer);
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("dead-gate"), p);
 
-        // And the spends the old test performed are now unperformable, because there is
-        // no mandate to spend from. Asserted by reusing THE SAME SALT with the threshold
-        // repaired: if the refused attempt had written any state, this would come back
-        // `MandateExists` instead of succeeding. That is a stronger check than reading a
-        // zeroed struct, and it needs no off-chain id derivation — there is no
-        // `mandateId` view, the id is keccak over (DOMAIN, chainid, this, payer, salt).
+        // The spends the old test performed are now unperformable, because there is no
+        // mandate to spend from. That is asserted by reusing THE SAME SALT with the
+        // threshold repaired: if the refused attempt had written any state, this would come
+        // back `MandateExists` instead of succeeding, which is a stronger check than reading
+        // a zeroed struct and needs no off-chain id derivation — there is no `mandateId`
+        // view, the id is keccak over (DOMAIN, chainid, this, payer, salt).
         p.cosignThreshold = usd(9);
         vm.prank(payer);
         bytes32 id = mm.createMandate(bytes32("dead-gate"), p);
 
-        // One base unit of threshold below the cap is all it takes, and the gate is
-        // alive: the largest spend the mandate permits now demands a signature. This is
-        // the same boundary the old test straddled from the wrong side.
+        // One base unit of threshold below the cap is all it takes, and the cosign check is
+        // alive: the largest spend the mandate permits now demands a signature. This is the
+        // same boundary the old test straddled from the wrong side.
         bytes32 nonce = nextNonce();
         bytes32 hash = mm.spendHash(id, vendor, usd(10), REF, nonce);
         vm.prank(agent);
@@ -828,19 +828,19 @@ contract CosignTest is Base {
      * v1 and the F15/F16 revision both let a cosigner write an authorisation into storage that
      * was dead on arrival: on a revoked mandate, past its expiry, for a recipient the allowlist
      * never contained, or on a nonce a spend had already consumed. Each one costs the cosigner
-     * gas, leaves a slot nobody is obliged to clean, and — the part that matters — tells them
-     * they have authorised a payment. They have not. `spend` will refuse it every time.
+     * gas, leaves a slot no account is obliged to clean, and tells them they have authorised a
+     * payment that `spend` will refuse every time.
      *
      * TWO THINGS THIS SECTION HAS TO PROVE, and the second is the one that could go wrong.
      *
      * The easy half is that the permanent conditions are refused. The hard half is that the
      * RECOVERABLE ones are not: a guard that rejects an approval a later spend could have used
-     * turns our own caution into somebody's unapprovable payment, which for a payments
-     * primitive is a liveness failure we caused. Three conditions look mirrorable and are not
-     * — a start date in the future, a rolling window that is currently full, and an ERC-8004
-     * credential that has not been filed yet — and each gets a test below that approves
-     * successfully and then proves the approval was genuinely usable once the condition
-     * cleared. Those three tests are the reason to trust the other nine.
+     * turns the contract's own caution into a payer's unapprovable payment, which for a
+     * payments primitive is a liveness failure of the contract's own making. Three conditions
+     * look mirrorable and are not — a start date in the future, a rolling window that is
+     * currently full, and an ERC-8004 credential that has not been filed yet — and each gets a
+     * test below that approves successfully and then proves the approval was usable once the
+     * condition cleared. Those three tests are the reason to trust the other nine.
      */
 
     /// Approve as the cosigner and report the revert data instead of propagating it.
@@ -871,12 +871,12 @@ contract CosignTest is Base {
         approveReverts(id, to, amount, nonce, abi.encodeWithSelector(selector));
     }
 
-    /// The parity assertion, stated as narrowly as it is true: one defect at a time.
+    /// The parity assertion is stated as narrowly as it is true: one defect at a time.
     /// `spend` and `approveCosignFor` cannot always agree, because the recoverable checks
-    /// `approveCosignFor` skips sit BETWEEN the permanent ones it keeps — a request that is
-    /// both over `perTxCap` and behind a missing credential gets `CredentialMissing` from one
-    /// and `OverPerTxCap` from the other. With a single defect they must agree, and that is
-    /// also the only case a cosigner could act on.
+    /// `approveCosignFor` skips sit BETWEEN the permanent ones it keeps: a request that is both
+    /// over `perTxCap` and behind a missing credential gets `CredentialMissing` from one and
+    /// `OverPerTxCap` from the other. With a single defect they must agree, and that single
+    /// case is also the only one a cosigner could act on.
     function _assertSameRefusal(bytes32 id, address to, uint256 amount, bytes32 nonce, string memory what) internal {
         (bool spendOk, bytes memory spendErr) = trySpend(id, to, amount, nonce);
         (bool approveOk, bytes memory approveErr) = tryApprove(id, to, amount, nonce, uint40(block.timestamp + DAY));
@@ -899,11 +899,11 @@ contract CosignTest is Base {
         payReverts(id, vendor, usd(50), MandateManager.Revoked.selector);
     }
 
-    /// Also pins the guard ORDER, which is the part that took thought. At the instant a
-    /// mandate expires, any legal `validUntil` is necessarily past `m.expiresAt` too, so a
-    /// contract that checked the deadline first would answer "your deadline is wrong" to
-    /// someone whose actual problem is that the mandate is dead. Expiry outranks it, and this
-    /// assertion is what stops the two blocks being reordered later for tidiness.
+    /// This test also pins the guard ORDER. At the instant a mandate expires, any legal
+    /// `validUntil` is necessarily past `m.expiresAt` too, so a contract that checked the
+    /// deadline first would answer "your deadline is wrong" to someone whose actual problem
+    /// is that the mandate is dead. Expiry outranks it, and this assertion is what stops the
+    /// two blocks being reordered later for tidiness.
     function test_f17_approvingOnAnExpiredMandate_isRefused() public {
         MandateManager.MandateParams memory p = cosignParams(); // already carries F_EXPIRY
         p.expiresAt = uint40(block.timestamp + DAY);
@@ -932,7 +932,8 @@ contract CosignTest is Base {
     /// Zero amount reports `ZeroAmount`, NOT `CosignNotRequired`, and the ordering that
     /// produces that is deliberate: nothing is also at-or-below every threshold, so a contract
     /// that checked the threshold first would tell a cosigner "no signature needed" about a
-    /// payment of nothing. True, and useless. `spend` says `ZeroAmount`; so does this.
+    /// payment of nothing, which would be true and useless at once. `spend` says
+    /// `ZeroAmount`, and so does this test.
     function test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused() public {
         bytes32 id = grant(cosignParams());
 
@@ -943,13 +944,13 @@ contract CosignTest is Base {
         );
     }
 
-    /// F19's mirror, and it is here because of F17's rule rather than as an afterthought to it.
-    /// F17's list was derived by partitioning every refusal `spend` can make into permanent and
-    /// recoverable and mirroring the permanent ones; `payer` is assigned once in `createMandate`
-    /// and never again, so `recipient == m.payer` is exactly as permanent as a zero recipient
-    /// and belongs to that partition. Without this guard the co-signer could pay gas to
-    /// authorise a spend the contract would refuse forever — the false assurance F17 exists to
-    /// prevent, reintroduced by the fix to a different finding.
+    /// This test mirrors F19, and it is here because of F17's rule rather than as an
+    /// afterthought to it. F17's list was derived by partitioning every refusal `spend` can
+    /// make into permanent and recoverable and mirroring the permanent ones; `payer` is
+    /// assigned once in `createMandate` and never again, so `recipient == m.payer` is exactly
+    /// as permanent as a zero recipient and belongs to that partition. Without this guard the
+    /// co-signer could pay gas to authorise a spend the contract would refuse forever — the
+    /// false assurance F17 exists to prevent, reintroduced by the fix to a different finding.
     ///
     /// The second case pins the ordering against `CosignNotRequired`: one unit is also
     /// at-or-below the threshold, so a contract that consulted the threshold first would answer
@@ -961,7 +962,7 @@ contract CosignTest is Base {
         approveReverts(id, payer, usd(50), nextNonce(), MandateManager.SelfPayment.selector);
         approveReverts(id, payer, 1, nextNonce(), MandateManager.SelfPayment.selector);
 
-        // And the spend path agrees, which is the whole point of the mirror: the same request
+        // The spend path agrees too, which is the whole point of the mirror: the same request
         // is refused with the same error whether it arrives as an approval or as a payment.
         payReverts(id, payer, usd(50), MandateManager.SelfPayment.selector);
     }
@@ -1012,7 +1013,8 @@ contract CosignTest is Base {
      * because the guard is shadowed by a neighbour — the way `BadConfig` hides behind
      * `NotCosigner` in the model — but for the plainer reason that nothing asserted it at all.
      * `Bounds.t.sol` covers the identical guard on the spend path at line 763 and that coverage
-     * reads, from a distance, like coverage of both. It is not. Twelve tests, eleven guards.
+     * reads, from a distance, like coverage of both while covering only one: the twelve tests
+     * above assert eleven guards.
      *
      * Reaching it takes the same two conditions `Bounds.t.sol` documents at length, and the
      * first is a real constraint rather than a fixture convenience: the mandate must have NO
@@ -1021,13 +1023,14 @@ contract CosignTest is Base {
      * bound the type can express without binding before the counter does. Second, the counter
      * has to be driven to its cliff, which needs a mint — the suite's default funding is about
      * 79 trillion times too small, which is also why this is a bounded-arithmetic guard rather
-     * than a policy anybody will meet.
+     * than a policy any payer will meet.
      *
-     * `cosignThreshold` is 0 here — "gate everything", legal because the biconditional at
-     * `createMandate` line 511 is on the cosigner ADDRESS, not the threshold. That choice is
-     * what makes the boundary testable one base unit at a time: with a non-zero threshold the
-     * passing half of the pair would be refused by `CosignNotRequired` instead, and the test
-     * would prove the ordering of two guards rather than the width of the counter.
+     * `cosignThreshold` is 0 here, so every amount requires a signature, which is legal because
+     * the biconditional in `createMandate` is on the cosigner ADDRESS, not the threshold. That
+     * choice is what makes the boundary testable one base unit at a time: with a non-zero
+     * threshold the passing half of the pair would be refused by `CosignNotRequired` instead,
+     * and the test would prove the ordering of two guards rather than the width of the
+     * counter.
      */
     function test_f17_approvingPastTheUint96AuditCeiling_isRefused() public {
         uint256 MAX = uint256(type(uint96).max);
@@ -1037,8 +1040,9 @@ contract CosignTest is Base {
         bytes32 id = grant(p);
 
         // Drive the counter to MAX - 1. The setup spend needs its own approval, since a
-        // threshold of zero gates every amount, and that approval has to CLEAR the guard under
-        // test: at `totalSpent == 0` the ceiling is not in reach, which is the point.
+        // threshold of zero requires a signature for every amount, and that approval has to
+        // CLEAR the guard under test: at `totalSpent == 0` the ceiling is not in reach, which
+        // is the point.
         token.mint(payer, type(uint96).max);
         bytes32 n = nextNonce();
         vm.prank(boss);
@@ -1051,7 +1055,7 @@ contract CosignTest is Base {
         approveReverts(id, vendor, 2, nextNonce(), MandateManager.TotalSpentCeiling.selector);
         payReverts(id, vendor, 2, MandateManager.TotalSpentCeiling.selector);
 
-        // And one fits exactly. This half is what pins the boundary to the width of the
+        // One fits exactly, and this half is what pins the boundary to the width of the
         // counter: a guard that was off by one, or that refused any partly spent mandate,
         // would also have refused the request above and looked correct doing it.
         vm.prank(boss);
@@ -1077,10 +1081,11 @@ contract CosignTest is Base {
 
     // ------------------------------- the spend must NEED a co-signature
 
-    /// The one refusal in F17 that is not about consumability. At or below the threshold the
-    /// approval is never CONSULTED — `spend` reads the mapping only when
-    /// `amount > cosignThreshold` — so the payment goes through with or without it. Refused
-    /// because of what it would let the cosigner believe: that they had gated something.
+    /// This is the one refusal in F17 that is not about consumability. At or below the
+    /// threshold the approval is never CONSULTED — `spend` reads the mapping only when
+    /// `amount > cosignThreshold` — so the payment goes through with or without it. It is
+    /// refused because of what it would let the cosigner believe: that their approval had
+    /// restricted a payment.
     function test_f17_approvingAtOrBelowTheThreshold_isRefused() public {
         bytes32 id = grant(cosignParams()); // threshold 10
         uint40 validUntil = uint40(block.timestamp + DAY);
@@ -1112,7 +1117,7 @@ contract CosignTest is Base {
 
     /// F16 bounded `validUntil` against the clock. F17 bounds it against the mandate, in both
     /// directions, and both bounds refuse rather than clamp for F16's reason: a deadline the
-    /// contract quietly moved is a deadline the cosigner did not agree to.
+    /// contract moved without reverting is a deadline the cosigner did not agree to.
     function test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry() public {
         // (a) An approval whose whole life sits inside the mandate's not-yet-valid window.
         MandateManager.MandateParams memory p = cosignParams();
@@ -1189,8 +1194,8 @@ contract CosignTest is Base {
     }
 
     /// A full rolling window is the sharpest of the three, because the window arithmetic is
-    /// the most tempting to mirror and the least safe to: used totals FALL as buckets age out,
-    /// so an amount refused now fits later with nothing else changing.
+    /// the most tempting to mirror and the least safe to mirror: used totals FALL as buckets
+    /// age out, so an amount refused now fits later with nothing else changing.
     function test_f17_approvingWhileAWindowIsFull_isAllowed() public {
         MandateManager.MandateParams memory p = emptyParams();
         p.perTxCap = usd(100);

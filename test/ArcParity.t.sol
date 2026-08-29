@@ -10,12 +10,12 @@ import {console} from "forge-std/console.sol";
  *
  * WHY THIS FILE EXISTS. The gas report gives a median `spend` across the whole
  * suite, aggregated over mandates with wildly different shapes: some with four
- * windows, some with none, some with a credential gate, some denied before they
+ * windows, some with none, some with a credential check, some denied before they
  * touch the token. Comparing ONE real on-chain spend against that median measures
  * almost nothing. To learn what Arc's real USDC costs that MockUSDC does not, the
  * two sides have to be the same transaction.
  *
- * So every number below is a constant, and the same constants are what get sent to
+ * Every number below is a constant, and the same constants are what get sent to
  * Arc. If someone changes one here without changing the chain-side command, the
  * comparison is void — which is why they are named ARC_* and gathered in one block
  * rather than inlined.
@@ -33,17 +33,17 @@ import {console} from "forge-std/console.sol";
  * type(uint256).max, so the slot's transaction-start value was non-zero and BOTH
  * writes were priced as dirty updates. `approve` reported 3,185 gas — impossible,
  * since the SSTORE alone is 20,000 — and `spend` came in ~4,900 low because
- * `transferFrom` decrements that same pre-warmed slot. The failure was silent: the
- * test passed, the money moved, every assertion held.
+ * `transferFrom` decrements that same pre-warmed slot. The failure produced no
+ * error: the test passed, the money moved, every assertion held.
  *
- * So each measurement now lives in its own contract, with all preparation in `setUp`,
- * which Foundry runs as a separate transaction. Cold slots, cold accounts, original
- * values matching the real chain.
+ * Each measurement now lives in its own contract, with all preparation moved into
+ * `setUp`, which Foundry runs as a separate transaction, so the slots and accounts
+ * are cold and the original values match the real chain.
  *
- * WHAT THE NUMBERS MEAN. `gasleft()` deltas measure EXECUTION only. A receipt's
- * `gasUsed` also includes the intrinsic cost: 21,000 for the transaction plus 4 gas
- * per zero calldata byte and 16 per non-zero one. `_intrinsic` computes that from
- * the actual encoded calldata, so the printed PREDICTED figure is directly
+ * WHAT THE NUMBERS MEAN. A `gasleft()` delta measures EXECUTION only, while a
+ * receipt's `gasUsed` also includes the intrinsic cost: 21,000 for the transaction
+ * plus 4 gas per zero calldata byte and 16 per non-zero one. `_intrinsic` computes
+ * that from the actual encoded calldata, so the printed PREDICTED figure is directly
  * comparable to `cast receipt`'s gasUsed. Any residual is Arc behaving differently
  * from a plain ERC-20 — which is the entire question.
  *
@@ -61,7 +61,7 @@ abstract contract ArcParityBase is Base {
     // A courier agent with a 0.50 per-payment ceiling, 2.00 lifetime, 1.00 per
     // rolling day in hourly buckets, expiring 2026-09-30, allowed to pay exactly
     // one vendor. Small enough that the whole demo costs less than the gas to run
-    // it, shaped to exercise every cheap gate at once.
+    // it, shaped to exercise every low-cost check at once.
 
     /// 0x…c0de. Written as a cast rather than a hex literal so no EIP-55 checksum
     /// can be got wrong; the chain-side command uses the lowercase form.
@@ -129,7 +129,7 @@ abstract contract ArcParityBase is Base {
         p.allowlist[0] = ARC_RECIPIENT;
         // identity and credential stay zeroed: no agent identity is minted to this
         // throwaway wallet, and the only real attestation on Arc Testnet has a
-        // FAILING response of 1. Gating on either would mean faking a credential
+        // FAILING response of 1. Requiring either would mean faking a credential
         // to demonstrate a credential check, which proves nothing.
     }
 
@@ -161,8 +161,8 @@ contract ArcParityApproveTest is ArcParityBase {
 
         assertEq(token.allowance(payer, address(mm)), ARC_TOTAL, "allowance was actually set");
         // A zero-to-non-zero SSTORE is 20,000 gas and cannot be avoided, so anything
-        // materially below that means the slot was pre-warmed and this is not the
-        // number we think it is.
+        // materially below that means the slot was pre-warmed and the figure measures
+        // something other than a first write.
         assertGt(used, 20_000, "approve must pay a full SSTORE_SET; below this the slot was dirty");
 
         _report("approve(MandateManager, 2.00 USDC)", used, cd);
@@ -223,7 +223,7 @@ contract ArcParitySpendTest is ArcParityBase {
         mm.spend(arcId, ARC_RECIPIENT, ARC_AMOUNT, ARC_REF, ARC_NONCE);
         uint256 used = g - gasleft();
 
-        // A gas measurement of a call that quietly did nothing is worthless, so
+        // A gas measurement of a call that did nothing without reverting is worthless:
         // prove the money moved and the ceiling tightened before reporting.
         assertEq(token.balanceOf(ARC_RECIPIENT), ARC_AMOUNT, "recipient was actually paid");
         assertEq(token.allowance(payer, address(mm)), ARC_TOTAL - ARC_AMOUNT, "allowance decremented by the spend");
@@ -252,15 +252,15 @@ contract ArcParitySpendTest is ArcParityBase {
  * including why a reverting `revoke` cannot execute the 23,773 gas the report lists for
  * it, is the closing section of DESIGN.md.
  *
- * The consequence for THIS FILE is uncomfortable and worth stating plainly: the harness
- * below was less accurate than the tool it was built to check. Its `gasleft()` figure of
- * 36,231 for `approveCosign` overstates the true execution of 31,026 by about 5,205, of
- * which only 2,700 is accounted for by COLD_ACCOUNT_ADJ. Foundry's own gas report needed
- * no adjustment at all. So the residuals this file reports are mostly measurements of
- * the harness, and the `createMandate` deviation of −6,337 that was once used to
- * calibrate an Arc "premium" was harness error, not a property of Arc. The tests are
- * kept because they document that, and because the intrinsic-gas arithmetic in
- * `_report` is still correct and still useful.
+ * The consequence for THIS FILE is that the harness below was less accurate than the
+ * tool it was built to check. Its `gasleft()` figure of 36,231 for `approveCosign`
+ * overstates the true execution of 31,026 by about 5,205, of which only 2,700 is
+ * accounted for by COLD_ACCOUNT_ADJ, while Foundry's own gas report needed no
+ * adjustment at all. The residuals this file reports are therefore mostly
+ * measurements of the harness, and the `createMandate` deviation of −6,337 that was
+ * once used to calibrate an Arc "premium" was harness error, not a property of Arc.
+ * The tests are kept because they document that, and because the intrinsic-gas
+ * arithmetic in `_report` is still correct and still useful.
  *
  * ---- superseded reasoning, retained deliberately ----
  * It is an accident, and taking it at face value would mean misreading every other
@@ -268,13 +268,13 @@ contract ArcParitySpendTest is ArcParityBase {
  *
  * The proof that it is an accident sits four rows above it in the same gas report:
  * `spendHash` is listed at 1,003 gas. No transaction can cost 1,003 gas, because the
- * intrinsic floor is 21,000. So forge's gas report measures EXECUTION inside the call
+ * intrinsic floor is 21,000, so forge's gas report measures EXECUTION inside the call
  * frame and excludes intrinsic cost entirely, while a receipt's `gasUsed` includes it.
  * The two columns were never comparable; they simply printed the same digits.
  *
  * That last paragraph is the error. `spendHash` is a `view`; every figure the argument
  * was applied to belongs to a state-changing function. A true observation about one
- * kind of call was generalised to a kind it does not describe, and the generalisation
+ * class of call was generalised to a class it does not describe, and the generalisation
  * was never checked against a second method — which is exactly the failure mode this
  * repository keeps rediscovering.
  * ---- end superseded reasoning ----
@@ -293,11 +293,11 @@ contract ArcParitySpendTest is ArcParityBase {
  * THE ANCHOR IN THIS SUITE IS GONE AS OF v2, AND NOTHING CAN RESTORE IT.
  * ============================================================================
  *
- * `approveCosign(bytes32,bytes32)` was DELETED by F15. Every paragraph above still
- * describes something true, but it describes a function that no longer exists at any
- * address this repository can call, so the comparison this suite was built to perform
- * cannot be performed. The live receipt — tx `0x29eb5c24…`, 53,114 gas, block on Arc
- * Testnet — measured `approveCosign` running inside deployed v1 at
+ * `approveCosign(bytes32,bytes32)` was DELETED by F15, and every paragraph above
+ * still describes something true, but it describes a function that no longer exists
+ * at any address this repository can call, so the comparison this suite was built
+ * to perform cannot be performed. The live receipt — tx `0x29eb5c24…`, 53,114 gas,
+ * block on Arc Testnet — measured `approveCosign` running inside deployed v1 at
  * `0x3744E93B9e796E05CB66311d897559B6F3860196`. That deployment is immutable and still
  * holds the old function; this source tree no longer does. There is no way to put the
  * two back on the same basis:
@@ -312,7 +312,7 @@ contract ArcParitySpendTest is ArcParityBase {
  *     deployment, and when it happens it gives a NEW anchor for the NEW function — not a
  *     repair of this one.
  *
- * So `ARC_LIVE_GASUSED` is retained below as history and is deliberately NOT asserted
+ * `ARC_LIVE_GASUSED` is retained below as history and is deliberately NOT asserted
  * against any more. What survives is everything that never depended on the live figure:
  * the A/B cold-surcharge isolation, the hand decomposition, the intrinsic-gas arithmetic,
  * and the `used > 20_000` floor proving a virgin SSTORE was actually paid for. What is
@@ -408,8 +408,8 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // is the only way to check the hand decomposition instead of asserting it. The
         // model says A should carry 2,500 of cold-account surcharge (2,600 EXTCODESIZE
         // less the 100 a warm one costs) plus 2,000 for each cold mandate slot, so
-        // A − B should be a few thousand. A different answer means the model is wrong about
-        // which slots are cold, and every other figure derived from it is suspect.
+        // A − B should be a few thousand. A different answer means the model is wrong
+        // about which slots are cold, and every other figure derived from it is suspect.
         //
         // v2 note: the 8,500 target originally quoted below was derived for the deleted
         // two-argument function, which read three mandate slots. F15 made `approveCosignFor`
@@ -495,7 +495,7 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         console.log("  A, everything cold        ", used);
         console.log("  B, warm but target slot   ", usedWarm);
         // A > B is a PROPERTY OF THE MEASUREMENT MODE, not of the contract, so it is
-        // guarded rather than asserted. Under `--gas-report` Foundry adds per-call
+        // guarded rather than asserted, since under `--gas-report` Foundry adds per-call
         // tracing overhead that lands INSIDE the `gasleft()` window and is not constant
         // between two calls: on 2026-08-25 this read A = 58,319 against B = 60,222 and
         // the bare `used - usedWarm` below panicked with 0x11 on the unsigned subtraction
@@ -554,13 +554,13 @@ contract ArcParityApproveCosignTest is ArcParityBase {
         // than deleting them: a passing test that compares incomparable things teaches a
         // reader that the comparison is valid.
         //
-        // What remains is not decoration. `used > 20_000` proves a virgin SSTORE was paid
-        // for, which is the trap at the top of this file and the reason `setUp` reads the
-        // slot instead of the test body. The calldata-shape and intrinsic assertions pin the
-        // arithmetic `_report` prints. And the A/B isolation still measures the harness
-        // against itself, which never needed Arc. The suite is now a measurement rather than
-        // a parity check, and it is named honestly in the banner rather than in a comment
-        // nobody reads.
+        // Each remaining assertion still does work. `used > 20_000` proves a virgin
+        // SSTORE was paid for, which is the trap at the top of this file and the reason
+        // `setUp` reads the slot instead of the test body. The calldata-shape and
+        // intrinsic assertions pin the arithmetic `_report` prints, and the A/B isolation
+        // still measures the harness against itself, which never needed Arc. The suite is
+        // now a measurement rather than a parity check, and the banner at the top of this
+        // file names it as such rather than leaving that correction to an inline comment.
         assertGt(usedWarm, 20_000, "B must also pay a full SSTORE_SET on its own virgin slot");
     }
 }

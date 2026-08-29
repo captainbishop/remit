@@ -16,16 +16,16 @@
 //
 // UNITS
 // Every amount is a BigInt in ERC-20 USDC units: 6 decimals, so 1 USDC = 1_000_000n.
-// Arc exposes USDC through two interfaces over ONE balance — native at 18 decimals
-// and ERC-20 at 6 (arc/references/evm-differences.mdx). This engine speaks 6-decimal
-// ERC-20 units exclusively, which is what the Arc docs recommend for application
+// Arc exposes USDC through two interfaces over ONE balance, native at 18 decimals and
+// ERC-20 at 6 (arc/references/evm-differences.mdx). This engine speaks 6-decimal ERC-20 units
+// exclusively, which is what the Arc docs recommend for application
 // accounting, and never mixes in an 18-decimal value.
 //
 // TIME
 // `now` is a block timestamp in seconds. Arc timestamps are NON-DECREASING but NOT
 // strictly increasing: sub-second blocks (~0.48s average) can share a timestamp
-// (arc/references/evm-differences.mdx). So the engine never treats a timestamp as
-// unique, never uses it for ordering, and never assumes it advanced between calls.
+// (arc/references/evm-differences.mdx). The engine therefore never treats a timestamp
+// as unique, never uses it for ordering, and never assumes it advanced between calls.
 // Replay protection and ordering come from explicit nonces instead.
 
 'use strict';
@@ -86,8 +86,8 @@ const Denial = {
   NONCE_RESERVED: 'NONCE_RESERVED',
   COSIGN_REQUIRED: 'COSIGN_REQUIRED',
   // NEW IN v2 (F16). Split from COSIGN_REQUIRED rather than folded into it: the two need
-  // different actions from whoever reads the denial. COSIGN_REQUIRED means nobody approved
-  // this spend; COSIGN_EXPIRED means somebody did and the window closed.
+  // different actions from whoever reads the denial. COSIGN_REQUIRED means no approval was
+  // recorded for this spend; COSIGN_EXPIRED means one was and its window has closed.
   COSIGN_EXPIRED: 'COSIGN_EXPIRED',
   IDENTITY_NOT_HELD: 'IDENTITY_NOT_HELD',
   IDENTITY_TRANSFERRED: 'IDENTITY_TRANSFERRED',
@@ -102,17 +102,18 @@ const Denial = {
  * NOT in `Denial`.
  *
  * NEW IN v2 (F17). `Denial` is the set of reasons a SPEND can be refused, mirrored 1:1 by the
- * contract's errors, and every value in it is reachable from `evaluate`. None of these four is.
- * Folding them in would put entries in an enum that the function the enum describes can never
- * produce — the same "displayed but dead" defect that `createMandate` now refuses in three
- * other places, so it is not a defect this model gets to commit itself.
+ * contract's errors, and every value in it is reachable from `evaluate`, which is true of none
+ * of the four above. Folding them in would put entries in an enum that the function the enum
+ * describes can never produce — the same "displayed but dead" defect that `createMandate` now
+ * refuses in three other places, so it is not a defect this model gets to commit itself.
  *
  * Every OTHER refusal `approveCosignFor` raises reuses a `Denial` value verbatim, and that
- * reuse is load-bearing rather than cosmetic: it is what lets a test assert that a request
+ * reuse is deliberate rather than cosmetic: it is what lets a test assert that a request
  * with one permanent defect is refused with the SAME code by both functions.
  */
 const ApprovalRefusal = {
-  // The contract's BadConfig(): F_COSIGN unset, so there is no gate to approve against.
+  // The contract's BadConfig(): F_COSIGN unset, so there is no cosign requirement to approve
+  // against.
   BAD_CONFIG: 'BAD_CONFIG',
   // The contract's NotCosigner().
   NOT_COSIGNER: 'NOT_COSIGNER',
@@ -150,8 +151,8 @@ const MAX_COSIGN_TTL = 30n * 86_400n;
  * amount which it casts down. An unchecked cast would truncate a huge amount into a
  * small one that passes every cap, so the contract refuses anything that does not fit
  * before consulting a single bound. JavaScript's BigInt has no such limit and would
- * silently diverge here — which is the whole reason to mirror the constant rather
- * than let the model be more permissive than the thing it specifies.
+ * diverge here without raising an error, which is the reason to mirror the constant
+ * rather than let the model be more permissive than the thing it specifies.
  */
 const MAX_AMOUNT = (1n << 96n) - 1n;
 
@@ -160,40 +161,40 @@ const MAX_AMOUNT = (1n << 96n) - 1n;
  *
  * WHY A BUCKET RING, AND WHY IT ERRS STRICT
  *
- * An exact sliding window needs the timestamp of every spend — unbounded storage,
- * so it is not implementable on-chain. Two cheap approximations exist and both
- * have a failure mode worth naming:
+ * An exact sliding window needs the timestamp of every spend, which is unbounded
+ * storage and therefore not implementable on-chain. Two cheap approximations exist,
+ * each with a distinct failure mode:
  *
- *   1. Tumbling window (reset the counter each period). Cheapest, and badly
- *      broken: spend the full cap in the last second of period N and the full cap
- *      again in the first second of N+1 — 2x the cap inside two seconds.
+ *   1. Tumbling window (reset the counter each period). The least expensive of the
+ *      two, and badly broken: spend the full cap in the last second of period N and
+ *      the full cap again in the first second of N+1 — 2x the cap inside two seconds.
  *
- *   2. Proportional two-bucket decay (the classic "sliding window counter"),
- *      which weights the previous period by how much of it still overlaps. Better,
- *      but it UNDERCOUNTS when spending is clustered at the end of the previous
- *      period: it assumes uniform distribution, so an agent that front-loads can
- *      still exceed the cap over a true trailing window.
+ *   2. Proportional two-bucket decay (the classic "sliding window counter") weights
+ *      the previous period by how much of it still overlaps, which is closer, though
+ *      it UNDERCOUNTS when spending is clustered at the end of the previous period:
+ *      it assumes uniform distribution, so an agent that front-loads can still
+ *      exceed the cap over a true trailing window.
  *
  * This implementation splits the window into K = `buckets` sub-periods of
  * S = L/K seconds and keeps a ring of per-sub-period counters. With b = now/S the
- * current sub-bucket, usage is the sum of buckets [b-K, b] — that is K+1 buckets,
- * not K, and the +1 is the load-bearing detail.
+ * current sub-bucket, usage is the sum of buckets [b-K, b] — that is K+1 buckets
+ * rather than K, and the +1 is what makes the guarantee below hold.
  *
  * WHY K+1 (this was a bug, caught by the fuzz test in policy.test.js)
  * Summing only [b-K+1, b] covers the span [(b-K+1)S, (b+1)S), which is L seconds
  * long but ends at the END of the current bucket — in the future relative to now.
  * The span is therefore shifted forward by up to S, and bucket b-K falls out of
- * the ring. But b-K always still overlaps the true trailing window (t-L, t],
- * because its end (b-K+1)S = bS + S - L > t - L for every t < (b+1)S. So a spend
- * late in bucket b-K stopped being counted while it was still genuinely inside
- * the window — a real breach, not a rounding artifact. The fuzz test found it at
- * K=4 by spending near the end of a sub-bucket and again exactly K buckets later.
+ * the ring. Bucket b-K always still overlaps the true trailing window (t-L, t],
+ * since its end (b-K+1)S = bS + S - L > t - L for every t < (b+1)S. A spend late in
+ * bucket b-K therefore stopped being counted while it was still inside the window —
+ * a real breach rather than a rounding artifact. The fuzz test found it at K=4 by
+ * spending near the end of a sub-bucket and again exactly K buckets later.
  *
  * THE GUARANTEE, with the +1
- * Take any spend at time u in (t-L, t]. Its bucket is floor(u/S) <= b since
- * u <= t. And u > t-L >= bS - L = (b-K)S, so floor(u/S) >= b-K. Hence every spend
- * in the true trailing window sits in [b-K, b] and IS counted. The engine can
- * therefore never permit more than `cap` in any true trailing window of L.
+ * Take any spend at time u in (t-L, t]. Its bucket is floor(u/S) <= b since u <= t,
+ * and u > t-L >= bS - L = (b-K)S gives floor(u/S) >= b-K, so every spend in the true
+ * trailing window sits in [b-K, b] and IS counted. The engine can therefore never
+ * permit more than `cap` in any true trailing window of L.
  *
  * THE PRICE
  * The counted span is (K+1)S = L + S, so up to one extra sub-period of history is
@@ -220,8 +221,8 @@ function window(lengthSeconds, cap, buckets = 12) {
     );
   }
   // A window whose cap is zero can never permit a spend, and it also satisfies the
-  // "at least one bound" check in createMandate — so accepting it mints a mandate that
-  // looks configured and is dead. The contract calls this BadWindow.
+  // "at least one bound" check in createMandate, so accepting it mints a mandate that
+  // looks configured and is dead; the contract calls this BadWindow.
   if (BigInt(cap) <= 0n) throw new Error('window(): cap must be positive');
   // ringSize = K+1 so the K+1 live bucket indices never collide modulo the ring.
   return { lengthSeconds: L, cap: BigInt(cap), buckets: K, subLength: L / K, ringSize: K + 1n };
@@ -267,7 +268,7 @@ function createMandate(spec) {
   // `payer` gets the same refusal for a different reason: on-chain the payer IS msg.sender,
   // so a zero payer is not refused anywhere in the contract because it cannot arise. A model
   // that accepts one describes a mandate with no counterpart, and every allowance and
-  // transferFrom in it would be against an account nobody holds.
+  // transferFrom in it would be against an account that no key controls.
   if (normalizeAddr(payer) === ZERO_ADDRESS) {
     throw new Error(
       'createMandate(): payer cannot be the zero address — on-chain the payer is ' +
@@ -307,13 +308,14 @@ function createMandate(spec) {
   if (cosignThreshold !== null && !cosigner) {
     throw new Error('createMandate(): cosignThreshold requires a cosigner');
   }
-  // And the converse, which this model accepted until v2 and the contract never could.
-  // On-chain, F_COSIGN is derived from `cosigner != address(0)` and the threshold is a
-  // plain uint96 whose zero is meaningful — "every spend needs a signature", since the
-  // gate tests `amount > threshold` strictly and amount is at least 1. There is no
-  // on-chain state for "a cosigner is named but nothing is gated", so a model that
-  // accepted one was describing a mandate that cannot exist. Spell it `cosignThreshold: 0`
-  // to gate everything; that is what the contract stores.
+  // The converse, which this model accepted until v2 and the contract never could, is
+  // refused too. On-chain, F_COSIGN is derived from `cosigner != address(0)` and the
+  // threshold is a plain uint96 whose zero is meaningful — "every spend needs a
+  // signature", since the check tests `amount > threshold` strictly and amount is at
+  // least 1. There is no on-chain state for "a cosigner is named but no spend requires
+  // a signature", so a model that accepted one was describing a mandate that cannot
+  // exist. Spell it `cosignThreshold: 0` to require a signature for every spend; that
+  // is what the contract stores.
   if (cosigner && cosignThreshold === null) {
     throw new Error(
       'createMandate(): a cosigner requires a cosignThreshold — use 0 to require a ' +
@@ -371,7 +373,7 @@ function createMandate(spec) {
     }
     // NEW IN v2 (F34). `requestHash` is the entire lookup key: the registry is queried on it
     // alone. Zero is the default value of the on-chain bytes32 and cannot address a real
-    // attestation, so a mandate carrying it is one whose credential gate can only ever answer
+    // attestation, so a mandate carrying it is one whose credential check can only ever answer
     // CREDENTIAL_MISSING. Refused at the one moment the payer can still supply the right value.
     if (!credential.requestHash || /^0x0*$/.test(String(credential.requestHash))) {
       throw new Error(
@@ -446,8 +448,8 @@ function createMandate(spec) {
     throw new Error(`createMandate(): at most ${MAX_WINDOWS} windows (gas bound)`);
   }
 
-  // The co-signature gate must be able to fire. `evaluate` demands a signature when
-  // `amount > cosignThreshold`, strictly, so the gate is dead unless the policy permits
+  // The co-signature requirement must be able to fire. `evaluate` demands a signature when
+  // `amount > cosignThreshold`, strictly, so the requirement is dead unless the policy permits
   // at least one amount above the threshold. Compare against the largest single spend the
   // WHOLE policy allows, not against any one field:
   //
@@ -456,15 +458,15 @@ function createMandate(spec) {
   // MAX_AMOUNT is in there because it is the bound that applies when nothing else does —
   // a mandate bounded only by an expiry still caps amounts at the width of the on-chain
   // uint96, so a threshold of MAX_AMOUNT is unreachable even with no caps at all. totalCap
-  // is evaluated at totalSpent = 0, which is right because reachability asks whether the
-  // gate can EVER fire and the lifetime cap is loosest on the first spend. Window caps
-  // enter as a minimum because the tightest one binds every spend.
+  // is evaluated at totalSpent = 0, which is right because reachability asks whether a
+  // signature can EVER be demanded and the lifetime cap is loosest on the first spend.
+  // Window caps enter as a minimum because the tightest one binds every spend.
   //
   // The obvious test, `perTxCap < cosignThreshold`, is wrong twice over: the comparison
   // is backwards, since equality is dead too (`amount > threshold` and `amount <= perTxCap`
-  // cannot both hold when they are equal — confirmed on Arc Testnet, DESIGN.md:1272), and
-  // perTxCap is not the only ceiling, since `totalCap = 100` with `cosignThreshold = 100`
-  // and no per-transaction cap is equally dead.
+  // cannot both hold when they are equal — confirmed on Arc Testnet, DESIGN.md:981), and
+  // perTxCap is not the only ceiling, since `totalCap = 100` with `cosignThreshold = 100` and
+  // no per-transaction cap is equally dead.
   if (cosignThreshold !== null) {
     let effectiveMax = MAX_AMOUNT;
     if (perTxCap !== null && BigInt(perTxCap) < effectiveMax) effectiveMax = BigInt(perTxCap);
@@ -515,10 +517,11 @@ function createMandate(spec) {
     // timestamp the approval dies AT, exclusive. Absent from the Map is the model's
     // equivalent of the contract's stored zero.
     cosignApprovals: new Map(),
-    // v2 (F30): nonce => the spend hash that nonce is held for. Absent means free. Written by
-    // `approveCosignFor`, cleared by `commit` and by `withdrawCosign`. Keyed on the nonce rather
-    // than on the hash because the question being asked is "what is this nonce spoken for", and
-    // a hash cannot be turned back into the nonce inside it.
+    // v2 (F30): nonce => the spend hash that nonce is held for; absence from the Map means
+    // the nonce is free. Written by `approveCosignFor`, cleared by `commit` and by
+    // `withdrawCosign`. Keyed on the nonce rather than on the hash because the question being
+    // asked is "what is this nonce spoken for", and a hash cannot be turned back into the
+    // nonce inside it.
     cosignReservedNonces: new Map(),
   };
 }
@@ -553,7 +556,7 @@ function windowUsage(win, ringState, now) {
   return { bucket: b, oldest, effective };
 }
 
-/** Which ring slot a sub-bucket index maps to. Ring holds K+1 slots. */
+/** Maps a sub-bucket index to its ring slot. The ring holds K+1 slots. */
 function ringSlot(win, bucketIndex) {
   return Number(((bucketIndex % win.ringSize) + win.ringSize) % win.ringSize);
 }
@@ -565,7 +568,7 @@ function ringSlot(win, bucketIndex) {
  *
  * v2 (F15): takes the MANDATE rather than a free `spender`, mirroring the contract's
  * `spendHash` after its `spender_` parameter was retired. A caller could previously ask for
- * the hash of a spend by somebody who is not the mandate's spender — a hash no spend can
+ * the hash of a spend by an address that is not the mandate's spender — a hash no spend can
  * ever match, and one a cosigner could nonetheless be handed and asked to approve.
  */
 function spendHash({ mandate, recipient, amount, ref, nonce }) {
@@ -606,10 +609,10 @@ function evaluate(mandate, request, ctx) {
   if (now < mandate.notBefore) {
     return deny(Denial.NOT_YET_VALID, { now, notBefore: mandate.notBefore });
   }
-  // expiresAt is EXCLUSIVE: a mandate expiring at T is dead AT T. Chosen
-  // deliberately — with sub-second blocks sharing a timestamp, an inclusive
-  // bound would leave an ambiguous final second in which liveness depends on
-  // which block within that second included the transaction.
+  // expiresAt is EXCLUSIVE: a mandate expiring at T is dead AT T. That is deliberate,
+  // since with sub-second blocks sharing a timestamp an inclusive bound would leave an
+  // ambiguous final second in which liveness depends on which block within that second
+  // included the transaction.
   if (mandate.expiresAt !== null && now >= mandate.expiresAt) {
     return deny(Denial.EXPIRED, { now, expiresAt: mandate.expiresAt });
   }
@@ -625,20 +628,20 @@ function evaluate(mandate, request, ctx) {
     // rather than burning the sender's gas on a guaranteed runtime revert.
     return deny(Denial.ZERO_RECIPIENT);
   }
-  // F19. Ahead of the allowlist deliberately: shape before policy. A self-payment is never a
-  // payment regardless of who is allowlisted, and answering RECIPIENT_NOT_ALLOWED would send
-  // the reader to edit a config when the request itself is the mistake.
+  // F19, placed ahead of the allowlist deliberately: shape before policy. A self-payment is
+  // never a payment regardless of who is allowlisted, and answering RECIPIENT_NOT_ALLOWED
+  // would send the reader to edit a config when the request itself is the mistake.
   if (normalizeAddr(recipient) === mandate.payer) {
     return deny(Denial.SELF_PAYMENT, { payer: mandate.payer });
   }
   // F29, and ahead of the allowlist for F19's reason: the request is the mistake, not the
   // config. `ctx.manager` is the contract's own address and `ctx.token` the USDC contract's,
-  // the two destinations from which nobody can move the money on again.
+  // the two destinations from which the money cannot be moved on again.
   //
   // A caller that names neither cannot have this checked, because the model has no other way
-  // to learn a deployment's addresses — a limitation worth stating rather than hiding, since
-  // the contract always knows both. Anything comparing this model against a live deployment
-  // has to supply them or it is comparing a weaker rule.
+  // to learn a deployment's addresses — a limitation of the model rather than of the
+  // contract, which always knows both. Anything comparing this model against a live
+  // deployment has to supply them or it is comparing a weaker rule.
   const unrecoverable = [ctx.manager, ctx.token].filter(Boolean).map(normalizeAddr);
   if (unrecoverable.includes(normalizeAddr(recipient))) {
     return deny(Denial.UNRECOVERABLE_RECIPIENT, { recipient });
@@ -668,9 +671,9 @@ function evaluate(mandate, request, ctx) {
 
   // --- identity gate (optional, ERC-8004) ---
   // ownerOf(agentId) is the only on-chain identity lookup Arc documents, and the
-  // identity is a TRANSFERABLE ERC-721. Holding the token now is necessary but
-  // not sufficient: we also pin the owner the payer intended at grant time, or a
-  // token transfer would silently move spending authority to a stranger.
+  // identity is a TRANSFERABLE ERC-721. Holding the token now is necessary but not
+  // sufficient: the mandate also pins the owner the payer intended at grant time, or a
+  // token transfer would move spending authority to a stranger without any denial.
   //
   // NOTE FOR THE CONTRACT: ownerOf is ERC-721, so it REVERTS for a nonexistent or
   // burned tokenId rather than returning address(0). MandateManager must therefore
@@ -704,17 +707,17 @@ function evaluate(mandate, request, ctx) {
     }
   }
 
-  // --- credential gate (optional, ERC-8004 ValidationRegistry) ---
+  // --- credential check (optional, ERC-8004 ValidationRegistry) ---
   // getValidationStatus is the one credential check Arc exposes on-chain.
   // Reputation is write-only in the documented ABI, so it is deliberately unused.
   //
   // THE TUPLE MUST BE CHECKED, NOT JUST THE RESPONSE
   // getValidationStatus(bytes32 requestHash) is keyed ONLY by requestHash and
   // returns (validatorAddress, agentId, response, responseHash, tag, lastUpdate).
-  // Reading `response` alone makes the gate theater: anyone can pick a requestHash
-  // and have some cooperative validator answer it, or reuse an attestation issued
-  // about a different agent. So the validator that answered and the agent it
-  // answered about are both verified against what the payer named at grant time.
+  // Reading `response` alone makes the check theater: anyone can pick a requestHash and
+  // have some cooperative validator answer it, or reuse an attestation issued about a
+  // different agent. The validator that answered and the agent it answered about are
+  // therefore both verified against what the payer named at grant time.
   if (mandate.credential) {
     const {
       validator,
@@ -741,12 +744,12 @@ function evaluate(mandate, request, ctx) {
     // contract has no null: `c.agentId != 0 ? c.agentId : _identity[...].agentId` makes
     // an explicit zero fall through to the identity gate. Using `??` here instead would
     // have made `agentId: 0n` mean "require the attestation to be about agent 0", which
-    // the contract can never express. Same reasoning as maxStaleness below.
+    // the contract can never express, for the same reason recorded at maxStaleness below.
     //
     // If BOTH are unset the check is SKIPPED, not failed, and the gate degrades to
     // "the named validator filed a passing, fresh attestation under this exact
     // requestHash" with nothing tying it to this spender. That is a documented gap, not
-    // an oversight — see DESIGN.md, "The credential gate had to be built twice". It is
+    // an oversight — see DESIGN.md, "The credential check had to be built twice". It is
     // bounded by requestHash being payer-fixed at grant time, so a spender cannot
     // redirect the lookup at an attestation of their own choosing.
     const explicitAgent = agentId === null || BigInt(agentId) === 0n ? null : BigInt(agentId);
@@ -778,8 +781,8 @@ function evaluate(mandate, request, ctx) {
     // its own age. One future-dated stamp bought a credential that never went stale.
     //
     // A registry with a fast clock produces that by accident, so it is not a story about a
-    // malicious validator. An attestation dated in the future has an age nobody can compute,
-    // and refusing it is the only answer that does not amount to trusting it.
+    // malicious validator. An attestation dated in the future has an age that cannot be
+    // computed, and refusing it is the only answer that does not amount to trusting it.
     const staleAfter = maxStaleness === null ? 0n : BigInt(maxStaleness);
     if (
       staleAfter > 0n &&
@@ -845,7 +848,7 @@ function evaluate(mandate, request, ctx) {
   // two are provably equal here because WRONG_SPENDER above already refused every other
   // case, so this is not a behaviour change in `evaluate` — it is what lets `spendHash` be
   // reachable ONLY with the mandate's own spender, closing the path where a cosigner is
-  // handed the hash of a spend nobody can perform.
+  // handed the hash of a spend that cannot be performed.
   const hash = spendHash({ mandate, recipient, amount, ref, nonce });
   // F30, and OUTSIDE the cosign branch on purpose. A nonce held for a live approval is held
   // against every spend, not only against spends large enough to need a signature — the whole
@@ -885,7 +888,7 @@ function evaluate(mandate, request, ctx) {
   };
 }
 
-/** Apply a previously-evaluated allowed decision. Throws if handed a denial. */
+/** Apply a previously-evaluated allowed decision, throwing if handed a denial. */
 function commit(mandate, decision) {
   if (!decision.allowed) {
     throw new Error(`commit(): refusing to apply a denied decision (${decision.reason})`);
@@ -932,7 +935,7 @@ function commit(mandate, decision) {
   return mandate;
 }
 
-/** Convenience: evaluate then commit. Returns the decision either way. */
+/** Convenience: evaluate, then commit when the decision allows it, returning it either way. */
 function spend(mandate, request, ctx) {
   const decision = evaluate(mandate, request, ctx);
   if (decision.allowed) commit(mandate, decision);
@@ -945,13 +948,13 @@ function spend(mandate, request, ctx) {
  * The spender is included on purpose. An agent that has finished its work, or that
  * detects it has been compromised, should be able to surrender its own authority
  * without waiting for a human to act — and it cannot hurt the payer, because the only
- * power revocation removes is the agent's own. Nobody else may call it.
+ * power revocation removes is the agent's own. No third party may call it.
  *
  * On Arc this is stronger than on a probabilistic-finality chain: finality is
  * deterministic at one confirmation (arc/concepts/deterministic-finality.mdx),
  * so there is no reorg window in which a revoked mandate is still live and
- * spendable. On Ethereum a revocation is only economically final after minutes,
- * which is a real gap when the counterparty is an automated agent.
+ * spendable. On Ethereum a revocation is only economically final after minutes, which
+ * is a real gap when the counterparty is an automated agent.
  *
  * NOTE FOR THE CONTRACT: v1 reverted with `NotPayer()` here even though the spender is
  * also permitted, and four places in the repo recorded that the name was misleading
@@ -974,15 +977,15 @@ function revoke(mandate, caller) {
  *
  * RENAMED AND RESHAPED IN v2 (F15 + F16), mirroring the contract, where the opaque
  * two-argument `approveCosign(mandateId, hash)` was DELETED rather than kept alongside this
- * one. The reasoning is in MandateManager.sol's docstring and is worth restating because it
- * is the kind of thing a reader will otherwise try to "restore": whoever asks for the
- * signature chooses the entry point, and that party is usually the agent, so a legibility
- * control the adversary can opt out of on the victim's behalf is not a control.
+ * one. The reasoning is in MandateManager.sol's docstring and is restated here because a
+ * reader will otherwise try to "restore" the deleted form: whoever asks for the signature
+ * chooses the entry point, and that party is usually the agent, so a legibility control the
+ * adversary can opt out of on the victim's behalf is not a control.
  *
  * Two changes beyond the name:
  *
  *   1. There is no `request.spender ?? mandate.spender` escape any more. The old form let a
- *      caller approve the hash of a spend by somebody who is not the mandate's spender —
+ *      caller approve the hash of a spend by an address that is not the mandate's spender —
  *      a hash `evaluate` can never produce, so the approval was unspendable, and the
  *      cosigner had no way to notice from the arguments they were shown. `spendHash` now
  *      reads the spender off the mandate and there is nowhere to put a different one.
@@ -1005,14 +1008,14 @@ function revoke(mandate, caller) {
  * unapprovable until the cosigner is chased a second time, which for a payments primitive is a
  * liveness failure of our own making. They are:
  *
- *   - `notBefore` in the future. Passes with the clock. Approving ahead of a start date is the
- *     ordinary case for a scheduled payment, not an error.
+ *   - `notBefore` in the future, which passes once the clock reaches it. Approving ahead of a
+ *     start date is the ordinary case for a scheduled payment, not an error.
  *   - A full rolling window. The sharpest of the three, because the window arithmetic is the
  *     most tempting to mirror and the least safe to: `windowUsage` FALLS as buckets age out, so
  *     an amount refused now fits later with nothing else changed.
- *   - The ERC-8004 identity and credential gates. Recoverable by a third party the cosigner does
- *     not control. There is a second, structural reason visible only in this model: mirroring
- *     them would force `approveCosignFor` to take `ctx.resolveIdentityOwner` and
+ *   - The ERC-8004 identity and credential checks, which a third party the cosigner does not
+ *     control can restore. There is a second, structural reason visible only in this model:
+ *     mirroring them would force `approveCosignFor` to take `ctx.resolveIdentityOwner` and
  *     `ctx.resolveCredential`, i.e. to consult live registry state before agreeing to store an
  *     approval. The contract's shape says the same thing in gas — two external staticcalls on
  *     the approval path.
@@ -1058,9 +1061,9 @@ function approveCosignFor(mandate, caller, request, ctx) {
   if (!mandate) throw refuse(Denial.UNKNOWN_MANDATE, 'unknown mandate');
   // Configuration before authorisation, matching the contract's `F_COSIGN == 0` check ahead of
   // its `msg.sender != m.cosigner`. The order carries the whole answer: on a mandate with no
-  // cosign gate, NOT_COSIGNER would be technically true — nobody is null's cosigner — and would
-  // send the reader looking for a key that does not exist, when the truth is that nothing on
-  // this mandate is gated and no approval is needed by anyone.
+  // cosign requirement, NOT_COSIGNER would be technically true, since no caller matches a null
+  // cosigner, and it would send the reader looking for a key that does not exist when the truth
+  // is that this mandate requires no signature from anyone.
   if (!mandate.cosigner) {
     throw refuse(ApprovalRefusal.BAD_CONFIG, 'mandate has no cosigner');
   }
@@ -1135,10 +1138,10 @@ function approveCosignFor(mandate, caller, request, ctx) {
 
   // A consumed nonce is consumed for good, so this approval could only ever meet
   // NONCE_ALREADY_USED. Checked HERE, ahead of the caps, because that is where `evaluate` checks
-  // it — the position is not arbitrary and moving it would silently break the parity claimed
-  // above. This is also the condition a cosigner is least placed to notice: the agent supplies
-  // the nonce, and an agent that supplies a spent one is asking for a signature on a payment
-  // that cannot happen.
+  // it — the position is not arbitrary, and moving it would break the parity claimed above
+  // without anything reporting the break. This is also the condition a cosigner is least placed
+  // to notice: the agent supplies the nonce, and an agent that supplies a spent one is asking
+  // for a signature on a payment that cannot happen.
   if (request.nonce === undefined || request.nonce === null || request.nonce === '') {
     throw new Error('approveCosignFor(): nonce is required');
   }
@@ -1164,7 +1167,8 @@ function approveCosignFor(mandate, caller, request, ctx) {
   // solely when `amount > cosignThreshold`, so at or below the threshold this approval would sit
   // in the Map, cost the cosigner a transaction, and never be read — the payment goes through
   // with or without it. Refused because of what it would let the cosigner believe: that they had
-  // gated something. Inclusive comparison, because the threshold itself needs no signature.
+  // imposed a requirement where none exists. The comparison is inclusive, because the threshold
+  // itself needs no signature.
   //
   // Note this is guarded on `cosignThreshold !== null` for form only. `createMandate` forces the
   // threshold non-null whenever a cosigner is named, and the absence of a cosigner was already
@@ -1179,8 +1183,8 @@ function approveCosignFor(mandate, caller, request, ctx) {
   }
 
   // ---- F17: two deadline bounds relative to the mandate, not the clock ----------------------
-  // Refuse rather than clamp, for F16's reason: a deadline the model quietly moved is a deadline
-  // the cosigner did not agree to.
+  // Refuse rather than clamp, for F16's reason: a deadline the model moved with no signal to
+  // the cosigner is a deadline they did not agree to.
   //
   // An approval that dies at or before the mandate starts spans only the stretch in which
   // `evaluate` denies NOT_YET_VALID, so it is unconsumable for its whole life. This is the
@@ -1193,7 +1197,7 @@ function approveCosignFor(mandate, caller, request, ctx) {
         `so no spend could ever fall inside it`,
     );
   }
-  // And the stretch of an approval that outlives the mandate is authority that cannot be
+  // The stretch of an approval that outlives the mandate is likewise authority that cannot be
   // exercised. Left unbounded, a 30-day approval on a mandate expiring tomorrow shows the
   // cosigner a month of authority and means a day of it. The cost is that a cosigner cannot pass
   // `now + MAX_COSIGN_TTL` blindly and has to read `expiresAt` first, which is the intended
@@ -1212,7 +1216,7 @@ function approveCosignFor(mandate, caller, request, ctx) {
     ref: request.ref ?? '',
     nonce: request.nonce,
   });
-  // F30. One nonce holds one approval. A second approval on a nonce already held for a
+  // F30: one nonce holds one approval. A second approval on a nonce already held for a
   // different spend is refused rather than allowed to overwrite it, because the two cannot both
   // be consumed: the first spend to land burns the nonce and the survivor is stranded. The
   // cosigner who wants to replace an approval withdraws it first, which is one extra call and
@@ -1272,7 +1276,7 @@ function withdrawCosign(mandate, caller, hash, nonce) {
 
 /**
  * Remaining headroom on every axis — what a dashboard or an agent's pre-flight
- * check should read. Pure; does not mutate.
+ * check should read. This function is pure and does not mutate the mandate.
  */
 function headroom(mandate, now) {
   const t = BigInt(now);
@@ -1326,7 +1330,7 @@ function headroom(mandate, now) {
  * succeeded on both. Summing the two per-mandate answers gives 180,000, which is
  * twice what the payer can actually lose. This does NOT fix that race — the race
  * is inherent to layering per-mandate policy on one shared allowance — it makes
- * the overlap a number you can read instead of an inference nobody makes.
+ * the overlap a number you can read instead of an inference no reader would make.
  *
  * WHAT THE NUMBER MEANS, EXACTLY. The largest total that ONE spend from each
  * named mandate could move right now. It is deliberately NOT total flow: a
@@ -1358,8 +1362,8 @@ function headroom(mandate, now) {
  * wrong number: there is no joint ceiling across two payers (they have separate
  * allowances and separate balances, so no single clamp applies), and a repeated
  * id double-counts headroom that exists once. Note that duplicates are the more
- * dangerous of the two — mixing payers at least tends to produce an obviously
- * odd figure, whereas naming the same mandate twice produces a plausible one.
+ * dangerous of the two — mixing payers at least tends to produce a figure that
+ * reads as wrong, whereas naming the same mandate twice produces a plausible one.
  * The contract additionally refuses arrays longer than 8, and that bound is
  * deliberately NOT mirrored here. The rule being followed: bounds that constrain
  * the state machine get mirrored, because they change which spends are legal

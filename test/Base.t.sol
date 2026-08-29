@@ -42,20 +42,20 @@ abstract contract Base is Test {
      * The lifetime horizon nearly every mandate in this suite carries, and the reason it
      * is the largest representable value rather than a plausible far-future date.
      *
-     * NEW IN v2. `createMandate` now refuses a mandate with no LIFETIME bound. A
+     * NEW IN v2: `createMandate` now refuses a mandate with no LIFETIME bound. A
      * per-transaction cap is not one — the delegate spends it again, and again — and
      * neither is a rolling window, which is bounded per period and unbounded over a
-     * lifetime. Only `totalCap` and `expiresAt` are. Almost every test here is about
-     * something other than expiry, so each one needs a bound that cannot interfere with
-     * whatever it is actually measuring.
+     * lifetime; `totalCap` and `expiresAt` are the only two. Almost every test here is
+     * about something other than expiry, so each one needs a bound that cannot
+     * interfere with whatever it is actually measuring.
      *
      * `expiresAt` is the right one of the two, and not merely the more convenient one.
      * `totalCap` enters the amount arithmetic everywhere — `spendable`,
      * `policyHeadroom`, the min-of across bounds, the totalSpent ceiling — so handing
-     * every mandate one would quietly make it a term in tests that are measuring a
-     * window or a per-transaction cap, and some of those assert exact numbers. An expiry
-     * is inert with respect to every amount in the system. It is either passed or it is
-     * not.
+     * every mandate one would make it an unannounced term in tests that are measuring
+     * a window or a per-transaction cap, and some of those assert exact numbers. An
+     * expiry is inert with respect to every amount in the system. It is either passed
+     * or it is not.
      *
      * uint40 max, rather than a plausible date, because "far enough" has to hold
      * unconditionally. The model's `FAR` is 4e9 — year 2096, against a measured maximum
@@ -65,7 +65,7 @@ abstract contract Base is Test {
      * seconds, and `depth` is a number in foundry.toml which the deep profile already
      * raises from 64 to 256. A horizon that is safe under one profile and not another is
      * a trap, so this is the one value no run can pass without first overflowing the
-     * field it is stored in. Year 36812.
+     * field it is stored in, which is the year 36812.
      *
      * The contract permits it. `expiresAt` is only ever compared, never used in
      * arithmetic — MandateManager.sol:608 in `spend` and :1012 in `isLive` are its only
@@ -82,8 +82,8 @@ abstract contract Base is Test {
      * Mirrors of MandateManager's flag constants, deliberately re-declared rather
      * than read through the public getters. If the contract ever renumbers a flag,
      * these stop matching and test_flagConstants_matchTheContract fails loudly —
-     * whereas reading the getters would silently keep every test passing while
-     * testing the wrong bit.
+     * whereas reading the getters would keep every test passing with no failure at
+     * all, while testing the wrong bit.
      */
     uint8 internal constant F_PER_TX = 1 << 0;
     uint8 internal constant F_TOTAL = 1 << 1;
@@ -132,8 +132,8 @@ abstract contract Base is Test {
     ///
     /// The bound is not decoration. `whole * ONE` is uint256 arithmetic and the result is
     /// narrowed to uint96, so without this check a large argument would truncate into a
-    /// small amount — and a test that meant to spend more than the cap would quietly
-    /// spend less than it and pass. Every current call site passes a literal (the largest
+    /// small amount — and a test that meant to spend more than the cap would spend
+    /// less than it and pass. Every current call site passes a literal (the largest
     /// is 5000), so this cannot fire today; it is here so that the first person to write
     /// `usd(fuzzInput)` gets a failure instead of a false green.
     function usd(uint256 whole) internal pure returns (uint96) {
@@ -152,7 +152,7 @@ abstract contract Base is Test {
     /// `perTxCap`, or a window, or both, does NOT make the result creatable. Only
     /// `totalCap` or `expiresAt` does. Any test that builds from here and expects the
     /// grant to succeed — or to fail for some more specific reason than `Unbounded` —
-    /// has to add one, and `withExpiry` is the cheapest way.
+    /// has to add one, and `withExpiry` is the simplest way.
     function emptyParams() internal view returns (MandateManager.MandateParams memory p) {
         p.spender = agent;
         p.windows = new MandateManager.WindowParams[](0);
@@ -177,11 +177,11 @@ abstract contract Base is Test {
     ///
     /// Since v2 it also carries a `FAR` expiry, because a window alone is no longer a
     /// creatable mandate. That does not weaken the sentence above, and the reason is
-    /// worth writing down rather than assuming: an expiry can produce only `Expired`,
-    /// and `FAR` is uint40 max, so no run in this suite reaches it. If one ever did, the
-    /// failure would be loud rather than silent in both places it could hide —
-    /// `WindowFuzz` asserts that every refusal is `OverWindowCap` specifically, and
-    /// `WindowInvariant`'s handler records the first refusal that is not, which
+    /// twofold: an expiry can produce only `Expired`, and `FAR` is uint40 max, so no
+    /// run in this suite reaches it. If one ever did, the failure would be loud
+    /// rather than silent in both places it could hide — `WindowFuzz` asserts that
+    /// every refusal is `OverWindowCap` specifically, and `WindowInvariant`'s
+    /// handler records the first refusal that is not, which
     /// `invariant_theWindowIsTheOnlyThingThatEverRefuses` then reads.
     function windowOnlyParams(uint32 lengthSeconds, uint96 cap, uint8 buckets)
         internal
@@ -198,7 +198,7 @@ abstract contract Base is Test {
     /// with anything — see `FAR` above for why it is uint40 max and why it is an expiry
     /// rather than a total.
     ///
-    /// This is a `with*` helper rather than something `grant()` does silently, and that
+    /// This is a `with*` helper rather than a bound `grant()` adds by itself, and that
     /// is deliberate. Making `grant` supply a bound would have repaired every failing
     /// test in this suite in one edit, and in the same edit stopped the suite from
     /// demonstrating that a real caller has to supply one. Every mandate here names its
@@ -316,11 +316,11 @@ abstract contract Base is Test {
     /**
      * Expect a spend to be refused with exactly this revert data.
      *
-     * The prank is deliberately set BEFORE expectRevert. Both are cheatcode calls
-     * and Foundry does not let one consume the other, but expectRevert applies to
-     * the next real call, so anything that looks like a call must not sit between
-     * them. Wrapping the pair here keeps every denial test in the right order
-     * instead of relying on each one getting it right by hand.
+     * The prank is deliberately set BEFORE expectRevert. Both are cheatcode calls and
+     * Foundry does not let one consume the other, but expectRevert applies to the next
+     * real call, so anything that looks like a call must not sit between them.
+     * Wrapping the pair here keeps every denial test in the right order instead of
+     * relying on each one getting it right by hand.
      */
     function payReverts(bytes32 id, address to, uint256 amount, bytes memory expectedError) internal {
         bytes32 nonce = nextNonce();
@@ -349,8 +349,8 @@ abstract contract Base is Test {
     // -- assertions --------------------------------------------------------
 
     /// First four bytes of revert data. `bytes memory` cannot be cast to bytes4
-    /// directly, and getting this wrong silently compares zero to zero, so it is
-    /// done once here rather than inline at each call site.
+    /// directly, and getting this wrong compares zero to zero with no failing test.
+    /// The extraction is done once here rather than inline at each call site.
     function selectorOf(bytes memory data) internal pure returns (bytes4 sel) {
         require(data.length >= 4, "selectorOf: revert data too short");
         assembly {

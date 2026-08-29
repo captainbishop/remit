@@ -1,24 +1,24 @@
 # Audit scope
 
-What an auditor is being asked to read, and what they are not. Every count below comes
-from the tree at the commit named in the next line; if that line is stale, the counts
-are too.
+The material an auditor is being asked to read is listed below, together with the
+material excluded from that request. Every count here comes from the tree at the commit
+named in the next line; if that line is stale, the counts are too.
 
-**Anchored at `0d9e209` on branch `main`.** The deployed release is the annotated tag
+**Anchored at `9fa7ece` on branch `main`.** The deployed release is the annotated tag
 `v1.0.0-arc-testnet`; `main` is v2 in progress and does not reproduce the deployed
-bytecode. A scope statement tied to "the current tree" expires without anyone noticing,
-so re-derive these numbers against whatever commit is handed over.
+bytecode. A scope statement tied to "the current tree" expires without anyone noticing;
+re-derive these numbers against whatever commit is handed over.
 
 ## In scope
 
-One file, 1,537 lines, **14,458 bytes of runtime bytecode** (initcode 14,768), leaving
-10,118 bytes under the EIP-170 limit.
+The in-scope code is one file, 1,537 lines, **14,458 bytes of runtime bytecode**
+(initcode 14,768), leaving 10,118 bytes under the EIP-170 limit.
 
-That figure is the tree named above, not the deployed contract. Deployed v1 is 11,572
-bytes, confirmed by its own on-chain code length, and that is the number most of this
-repo's other documents quote. v2 is 2,886 bytes larger, almost all of it the co-signature
-rework and `spendableAcross`. If a document quotes 11,572 without saying which release it
-means, it means v1.
+That figure describes the tree named above rather than the deployed contract. Deployed v1
+is 11,572 bytes, confirmed by its own on-chain code length, and that is the number most of
+this repo's other documents quote. v2 is 2,886 bytes larger, almost all of it the
+co-signature rework and `spendableAcross`. If a document quotes 11,572 without
+saying which release it means, it means v1.
 
 | File | What it is |
 |---|---|
@@ -28,7 +28,7 @@ There is nothing else in `contracts/`. The contract declares the three interface
 needs inline at lines 136, 144 and 151 rather than importing them, so the file is
 self-contained and can be read start to finish without following a dependency.
 
-## Also worth reading, though not the contract
+## Supporting files outside the contract
 
 | File | Why it is here |
 |---|---|
@@ -55,13 +55,13 @@ self-contained and can be read start to finish without following a dependency.
 | Arc Testnet | 5042002 | Deployed and verified at `0x3744E93B9e796E05CB66311d897559B6F3860196`, 31 transactions of live use recorded under `evidence/`. |
 | Arc mainnet | not yet published | The intended target. `script/Deploy.s.sol` has no entry for it and will refuse to deploy there until one is added deliberately. |
 
-The chain id is not incidental. It is hashed into every spend hash alongside `DOMAIN`
-and the contract address, so a co-signature produced for one chain cannot be replayed on
-another or against a second deployment on the same chain.
+The chain id is part of the replay argument: it is hashed into every spend hash alongside
+`DOMAIN` and the contract address, so a co-signature produced for one chain cannot be
+replayed on another or against a second deployment on the same chain.
 
 ## Entry points
 
-Five functions change state. Everything else reads.
+Five functions change state, and everything else reads.
 
 | Function | Who may call it | What it does |
 |---|---|---|
@@ -71,43 +71,42 @@ Five functions change state. Everything else reads.
 | `approveCosignFor` | the cosigner | Pre-approves one exact spend hash, with a deadline. |
 | `withdrawCosign` | the cosigner | Cancels an approval before it is used. The payer cannot cancel one directly; revoking the mandate is the payer's route. |
 
-Twelve view functions, plus getters for `usdc`, `identityRegistry`, `validationRegistry`
-and `DOMAIN`. `spendable` and `spendableAcross` are the two an integrator is most likely
-to build on, and `spendableAcross` is the only place in the contract where an error
-reports a badly formed question rather than a refused action.
+The contract exposes twelve view functions, plus getters for `usdc`, `identityRegistry`,
+`validationRegistry` and `DOMAIN`. The two an integrator is most likely to build on are
+`spendable` and `spendableAcross`, and `spendableAcross` is the only place in the
+contract where an error reports a badly formed question rather than a refused action.
 
 The constructor takes three addresses and refuses only a zero USDC. A zero registry is a
-valid configuration that disables the ERC-8004 credential gate.
+valid configuration that disables the ERC-8004 credential check.
 
-## What the contract deliberately does not have
+## Features deliberately omitted
 
-Worth stating up front, because their absence removes whole classes of finding and an
-auditor should not spend time looking.
+The absences below remove whole classes of finding, so an auditor should not spend time
+looking for them.
 
-No owner, admin, role, pause, or upgrade path. No `payable`, `receive`, or `fallback`, so
-it cannot hold or move native value. No custody of USDC at any point: the payer's funds
-stay in the payer's wallet and a spend is `transferFrom(payer → recipient)`, which means
-`approve(mandateManager, 0)` is a hard stop the payer controls without our cooperation.
-No proxy, no storage gaps, no initialiser. No `require`; every refusal is a named custom
-error.
+The contract has no owner, admin, role, pause, or upgrade path, and no `payable`,
+`receive`, or `fallback`, so it cannot hold or move native value. It takes no custody of
+USDC at any point: the payer's funds stay in the payer's wallet and a spend is
+`transferFrom(payer → recipient)`, which means `approve(mandateManager, 0)` is a hard
+stop the payer controls unilaterally. There is no proxy, no storage gaps and no
+initialiser, and no `require`: every refusal is a named custom error.
 
 The cost of that shape is that nothing can be fixed after deployment. `IMMUTABILITY.md`
 is the document about what that means for a payer.
 
-## Where the rest of the context lives
+## Related documents
 
 | Question | File |
 |---|---|
 | What is this and why | `README.md` |
 | Design decisions and the arguments behind them | `DESIGN.md` |
-| Trust assumptions, threat model, 28 recorded findings, 18 invariants | `THREAT-MODEL.md` |
+| Trust assumptions, threat model, 28 recorded findings, 17 invariants | `THREAT-MODEL.md` |
 | What immutability costs and what recourse a payer has | `IMMUTABILITY.md` |
 | Test and tooling conventions, compiler settings | `FORGE.md` |
 | Live transactions, gas measurements, verification output | `evidence/` |
 
-`THREAT-MODEL.md` is the one to read first. Its finding register is the honest list of
-what is known to be wrong or unresolved, including the items still open, and §5 names the
-tests it still owes.
+`THREAT-MODEL.md` is the one to read first. Its finding register lists what is known to be
+wrong or unresolved, including the items still open, and §5 names the tests it still owes.
 
 ## No prior audit
 
