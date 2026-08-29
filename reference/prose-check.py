@@ -40,6 +40,12 @@ the shape it looks for and, where the shape has a legitimate use, what it allows
                    sort of, on sight.
   confessional     First-person error narration: "the mistake was mine", "I got it
                    wrong", "cost us". Record the correction, not the apology.
+  note-to-self     An aside addressed to whoever writes next rather than to the
+                   reader: "TODO", "recalled from memory", "not verified here",
+                   "check X before citing a figure", "come back to this". A
+                   reader-facing statement of a limit is a different thing and is
+                   allowed, because half of what this repository publishes is a
+                   record of what it has not established.
   header-tone      Headers carrying any of the above, or ending in a question mark.
 
 The categories are deliberately over-inclusive. A flag is a candidate for reading,
@@ -156,6 +162,39 @@ CHECKS = [
             r"\b(?:the mistake was mine|my (?:own )?(?:mistake|error|fault|slip)|"
             r"I (?:got|had|wrote|typed|assumed|missed|forgot|was wrong)|cost us|"
             r"cost me|I should have|my first version|I then|I also)\b"
+        ),
+    ),
+    (
+        # An aside about the sentence rather than about the subject, addressed to
+        # whoever writes next instead of to the reader. DESIGN.md carried one for
+        # weeks, in the opening motivation section: "(Recalled from memory, not
+        # verified here - check current IC3 reporting before citing a figure.)"
+        #
+        # The distinction this pattern has to preserve, since the repository depends
+        # on one half of it: a reader-facing declarative statement of a limit ("this
+        # document quotes no figure, because none was verified while writing it") is
+        # the security posture the project is built on and stays. An imperative aimed
+        # at a future author is a draft that reached the reader. Only the second shape
+        # is listed here, which is why "come back in the tuple", "a placeholder
+        # verifier" and "only if you remember to look" are all outside it.
+        "note-to-self",
+        re.compile(
+            r"\b(?:note to self|TODO|FIXME|TBD|XXX)\b"
+            r"|\b(?:recalled|remembered|quoted|taken|working)\s+from\s+memory\b"
+            r"|\bnot\s+(?:verified|checked|measured|confirmed|counted|re-?run)\s+here\b"
+            r"|\b(?:check|verify|confirm|look\s+up|re-?check|measure|count)\b[^.;:)]{0,70}"
+            r"\bbefore\s+(?:citing|quoting|publishing|stating|printing|repeating)\b"
+            r"|\b(?:don't|do not)\s+forget\b"
+            r"|\bremember\s+to\s+(?:add|update|fix|change|write|check|re-?run|re-?derive)\b"
+            r"|\b(?:circle|come)\s+back\s+to\s+(?:this|it|these|them)\b"
+            r"|\brevisit\s+(?:this|these|it)\s+(?:before|when|after|once)\b"
+            r"|\b(?:flesh\s+out|fill\s+(?:this|that|it)\s+in|left\s+as\s+an\s+exercise)\b"
+            # "one day" belongs to this class in its deferral sense and is left out of it
+            # anyway: THREAT-MODEL.md uses the phrase twice as a duration ("had already
+            # gone wrong, in one day"), and a rule that reports correct prose twice on
+            # every run teaches its reader to skip the third hit.
+            r"|\b(?:for\s+now|at\s+some\s+point)\s*[.,;)]",
+            re.I,
         ),
     ),
 ]

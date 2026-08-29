@@ -52,6 +52,17 @@ this section reported eight vacuous bodies. All eight were false positives, caus
 hand-listed assertion vocabulary; the derived vocabulary reports zero." Documents avoid the first
 person entirely.
 
+**Notes to the author.** A published document states what has been established and what has not,
+and both statements are addressed to the reader. An instruction addressed to whoever writes next
+belongs in a task list instead: *TODO*, *TBD*, *recalled from memory*, *not verified here*, *check
+the current figure before citing one*, *come back to this*. `DESIGN.md` carried one of these in its
+opening section for several weeks — "(Recalled from memory, not verified here — check current IC3
+reporting before citing a figure.)" — attached to a sentence that quoted no figure at all. The
+repair is to have the document take the position itself: "This document quotes no figure for that,
+because none was verified while writing it; the FBI's IC3 annual report is where to check one."
+Declaring a limit to the reader is the stronger form and is required throughout these documents, so
+this rule turns on who the sentence addresses and in what mood, never on the admission itself.
+
 **Informal or interrogative headers.** A header is a descriptive noun phrase. "Status, honestly"
 becomes "Status". "Has a bug been found since deployment?" becomes "Bugs found since deployment".
 

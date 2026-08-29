@@ -52,9 +52,9 @@ Note also what the agent removed: less a control than a human who would plausibl
 paused at a familiar vendor with an unfamiliar account number.
 Invoice-redirection and business-email-compromise fraud was already among the largest
 categories of business payment loss by dollar value before any of this was automated.
-*(Recalled from memory, not verified here — check current IC3 reporting before citing
-a figure.)* Agents do not create that attack. They remove the last person who was
-occasionally catching it, and they operate at 2am.
+This document quotes no figure for that, because none was verified while writing it;
+the FBI's IC3 annual report is where to check one. Agents do not create that attack.
+They remove the last person who was occasionally catching it, and they operate at 2am.
 
 ### What each existing control does at 2:14am
 
