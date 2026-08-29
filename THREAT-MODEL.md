@@ -261,22 +261,26 @@ what it does not, and which areas remain unexamined.
 > **2026-08-29, the repository-wide wording audit: the model moved and the contract held its
 > line count.** `contracts/MandateManager.sol` is 2,043 lines before and after, and
 > `git diff --numstat` reports 350 lines added against 350 deleted, the same figure on both
-> sides. That was held deliberately: 208 pointers across this repository resolve to that file
-> by line, and any net change would put every one of them out by the same amount. The model
-> carries no such load, so it took four one-line insertions — `reference/policy.js` went
-> **1,444 → 1,448** and `reference/policy.test.js` **2,387 → 2,392**.
+> sides. That was held deliberately: 209 pointers across this repository resolve to that file
+> by line, and holding the count is what keeps the newest of them usable. Five are checked
+> against the working tree, and of the 204 anchored to a historical revision, the 36 at
+> `af9df40` land on the same numbers in the working tree because `af9df40` and the tree are
+> both 2,043 lines. The rest sit at earlier widths and resolve inside the blob they name: 101
+> at `92445dd` (1,204 lines), 66 at the `v1.0.0-arc-testnet` tag (873), and one at `9fa7ece`
+> (1,537). The model carries no such load, so it took four one-line insertions —
+> `reference/policy.js` went **1,444 → 1,448** and `reference/policy.test.js` **2,387 → 2,392**.
 >
-> **The eight citations into `reference/policy.js` in this file are anchored at `af9df40` and
-> still resolve there**, since `git diff af9df40 HEAD -- reference/policy.js` is empty. Against
-> the working tree each has shifted by the number of insertions that precede it: `:271-282` by
-> **+1**, `:366` and `:394-411` by **+2**, `:578`, `:634`, `:696` and `:773` by **+3**, and
-> `:1256` by **+4**. The insertion points in the old file are 115, 310, 518 and 1167, one line
-> at each. Those deltas are recorded rather than applied, for the reason the F19 paragraph above
+> **The eight citations into `reference/policy.js` in this file are anchored at `af9df40`, and
+> the pass itself landed as `e7922c1`.** `git diff af9df40 d75355c -- reference/policy.js` is
+> empty, so every one of the eight resolved unchanged for as long as `d75355c` was the tip. In
+> `e7922c1` each has shifted by the number of insertions that precede it: `:271-282` by **+1**,
+> `:366` and `:394-411` by **+2**, `:578`, `:634`, `:696` and `:773` by **+3**, and `:1256` by
+> **+4**. The insertion points in the `af9df40` file are 115, 310, 518 and 1167, one line at
+> each. Those deltas are recorded rather than applied, for the reason the F19 paragraph above
 > gives: each number is correct against the blob it names, and rewriting it would make it wrong.
-> When this pass commits, the working-tree column becomes a blob of its own, and the ladder above
-> is how to cross from one to the other. **`reference/policy.test.js` is cited by no line number
-> anywhere in the repository**, which was checked by grep over every tracked `.md`, `.sol`,
-> `.js` and `.py` file rather than assumed, so its five new lines cost nothing.
+> The ladder is how to cross from one blob to the other. **`reference/policy.test.js` is cited by
+> no line number anywhere in the repository**, which was checked by grep over every tracked
+> `.md`, `.sol`, `.js` and `.py` file rather than assumed, so its five new lines cost nothing.
 
 ## Why this document exists
 

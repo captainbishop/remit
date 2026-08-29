@@ -35,7 +35,7 @@ filename in range is reported as unattributed rather than guessed at.
 
 ANCHORED CITATIONS.
 
-Three conventions in this repository point a citation at a historical blob
+Four conventions in this repository point a citation at a historical blob
 rather than at the working tree, and each one is declared in the documents
 themselves:
 
@@ -43,13 +43,15 @@ themselves:
                                               declared in THREAT-MODEL.md:9-19
     an unqualified contract line number in    the v1.0.0-arc-testnet tag,
     DESIGN.md, CHANGELIST.md, L3-VAULT.md,    declared in FORGE.md:111-128
-    PRIVACY.md, GAS-ABSTRACTION.md and
-    evidence/README.md
+    PRIVACY.md, GAS-ABSTRACTION.md,
+    IMMUTABILITY.md and evidence/README.md
+    an unqualified contract line number in    9fa7ece, declared in scope.md:7
+    scope.md
     policy.js, policy.test.js and the         65f05d8 for F27 and F28, af9df40
     contract, cited from THREAT-MODEL.md      for F29 to F37, declared in
                                               THREAT-MODEL.md:172-182 and :203-216
 
-THREAT-MODEL.md:139 states the rule those three conventions share: "Those
+THREAT-MODEL.md:139 states the rule those four conventions share: "Those
 deltas are recorded rather than applied, because the numbers are correct as
 written against the blob they now name and rewriting them would make them
 wrong." A checker that compares such a citation against the working tree
