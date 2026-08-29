@@ -2843,6 +2843,38 @@ Nineteen and eight are the same mistake at different sizes. Deriving the vocabul
 primitive set under calling is the version that cannot decay: a helper written tomorrow is found
 tomorrow, and a helper that quietly stops asserting — the `trySpend` case — drops out on its own.
 
+**And because the first two versions were throwaway greps, the third one is in the repository.**
+It is `reference/vacuity-check.py`, it runs with no arguments from the repository root, and it
+exits non-zero if any case is vacuous or any declared error is orphaned, so it can be a CI step
+rather than a thing somebody remembers to do. Every figure in the five bullets above is its
+output rather than a transcription of its output: 207 cases as 204 plus 3, six helpers, 362
+primitive calls, 90 `vm.expectRevert` with none bare, 37 errors with no orphan and four named
+once, zero vacuous. The reason the method is written into the file's own docstring, at more
+length than the code, is that the code is the easy half — a future reader who only has the code
+will fix the next false positive by lengthening a list, which is the mistake this file exists to
+stop them making.
+
+**One number nearby looked stale and was not, which is recorded because the mistake was mine and
+it was made with this document open.** The check walks thirteen `.sol` files under `test/` —
+eleven `.t.sol` plus the two mocks — and ten of the eleven declare cases, `Base.t.sol` being the
+harness. Several documents here say the suite has *thirteen*, and matching that against eleven I
+wrote it down as drift from an older tree. It is not drift. A Forge *suite* is a **contract**, not
+a file, and thirteen concrete contracts under `test/` declare cases: `ArcParity.t.sol` alone holds
+four one-case contracts over a shared abstract base, and `WindowInvariant.t.sol` holds a handler
+that declares none. 1+1+1+1 + 29 + 46 + 43 + 24 + 13 + 25 + 4 + 5 + 14 = 207. Eleven test files,
+thirteen suites and 207 cases are all correct at once, and `FORGE.md` had already written the
+arithmetic down for the older figure — one line into a file in this repository would have stopped
+me.
+
+The reason it is in the document instead of silently reverted: the failure was not arithmetic. It
+was reaching a conclusion about a *count* from a count of something adjacent, which is the same
+move that produced the nineteen and the eight two paragraphs up, and it survived long enough to
+be typed only because it was a claim about our own paperwork rather than about the contract. The
+tooling around it worked exactly as intended — every figure in the bullets above came out of a
+script, and the one number I typed by hand is the one that was wrong. So the suite count is now
+derived too: `vacuity-check.py` prints case-bearing files, `.t.sol` files, mocks and suites on one
+line, which also keeps the two unrelated thirteens from being read as each other.
+
 ## 6. Method, and the enumeration behind §3
 
 Three sweeps, two of them run independently and every claim from them re-verified against
