@@ -59,14 +59,73 @@ contract GatesTest is Base {
         payReverts(id, usd(10), MandateManager.IdentityNotHeld.selector);
     }
 
-    /// `expectedOwner` pins the identity to a specific address on top of requiring
-    /// the caller to hold it. This is the case where the caller DOES hold the token
-    /// but the payer named someone else — a distinct error, because it means the
-    /// mandate's assumptions changed rather than that the agent lost its key.
-    function test_identityGate_expectedOwnerMismatch_reportsIdentityTransferred() public {
-        bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, boss));
-        // agent holds #42 and is the named spender, but the payer pinned boss.
+    /// CHANGED IN v2 (F33). This test used to grant a mandate pinning `expectedOwner` to `boss`
+    /// while naming `agent` as the spender, and assert that the spend reverted
+    /// `IdentityTransferred`. Every word of that was true and the test was still endorsing a
+    /// bug: `_checkIdentity` requires `ownerOf(agentId) == msg.sender` and `spend` requires
+    /// `msg.sender == m.spender`, so a pin at anyone other than the spender reverts on EVERY
+    /// spend, for the life of the mandate. The mandate was not protected, it was bricked, and
+    /// the payer had no way to tell those apart from the error.
+    ///
+    /// `createMandate` now refuses the configuration instead, which is the only moment at which
+    /// the payer can still fix it. `IdentityTransferred` is unreachable as a consequence — the
+    /// check stays in `_checkIdentity` because unreachable code that can only ever REFUSE a
+    /// payment is the safe direction for dead code, and the error declaration says so.
+    function test_identityGate_expectedOwnerNotTheSpender_isRefusedAtGrantTime() public {
+        grantReverts(withIdentity(simpleParams(), AGENT_ID, boss), MandateManager.BadConfig.selector);
+    }
+
+    /// The pin is still expressible when it names the spender, which is the only address it
+    /// could ever have named without bricking the grant.
+    function test_identityGate_expectedOwnerIsTheSpender_isAccepted() public {
+        bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, agent));
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// The other half of F33's disposition. `IdentityTransferred` is unreachable through the
+    /// public interface, and this shows the branch behind it still refuses a payment rather
+    /// than passing one.
+    ///
+    /// Three guards, each with its own test, make the state impossible to reach by calling the
+    /// contract. `createMandate` refuses an `expectedOwner` that is neither zero nor the spender
+    /// (the test two above this one), `spend` refuses any caller other than the spender
+    /// (`Bounds.t.sol`, and the tail of the transfer attack further up), and `_checkIdentity`
+    /// refuses unless the caller owns the identity — so by the time the pin is compared it can
+    /// only agree with a test that has just passed. Nothing writes `_identity` after the grant.
+    ///
+    /// The state is therefore reached here by writing storage directly, which earns its keep
+    /// twice over. The error declaration claims this dead code "can only ever REFUSE a payment",
+    /// and that is a claim about behaviour that nothing was checking. And the mutation gate
+    /// cannot see line 1229 without it: deleting that `revert` left all 206 other tests passing,
+    /// because none of them can make the condition true.
+    ///
+    /// The slot is derived and then verified before anything is written to it. The nine mappings
+    /// take slots 0 through 8 in declaration order, `_identity` is the fourth, so one mandate's
+    /// struct starts at `keccak256(abi.encode(mandateId, 3))` with `agentId` in that word and
+    /// `expectedOwner` in the next. Both are read back and checked against values this test
+    /// already knows, so a later change to the layout fails here with a message instead of
+    /// quietly overwriting some other mandate's window.
+    function test_f33_forcingTheUnreachablePin_stillRefusesTheSpend() public {
+        bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, agent));
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10), "the legal pin spends");
+
+        bytes32 base = keccak256(abi.encode(id, uint256(3)));
+        assertEq(uint256(vm.load(address(mm), base)), AGENT_ID, "slot 3 is no longer _identity");
+        bytes32 pin = bytes32(uint256(base) + 1);
+        assertEq(address(uint160(uint256(vm.load(address(mm), pin)))), agent, "expectedOwner moved");
+
+        vm.store(address(mm), pin, bytes32(uint256(uint160(other))));
+
         payReverts(id, usd(10), MandateManager.IdentityTransferred.selector);
+        assertEq(token.balanceOf(vendor), usd(10), "and nothing further moved");
+    }
+
+    /// F33. Agent id zero is not registrable under ERC-8004, so `ownerOf(0)` can only answer
+    /// with the zero address or revert, and both land on `IdentityNotHeld` forever.
+    function test_identityGate_zeroAgentId_isRefusedAtGrantTime() public {
+        grantReverts(withIdentity(simpleParams(), 0, address(0)), MandateManager.BadConfig.selector);
     }
 
     /// expectedOwner = address(0) means "do not pin" — only require that the caller
@@ -137,6 +196,57 @@ contract GatesTest is Base {
 
         vm.warp(attestedAt + 1 days + 1);
         payReverts(id, usd(10), MandateManager.CredentialStale.selector);
+    }
+
+    /**
+     * F31. A future-dated attestation used to be fresh forever.
+     *
+     * The old condition was `nowTs > lastUpdate && nowTs - lastUpdate > maxStaleness`. The first
+     * conjunct was there to stop an unsigned subtraction underflowing, and it did — by skipping
+     * the whole freshness test whenever `lastUpdate` was ahead of the chain clock. So
+     * `maxStaleness` applied to every attestation except the one class that cannot be honest
+     * about its own age: a validator stamping a time in the future, once, bought a credential
+     * that never expired.
+     *
+     * A registry with a fast clock produces this by accident, which is why it is a finding and
+     * not a story about a malicious validator.
+     *
+     * Staged in one `setStatus` call, and this test is also the fifth of the five that
+     * THREAT-MODEL.md section 5 owes.
+     */
+    function test_f31_aFutureDatedAttestationIsRefusedRatherThanFreshForever() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp + 365 days);
+
+        payReverts(id, usd(10), MandateManager.CredentialStale.selector);
+
+        // And it stays refused for as long as the stamp is ahead of the clock, then behaves
+        // ordinarily once the clock catches up — the guard is about an unknowable age, not a
+        // permanent blacklisting of the attestation.
+        vm.warp(block.timestamp + 364 days);
+        payReverts(id, usd(10), MandateManager.CredentialStale.selector);
+
+        vm.warp(block.timestamp + 1 days);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// The underflow the old conjunct was guarding against is still impossible, which is the one
+    /// thing the fix must not lose. `lastUpdate` one second ahead of the clock takes the first
+    /// leg and never reaches the subtraction.
+    function test_f31_theSubtractionStillCannotUnderflow() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp + 1);
+        payReverts(id, usd(10), MandateManager.CredentialStale.selector);
+    }
+
+    /// An attestation stamped at exactly the current block is fresh, so the new first leg is a
+    /// strict `>` and does not refuse the ordinary case.
+    function test_f31_anAttestationStampedThisBlockIsFresh() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
     }
 
     /**

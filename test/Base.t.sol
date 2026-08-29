@@ -275,6 +275,16 @@ abstract contract Base is Test {
         id = mm.createMandate(bytes32(++_saltCounter), p);
     }
 
+    /// Grant as the payer, expecting a refusal. Returns nothing, because nothing was created.
+    ///
+    /// The salt still advances, so a test can call this and then `grant` a corrected version of
+    /// the same params without colliding on `MandateExists`.
+    function grantReverts(MandateManager.MandateParams memory p, bytes4 selector) internal {
+        vm.prank(payer);
+        vm.expectRevert(selector);
+        mm.createMandate(bytes32(++_saltCounter), p);
+    }
+
     /// Spend as the agent, to the default vendor, with a fresh nonce.
     function pay(bytes32 id, uint256 amount) internal returns (bytes32) {
         vm.prank(agent);

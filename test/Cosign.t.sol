@@ -245,7 +245,7 @@ contract CosignTest is Base {
         // Withdrawal is what actually clears it, and it still works after expiry — a cosigner
         // tidying up must not be told the approval does not exist.
         vm.prank(boss);
-        mm.withdrawCosign(id, hash);
+        mm.withdrawCosign(id, hash, nonce);
         assertEq(mm.cosignApprovalDeadline(id, hash), 0);
     }
 
@@ -323,6 +323,11 @@ contract CosignTest is Base {
     function test_ATTACK_redirectingAnApprovedSpend_isRefused() public {
         bytes32 id = grant(cosignParams());
         bytes32 nonce = nextNonce();
+        bytes32 fresh = nextNonce();
+
+        // Hoisted before any prank: `mm.spendHash(...)` sitting in an argument list is itself a
+        // call, and `vm.prank` applies to the next one.
+        bytes32 onFresh = mm.spendHash(id, other, usd(50), REF, fresh);
 
         vm.prank(boss);
         bytes32 approved = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
@@ -330,10 +335,24 @@ contract CosignTest is Base {
         bytes32 redirected = mm.spendHash(id, other, usd(50), REF, nonce);
         assertTrue(approved != redirected, "the recipient must be inside the hash");
 
+        // Reusing the approved nonce meets F30's reservation first. That nonce is committed to
+        // `approved`, and the redirected spend is not it. Before F30 this reached the co-sign
+        // check and answered `CosignRequired(redirected)`: the refusal is the same either way,
+        // and the reason given is now the better one, because it names the payment the co-signer
+        // authorised instead of inviting the agent to go and collect a signature for the
+        // redirect.
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, redirected));
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, approved));
         mm.spend(id, other, usd(50), REF, nonce);
-        assertEq(token.balanceOf(other), 0);
+
+        // A fresh nonce carries no reservation, so this leg reaches the co-sign check, and there
+        // is no approval for any hash with this recipient in it. This is the half that shows the
+        // recipient is inside the hash, rather than only showing the nonce is spoken for.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, onFresh));
+        mm.spend(id, other, usd(50), REF, fresh);
+
+        assertEq(token.balanceOf(other), 0, "neither attempt moved money");
     }
 
     /// ATTACK: inflate an approved amount. Same idea, different field.
@@ -350,14 +369,27 @@ contract CosignTest is Base {
         // takes a hash, so the pranked call cannot swallow a `spendHash` of its own — but
         // any `spendHash` used for an ASSERTION still has to be hoisted, as here.
         bytes32 inflated = mm.spendHash(id, vendor, usd(90), REF, nonce);
+        bytes32 fresh = nextNonce();
+        bytes32 onFresh = mm.spendHash(id, vendor, usd(90), REF, fresh);
 
         vm.prank(boss);
         bytes32 approved = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
         assertTrue(approved != inflated, "the amount must be inside the hash");
 
+        // F30's reservation answers first on the approved nonce; see the redirect test above for
+        // why that is the better of the two refusals.
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, inflated));
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, approved));
         mm.spend(id, vendor, usd(90), REF, nonce);
+
+        // On a fresh nonce the co-sign check runs and the inflated amount has no approval. 90 is
+        // inside the per-transaction cap, so this really is the co-signature stopping it and not
+        // a cap doing the work — the refusal names the inflated hash.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, onFresh));
+        mm.spend(id, vendor, usd(90), REF, fresh);
+
+        assertEq(token.balanceOf(vendor), 0, "neither attempt moved money");
     }
 
     /// ATTACK: reuse the approval for a different invoice by changing the reference.
@@ -370,14 +402,25 @@ contract CosignTest is Base {
 
         // Hoisted for the same reason as above.
         bytes32 swapped = mm.spendHash(id, vendor, usd(50), otherRef, nonce);
+        bytes32 fresh = nextNonce();
+        bytes32 onFresh = mm.spendHash(id, vendor, usd(50), otherRef, fresh);
 
         vm.prank(boss);
         bytes32 approved = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
         assertTrue(approved != swapped, "the reference must be inside the hash");
 
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, swapped));
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, approved));
         mm.spend(id, vendor, usd(50), otherRef, nonce);
+
+        // The fresh-nonce leg is the one that pins the reference itself: same mandate, same
+        // recipient, same amount, everything a careless reading would call approved, and it is
+        // still refused because invoice-9999 is not invoice-0001.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignRequired.selector, onFresh));
+        mm.spend(id, vendor, usd(50), otherRef, fresh);
+
+        assertEq(token.balanceOf(vendor), 0, "neither attempt moved money");
     }
 
     /// The hash is bound to this chain and this contract address, so an approval
@@ -500,7 +543,7 @@ contract CosignTest is Base {
         bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
         vm.expectEmit(true, true, true, true, address(mm));
         emit MandateManager.CosignWithdrawn(id, hash, boss);
-        mm.withdrawCosign(id, hash);
+        mm.withdrawCosign(id, hash, nonce);
         vm.stopPrank();
 
         assertFalse(mm.isCosignApproved(id, hash));
@@ -516,8 +559,183 @@ contract CosignTest is Base {
 
         vm.prank(agent);
         vm.expectRevert(MandateManager.NotCosigner.selector);
-        mm.withdrawCosign(id, hash);
+        mm.withdrawCosign(id, hash, bytes32("n"));
         assertTrue(mm.isCosignApproved(id, hash));
+    }
+
+    // ------------------------------------------------- F30: the nonce reservation
+
+    /**
+     * The defect, stated as the sequence that produced it.
+     *
+     * The co-signer approves 50 USDC to the vendor under nonce N. `_cosignApproved` is keyed by
+     * hash and `_usedNonce` by nonce, and nothing joined them, so the delegate could spend one
+     * base unit to the same vendor under the SAME nonce N. That spend is below the threshold, so
+     * it never reads the approval mapping and never clears it; it writes `_usedNonce[N] = true`
+     * on the way out. From that block on, the approval sits in storage as authority that can
+     * never be exercised, because the only spend it matches carries a nonce already burned.
+     *
+     * The co-signer saw an approval, the payer saw a spend, and the 50 USDC the human actually
+     * agreed to never moved. Nobody was robbed, which is why it survived four mutation gates and
+     * 76/76 model parity — `reference/policy.js` adds the nonce unconditionally too, and the
+     * model was where this would have been caught.
+     */
+    function test_f30_aTinySpendCannotBurnTheNonceUnderALiveApproval() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        // One base unit, same nonce, same recipient: below the threshold, so the old code took
+        // no interest in the approval at all.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, hash));
+        mm.spend(id, vendor, 1, REF, nonce);
+
+        // The approval is untouched and the spend the human agreed to still works.
+        assertTrue(mm.isCosignApproved(id, hash), "the approval must have survived the attempt");
+        vm.prank(agent);
+        mm.spend(id, vendor, usd(50), REF, nonce);
+        assertEq(token.balanceOf(vendor), usd(50));
+    }
+
+    /// The reservation must not block the payment it exists to protect. Approve, then spend that
+    /// exact request under that exact nonce, and nothing is in the way.
+    function test_f30_theApprovedSpendPassesStraightThrough() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.prank(agent);
+        mm.spend(id, vendor, usd(50), REF, nonce);
+
+        assertEq(token.balanceOf(vendor), usd(50));
+        assertEq(mm.cosignApprovalDeadline(id, hash), 0, "the approval is consumed");
+    }
+
+    /// A nonce with no reservation on it is unaffected — the delegate picks another one and the
+    /// small payment goes through. The reservation binds one nonce, not the mandate.
+    function test_f30_anUnreservedNonceIsUntouched() public {
+        bytes32 id = grant(cosignParams());
+        vm.prank(boss);
+        mm.approveCosignFor(id, vendor, usd(50), REF, nextNonce(), uint40(block.timestamp + DAY));
+
+        vm.prank(agent);
+        mm.spend(id, vendor, 1, REF, nextNonce());
+        assertEq(token.balanceOf(vendor), 1);
+    }
+
+    /// Withdrawing frees the nonce. Without this the fix would trade one defect for a worse one:
+    /// a co-signer who approved and changed their mind would have burned that nonce for the life
+    /// of the mandate, and the delegate would have no way to learn which nonces were safe.
+    function test_f30_withdrawingTheApprovalReleasesTheNonce() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.startPrank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+        mm.withdrawCosign(id, hash, nonce);
+        vm.stopPrank();
+
+        vm.prank(agent);
+        mm.spend(id, vendor, 1, REF, nonce);
+        assertEq(token.balanceOf(vendor), 1, "the nonce is free again");
+    }
+
+    /// A second approval on the same nonce for a different request is refused, rather than
+    /// silently orphaning the first. Same reasoning as F17: the co-signer must not be able to
+    /// create authority that cannot be consumed, and after this write the first approval's nonce
+    /// would point somewhere else.
+    function test_f30_twoApprovalsOnOneNonce_areRefused() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 first = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        approveReverts(
+            id, vendor, usd(60), nonce, abi.encodeWithSelector(MandateManager.NonceReserved.selector, first)
+        );
+
+        // Withdraw, then the replacement is accepted — the refusal is a sequencing rule, not a
+        // one-approval-per-nonce-forever rule.
+        vm.startPrank(boss);
+        mm.withdrawCosign(id, first, nonce);
+        mm.approveCosignFor(id, vendor, usd(60), REF, nonce, uint40(block.timestamp + DAY));
+        vm.stopPrank();
+
+        vm.prank(agent);
+        mm.spend(id, vendor, usd(60), REF, nonce);
+        assertEq(token.balanceOf(vendor), usd(60));
+    }
+
+    /// Re-approving the SAME request under the same nonce is not a collision, so a co-signer
+    /// extending a deadline is not forced to withdraw first.
+    function test_f30_reApprovingTheSameRequest_isAllowed() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.startPrank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+        bytes32 again = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + 2 * DAY));
+        vm.stopPrank();
+
+        assertEq(again, hash, "same request, same hash");
+        assertEq(mm.cosignApprovalDeadline(id, hash), uint40(block.timestamp + 2 * DAY), "the later deadline won");
+    }
+
+    // --------------------------------------- F35: the liveness view tells the truth
+
+    /// An approval against a revoked mandate can never be consumed, and the DELEGATE can produce
+    /// that state alone, because `revoke` accepts the spender. The view used to report `true`
+    /// anyway: the approval mapping knows nothing about the mandate it belongs to.
+    function test_f35_isCosignApproved_isFalseOnceTheMandateIsRevoked() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, hash), "live before the revocation");
+
+        vm.prank(agent); // the delegate revoking its own authority
+        mm.revoke(id);
+
+        assertFalse(mm.isCosignApproved(id, hash), "F35: and unconsumable after it");
+        assertEq(mm.cosignApprovalDeadline(id, hash), uint40(block.timestamp + DAY), "the raw slot is unchanged");
+
+        // The view and the payment agree, which is the whole claim.
+        vm.prank(agent);
+        vm.expectRevert(MandateManager.Revoked.selector);
+        mm.spend(id, vendor, usd(50), REF, nonce);
+    }
+
+    /// The correction to F35, and the reason the view asks `_isPermanentlyDead` and not `isLive`.
+    /// Revocation and expiry are permanent, and folding them in was right. A start date that has
+    /// not arrived is a wait, and folding that in as well reported every scheduled payment's
+    /// approval as unapproved until the mandate opened — the flow F17 went out of its way to keep
+    /// legal. The contract has already proved such an approval outlives the wait, because
+    /// `approveCosignFor` refuses a deadline at or before `notBefore`.
+    ///
+    /// The expiry half of that helper cannot be reached through this view at all, which is worth
+    /// stating rather than testing: `approveCosignFor` also refuses a deadline past `expiresAt`, so
+    /// `block.timestamp < validUntil` already implies the mandate has not expired. The clause stays
+    /// because `isLive` needs it, one shared helper is safer than two copies of the rule, and it
+    /// keeps its coverage there through the `isLive` boundary tests in Views and Bounds.
+    function test_f35_aStartInTheFutureIsAWaitRatherThanADeath() public {
+        MandateManager.MandateParams memory p = cosignParams();
+        p.notBefore = uint40(block.timestamp + DAY);
+        bytes32 id = grant(p);
+        bytes32 nonce = nextNonce();
+
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + 3 * DAY));
+
+        assertFalse(mm.isLive(id), "the mandate has not opened");
+        assertTrue(mm.isCosignApproved(id, hash), "the approval is good anyway, and says so");
+        payReverts(id, vendor, usd(50), MandateManager.NotYetValid.selector);
+
+        vm.warp(uint256(p.notBefore));
+        assertTrue(mm.isCosignApproved(id, hash), "and it survives the mandate opening");
+        payWithNonce(id, vendor, usd(50), nonce);
+        assertEq(token.balanceOf(vendor), usd(50), "the view was telling the truth");
     }
 
     // ------------------------------------------------------------ ordering

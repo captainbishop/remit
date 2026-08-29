@@ -350,10 +350,26 @@ contract MandateManager {
     /// the same one-directional rule #22 applied to `expiresAt`: a field whose zero is
     /// "absent" must never be writable as a meaningful value, so `approveCosignFor` refuses
     /// any `validUntil` at or below `block.timestamp`. Widening the value costs nothing in
-    /// layout — `forge inspect MandateManager storage-layout` puts all eight of these
-    /// mappings at 32 bytes in slots 0-7 regardless of value type, and this one is last, so
-    /// nothing follows it to shift.
+    /// layout — `forge inspect MandateManager storage-layout` puts every one of these
+    /// mappings at 32 bytes in its own slot regardless of value type, so the widening
+    /// shifted nothing.
     mapping(bytes32 => mapping(bytes32 => uint40)) private _cosignApproved;
+    /// mandateId => nonce => the spend hash that nonce is reserved for. Zero means free.
+    ///
+    /// NEW IN v2 (F30). The mapping above is keyed by hash and `_usedNonce` is keyed by
+    /// nonce, and nothing tied the two together, so one nonce could carry a live approval
+    /// and be burned by a different spend. This is the join. Written by
+    /// `approveCosignFor`, cleared by the spend that consumes the approval and by
+    /// `withdrawCosign`, and read by `spend` on every path — including, and especially,
+    /// the paths that do not need a co-signature at all.
+    ///
+    /// A hash is a safe "absent" sentinel at zero for the same reason `_cosignApproved`'s
+    /// timestamp is: `spendHash` is keccak over nine fields including this contract's own
+    /// address, so a real hash of zero is not something a caller can arrange.
+    ///
+    /// Last of the nine mappings, and it takes the next slot rather than sharing one,
+    /// because a mapping always occupies a full slot.
+    mapping(bytes32 => mapping(bytes32 => bytes32)) private _cosignReservedNonce;
 
     // ---------------------------------------------------------------------
     // Events. The audit trail lives here and does not depend on the Memo
@@ -469,16 +485,30 @@ contract MandateManager {
     // Errors.
     //
     // The correspondence with reference/policy.js is one-directional, and v1's
-    // comment here claimed it both ways. Every one of the model's 21 `Denial`
-    // reasons has an error below with the same name — that is the direction that
-    // matters, because a denial the contract could not express would be a real
-    // divergence. The reverse does not hold: ten of the errors below have no
-    // `Denial` counterpart because the model reports those conditions by THROWING
-    // rather than denying. They are MandateExists, Unbounded, BadWindow, BadConfig,
-    // NotAuthorised, NotCosigner, MixedPayers, DuplicateMandate, TooManyMandates —
-    // all caller or grant-time mistakes rather than policy outcomes — plus
-    // TransferFailed, which the model cannot have an opinion about because it has
-    // no token. 21 + 10 = 31. Counted, not asserted.
+    // comment here claimed it both ways. Every one of the model's 25 `Denial`
+    // reasons and all 4 of its `ApprovalRefusal` codes have an error below with the
+    // same name — that is the direction that matters, because a denial the contract
+    // could not express would be a real divergence. The reverse does not hold:
+    // eight of the errors below have no model counterpart of any kind, because the
+    // model reports those conditions by THROWING rather than by naming a code. They
+    // are MandateExists, Unbounded, BadWindow, NotAuthorised, MixedPayers,
+    // DuplicateMandate and TooManyMandates — all caller or grant-time mistakes
+    // rather than policy outcomes — plus TransferFailed, which the model cannot have
+    // an opinion about because it has no token. 25 + 4 + 8 = 37, which is the number
+    // of `error` declarations below. Derived from both files on 2026-08-29 by mapping
+    // each code to its PascalCase name, not counted by eye.
+    //
+    // v1's version of this note said "23 + 10 = 33" and named BadConfig and
+    // NotCosigner among the ten with no counterpart. Both are model codes — they are
+    // two of the four `ApprovalRefusal` values F17 added — and the list left out
+    // BadDeadline and CosignNotRequired, the other two. So the arithmetic held only
+    // because two errors were miscounted in one direction and two were missing in
+    // the other. The lesson is the one in the repo's own rule about derived numbers:
+    // a total that comes out right is not evidence that its terms do.
+    //
+    // The four v2 additions to the model since then are UnrecoverableRecipient and
+    // NonceReserved, both policy outcomes and therefore `Denial` reasons, plus the
+    // grant-time refusals in `createMandate`, which throw and so add no code.
     //
     // When called through Memo, Arc wraps a child revert in MemoFailed(bytes), so
     // clients must unwrap one layer before decoding these.
@@ -502,6 +532,17 @@ contract MandateManager {
     /// disagree that #11 and #22 forbid. It closes a griefing vector as a side effect — a
     /// stopped or captured delegate could zero a lifetime cap without ever being paid.
     error SelfPayment();
+    /// NEW IN v2 (F29). The sibling of `SelfPayment`, and found the same way: ask what the
+    /// recipient rules actually rule out. `recipient == address(this)` cleared all of them.
+    /// This contract holds no USDC balance by design and has no token-sweep function, so a
+    /// spend to it is not a payment that went to the wrong place — it is USDC that no key on
+    /// Arc can move again. The delegate reaches it with an address anyone can read off the
+    /// explorer, and the payer's caps, nonce and `Spend` event all record it as a payment.
+    /// `address(usdc)` is refused for the same reason: Circle's token has no recovery path
+    /// for its own balance either. Neither is a plausible payee, so nothing legitimate is
+    /// lost by refusing both, and that asymmetry is the whole argument for a ban rather than
+    /// a warning in the documentation.
+    error UnrecoverableRecipient(address recipient);
     error OverPerTxCap();
     error OverWindowCap(uint32 lengthSeconds, uint96 cap, uint256 used);
     error OverTotalCap();
@@ -509,6 +550,17 @@ contract MandateManager {
     /// lifetime cap is itself a uint96 and binds first. v1 panicked here instead.
     error TotalSpentCeiling();
     error NonceAlreadyUsed();
+    /// NEW IN v2 (F30). A nonce with a live co-signature on it is spoken for. Without this,
+    /// the delegate could spend the same nonce for any OTHER amount — one base unit is
+    /// enough — and because the nonce is written on every spend while the approval is
+    /// cleared only by the spend that consumes it, the approval survived in storage as
+    /// authority that could never again be exercised. The co-signer saw an approval, the
+    /// payer saw a spend, and the amount the human actually agreed to never moved. Refused
+    /// rather than cleaned up silently, for F16's reason: the delegate does not get to
+    /// discard a human's decision as a side effect of an unrelated payment. Carrying the
+    /// reserved hash tells the delegate which approval it collided with, so it can either
+    /// pay that one or pick another nonce.
+    error NonceReserved(bytes32 reservedHash);
     error CosignRequired(bytes32 spendHash);
     /// NEW IN v2 (F16). Deliberately NOT folded into `CosignRequired`. The two conditions
     /// need different actions from whoever reads the revert: `CosignRequired` means nobody
@@ -533,6 +585,20 @@ contract MandateManager {
     /// leaving the co-signer to fetch the threshold themselves to find out.
     error CosignNotRequired(uint256 amount, uint96 threshold);
     error IdentityNotHeld();
+    /// UNREACHABLE AS OF v2 (F33), and kept deliberately. `createMandate` now refuses any
+    /// `expectedOwner` other than zero or the spender, `_checkIdentity` has already required
+    /// `ownerOf(agentId) == msg.sender`, and `spend` has already required
+    /// `msg.sender == m.spender` — so the pin can only ever agree with a test that just
+    /// passed. The check behind this error stays because dead code that can only REFUSE a
+    /// payment fails in the safe direction, and because deleting it would leave the next
+    /// reader of `IdentityGate.expectedOwner` with a field and no enforcement to read. Costs
+    /// one comparison per spend on a path that already made three.
+    ///
+    /// "Refuses rather than passes" is checked rather than asserted. Removing the `revert` below
+    /// left all 206 other tests passing, because none of them can make the condition true, so
+    /// `test_f33_forcingTheUnreachablePin_stillRefusesTheSpend` writes the pin directly into
+    /// storage to reach the branch — the one place in this repository where a test reaches a
+    /// state the public interface refuses to create, and the reason is written there.
     error IdentityTransferred();
     error CredentialMissing();
     error CredentialStale();
@@ -785,9 +851,64 @@ contract MandateManager {
             _allowlist[mandateId][p.allowlist[i]] = true;
         }
 
-        if (flags & F_IDENTITY != 0) _identity[mandateId] = p.identity;
+        // ---- F32: an unset flag must mean the payer did not supply the data -----------
+        // `flags` is `p.flags` verbatim, so nothing forced the bits and the struct fields to
+        // agree. A payer who fills `identity` and forgets `F_IDENTITY` gets a mandate with no
+        // identity gate at all, and gets it quietly: the field is dropped right here,
+        // `MandateCreated` reports the flags rather than the fields, and every later spend
+        // clears a gate the payer believes is closed. There is no reading of that grant that
+        // both sides would agree to, so it is refused instead of resolved — the payer either
+        // meant the flag or meant an empty struct, and either is one edit away.
+        if (flags & F_IDENTITY == 0 && (p.identity.agentId != 0 || p.identity.expectedOwner != address(0))) {
+            revert BadConfig();
+        }
+        if (
+            flags & F_CREDENTIAL == 0
+                && (
+                    p.credential.requestHash != 0 || p.credential.agentId != 0
+                        || p.credential.validator != address(0) || p.credential.maxStaleness != 0
+                        || p.credential.minResponse != 0
+                )
+        ) {
+            revert BadConfig();
+        }
+
+        if (flags & F_IDENTITY != 0) {
+            // ---- F33: a gate that can never open is not a gate ------------------------
+            // `_checkIdentity` calls `ownerOf(agentId)` and refuses unless the answer is the
+            // caller. Agent id zero is not registrable under ERC-8004, so that lookup either
+            // reverts into the catch arm or answers with the zero address, and both land on
+            // `IdentityNotHeld` — on every spend, for the life of the mandate. Same class as
+            // the dead co-signature configuration above, refused in the same place.
+            if (p.identity.agentId == 0) revert BadConfig();
+            // And `expectedOwner` has exactly one value worth writing. `_checkIdentity` has
+            // already required `ownerOf(agentId) == msg.sender`, and `msg.sender` there is the
+            // spender, so a non-zero `expectedOwner` either names the spender and repeats a
+            // test that just passed, or names somebody else and reverts `IdentityTransferred`
+            // on every spend. Pinning it to the spender keeps the field usable as a written
+            // record of intent and removes the setting that bricks the grant.
+            if (p.identity.expectedOwner != address(0) && p.identity.expectedOwner != p.spender) {
+                revert BadConfig();
+            }
+            _identity[mandateId] = p.identity;
+        }
         if (flags & F_CREDENTIAL != 0) {
             if (p.credential.minResponse == 0) revert BadConfig(); // 0 would accept a failed attestation
+            // ---- F34: and a threshold above the pass score is unmeetable ---------------
+            // ERC-8004 carries the outcome in a uint8 where 100 means passed, so a threshold
+            // above 100 refuses every attestation the standard can produce and the mandate is
+            // born dead in a way that reads, at the call site, like extra strictness.
+            //
+            // Bounded at `> 100` rather than pinned to `!= 100` so a validator scoring on a
+            // finer scale stays expressible. That is the one loose end on this fix and it only
+            // loosens in one direction: the bound can be tightened before deployment and never
+            // after, so it is called out in THREAT-MODEL.md rather than left to a reader.
+            if (p.credential.minResponse > 100) revert BadConfig();
+            // A zero request hash is the credential twin of a zero agent id.
+            // `getValidationStatus(0)` names no request, so it answers with an empty record,
+            // the zero-validator check refuses it, and `CredentialMissing` is the only outcome
+            // this mandate can ever reach.
+            if (p.credential.requestHash == 0) revert BadConfig();
             _credential[mandateId] = p.credential;
         }
 
@@ -860,6 +981,15 @@ contract MandateManager {
         // asked a design one. `m.payer` is written once (`payer: msg.sender`) and this
         // contract has no mutator for it, so the equality can never stop holding.
         if (recipient == m.payer) revert SelfPayment();
+        // F29, and the same argument one step further out. These two addresses accept USDC
+        // and can never send it: this contract has no token-moving function other than the
+        // `transferFrom` below, which always pays a third party, and Circle's token holds no
+        // recovery path for a balance credited to itself. Both are permanent properties of
+        // deployed code, so a spend to either destroys the payer's money for good while the
+        // caps, the nonce and the `Spend` event all record a successful payment. Refused here
+        // rather than left to the payer's allowlist, because F_ALLOWLIST is optional and this
+        // hazard is not.
+        if (recipient == address(this) || recipient == address(usdc)) revert UnrecoverableRecipient(recipient);
         if (m.flags & F_ALLOWLIST != 0 && !_allowlist[mandateId][recipient]) revert RecipientNotAllowed();
 
         if (amount == 0) revert ZeroAmount();
@@ -942,6 +1072,14 @@ contract MandateManager {
         // is worth one warm SLOAD: two copies of a nine-field `abi.encode` is precisely the
         // kind of pair that drifts.
         hash = spendHash(mandateId, recipient, amount, ref, nonce);
+        // F30. Outside the co-sign branch on purpose, because the branch below is exactly the
+        // case this does NOT need to cover. A nonce carrying a reservation for some other hash
+        // is a nonce the co-signer has already committed, and burning it here would delete a
+        // human's decision as a side effect of an unrelated payment. The comparison is against
+        // the hash rather than a bare flag so the ordinary path — approve, then spend that same
+        // request — passes straight through.
+        bytes32 reservedHash = _cosignReservedNonce[mandateId][nonce];
+        if (reservedHash != 0 && reservedHash != hash) revert NonceReserved(reservedHash);
         if (m.flags & F_COSIGN != 0 && amount > m.cosignThreshold) {
             uint40 validUntil = _cosignApproved[mandateId][hash];
             if (validUntil == 0) revert CosignRequired(hash);
@@ -952,6 +1090,9 @@ contract MandateManager {
             if (nowTs >= validUntil) revert CosignExpired(hash, validUntil);
             delete _cosignApproved[mandateId][hash]; // one signature authorises one spend
         }
+        // Cleared whether or not the branch above ran. The nonce is spent either way, so the
+        // reservation has done its job and the refund is worth more than the record.
+        if (reservedHash != 0) delete _cosignReservedNonce[mandateId][nonce];
 
         m.totalSpent = newTotal;
         m.spendCount += 1;
@@ -1137,7 +1278,19 @@ contract MandateManager {
         if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();
 
         if (response < c.minResponse) revert CredentialMissing();
-        if (c.maxStaleness != 0 && nowTs > lastUpdate && nowTs - lastUpdate > c.maxStaleness) {
+        // F31. The `nowTs > lastUpdate` conjunct this replaces was there to stop an unsigned
+        // subtraction underflowing, and it did — by treating a future-dated attestation as
+        // fresh forever. `maxStaleness` then applied to every attestation except the one class
+        // that cannot be honest about its own age. A validator that sets `lastUpdate` ahead of
+        // the chain clock, once, buys an attestation that never expires; on Arc the same thing
+        // happens by accident whenever a registry stamps a value from a clock running fast.
+        // Refusing is the fail-closed reading: an attestation dated in the future has no
+        // knowable age, and a freshness rule that cannot measure age should not pass.
+        //
+        // The underflow is still impossible. The first leg returns true for every case where
+        // `lastUpdate > nowTs`, so the subtraction in the second leg only ever runs when
+        // `nowTs >= lastUpdate`, which is exactly the guarantee the old conjunct provided.
+        if (c.maxStaleness != 0 && (lastUpdate > nowTs || nowTs - lastUpdate > c.maxStaleness)) {
             revert CredentialStale();
         }
     }
@@ -1321,6 +1474,9 @@ contract MandateManager {
         // pay gas to authorise it would be exactly the false assurance F17 exists to prevent.
         // Same position relative to the allowlist as in `spend`, for the parity reason below.
         if (recipient == m.payer) revert SelfPayment();
+        // F29's mirror. An approval naming this contract or the token could never be consumed
+        // once `spend` refuses them, so it belongs in the same list as the payer.
+        if (recipient == address(this) || recipient == address(usdc)) revert UnrecoverableRecipient(recipient);
         // `_allowlist` is written only in `createMandate` and this contract has no mutator for
         // it, so absence is permanent. F20 is an open question about adding a payer-only
         // REMOVE-only mutator, which would not weaken this: removal shrinks the set, so a
@@ -1381,6 +1537,14 @@ contract MandateManager {
         if (m.flags & F_EXPIRY != 0 && uint256(validUntil) > m.expiresAt) revert BadDeadline(validUntil);
 
         hash = spendHash(mandateId, recipient, amount, ref, nonce);
+        // F30. One nonce, one reservation. A second approval on the same nonce for a different
+        // request would leave the first sitting in `_cosignApproved` with the nonce pointing
+        // somewhere else, so the first could never be consumed — the unconsumable-approval
+        // shape F17 refuses, arrived at from the other direction. The co-signer withdraws the
+        // one they no longer want and then approves the replacement.
+        bytes32 reservedHash = _cosignReservedNonce[mandateId][nonce];
+        if (reservedHash != 0 && reservedHash != hash) revert NonceReserved(reservedHash);
+        _cosignReservedNonce[mandateId][nonce] = hash;
         _cosignApproved[mandateId][hash] = validUntil;
         emit CosignApproved(mandateId, hash, msg.sender, recipient, amount, validUntil);
     }
@@ -1403,12 +1567,24 @@ contract MandateManager {
     /// approved changes no storage but still emits `CosignWithdrawn`. F11 in THREAT-MODEL.md,
     /// open, and the reconciliation cost is written up on the event itself.
     ///
+    /// CHANGED IN v2 (F30): takes the nonce as well. F30's reservation is keyed by nonce and a
+    /// hash cannot be turned back into one, so without this parameter a withdrawal would clear
+    /// the approval and leave the nonce reserved for a hash that no longer exists — which
+    /// would make that nonce unspendable for the life of the mandate. This is a breaking
+    /// change against the deployed v1 signature, which took two arguments. It is the second
+    /// such change, after `spendHash`, and it is listed with that one in CHANGELIST.md.
+    ///
     /// @param mandateId The mandate the approval belongs to.
     /// @param hash The spend hash to un-approve, as returned by `spendHash`.
-    function withdrawCosign(bytes32 mandateId, bytes32 hash) external {
+    /// @param nonce The nonce that hash was approved against, so the reservation clears with
+    /// it. A nonce that does not match leaves the reservation alone rather than freeing one
+    /// that belongs to a different live approval, and the call can simply be repeated with the
+    /// right value.
+    function withdrawCosign(bytes32 mandateId, bytes32 hash, bytes32 nonce) external {
         Mandate storage m = _mandates[mandateId];
         if (msg.sender != m.cosigner) revert NotCosigner();
         delete _cosignApproved[mandateId][hash];
+        if (_cosignReservedNonce[mandateId][nonce] == hash) delete _cosignReservedNonce[mandateId][nonce];
         emit CosignWithdrawn(mandateId, hash, msg.sender);
     }
 
@@ -1502,8 +1678,11 @@ contract MandateManager {
     ///
     /// @param mandateId The mandate.
     /// @param hash The spend hash, as returned by `spendHash`.
-    /// @return True only if an approval is stored AND still live at this block. False covers
-    /// both "never approved" and "approved, then lapsed".
+    /// @return True only if an approval is stored, still live at this block, and against a
+    /// mandate that has not been revoked and has not expired. False covers "never approved",
+    /// "approved, then lapsed", and "approved against a mandate that has since been revoked or
+    /// expired". A mandate whose start is still in the future reports true, because the approval
+    /// will be honoured once it opens — `isLive` answers the separate timing question.
     function isCosignApproved(bytes32 mandateId, bytes32 hash) external view returns (bool) {
         uint40 validUntil = _cosignApproved[mandateId][hash];
         // Reading the clock is the point of the function, so the lint's objection is
@@ -1512,8 +1691,28 @@ contract MandateManager {
         // helper that reported an approval as live one second past the deadline `spend`
         // enforces would recreate F16 in the opposite direction. `cosignApprovalDeadline`
         // is there for anyone who wants the stored value without the comparison.
+        //
+        // F35 adds the mandate's own death to the answer. The approval mapping knows
+        // nothing about the mandate it belongs to, so before this a revoked or expired mandate
+        // still reported its old approvals as honourable — and the delegate can produce the
+        // revoked case alone, since `revoke` accepts the spender. A co-signer checking their
+        // outstanding approvals was reading a claim about one mapping and hearing a claim about
+        // the payment.
+        //
+        // It asks `_isPermanentlyDead` rather than `isLive`, which corrects how F35 first
+        // shipped. `isLive` also refuses a mandate whose `notBefore` has not arrived, and folding
+        // that in made this report `false` for an approval that is stored, unexpired and destined
+        // to work — the scheduled payment F17 deliberately lets a co-signer approve early. Two
+        // tests caught it. The distinction worth keeping is the one running through F16 and F17:
+        // revoked and expired are permanent, so an approval against either is worthless, while
+        // not-yet-started is a wait. A view that says "no" to both has merged "is this dead" with
+        // "is this ready", and the co-signer who asked cannot tell which answer they got.
+        //
+        // What this still does not cover, stated rather than implied: a lifetime cap with no
+        // headroom left, and a nonce already burned. Both need the amount or the nonce, neither
+        // of which this signature carries, and `spendable` is the view that answers the first.
         // forge-lint: disable-next-line(block-timestamp)
-        return validUntil != 0 && block.timestamp < validUntil;
+        return validUntil != 0 && block.timestamp < validUntil && !_isPermanentlyDead(_mandates[mandateId]);
     }
 
     /// @notice The raw deadline stored against a spend hash, exclusive.
@@ -1530,26 +1729,54 @@ contract MandateManager {
         return _cosignApproved[mandateId][hash];
     }
 
-    /// @notice Whether the allowlist would admit this recipient.
+    /// @notice Whether this recipient can receive a spend on this mandate.
     ///
-    /// This answers the allowlist question alone, and `spend` applies two further recipient
-    /// rules that this function does not: the payer may never be the recipient
-    /// (`SelfPayment`), and neither may the zero address (`ZeroRecipient`). A `true` here is
-    /// therefore not a prediction that the spend clears.
+    /// CHANGED IN v2 (F36). It used to answer the allowlist question alone and say so, listing
+    /// the recipient rules it left out. That was accurate and still wrong for the job: callers
+    /// use this as a pre-flight check, a `true` that `spend` then refuses is the disagreement
+    /// between display and enforcement that #11 and #22 both forbid, and F29 was about to add
+    /// a third omitted rule whose failure mode is unrecoverable rather than merely a revert.
+    /// So it now applies every recipient rule `spend` applies: the zero address, the payer,
+    /// this contract, the token, and the allowlist.
     ///
-    /// When `F_ALLOWLIST` is unset there is no list to consult and the answer is
-    /// `recipient != address(0)`, because the mandate admits anyone. An unknown mandate has
-    /// no flags set, so it takes that same branch and reports `true` for any non-zero
-    /// address — read `getMandate(mandateId).payer` if you need to tell "admits everyone"
-    /// apart from "does not exist".
+    /// It remains a recipient answer only. The caps, the nonce, the co-signature requirement
+    /// and the two ERC-8004 gates are all still outside it, so a `true` means "this payee is
+    /// permitted", not "this spend will succeed" — `spendable` answers how much can move.
+    ///
+    /// An unknown mandate now reports `false` for every address instead of `true` for every
+    /// non-zero one. It has no payer, so no spend against it can ever succeed, and a view that
+    /// says otherwise is answering a question about a mandate that does not exist.
     ///
     /// @param mandateId The mandate.
     /// @param recipient The address to test.
-    /// @return True if the allowlist admits it, or if the mandate keeps no allowlist.
+    /// @return True if a spend on this mandate could name this recipient.
     function isAllowedRecipient(bytes32 mandateId, address recipient) external view returns (bool) {
         Mandate storage m = _mandates[mandateId];
-        if (m.flags & F_ALLOWLIST == 0) return recipient != address(0);
+        if (m.payer == address(0)) return false;
+        if (recipient == address(0) || recipient == m.payer) return false;
+        if (recipient == address(this) || recipient == address(usdc)) return false;
+        if (m.flags & F_ALLOWLIST == 0) return true;
         return _allowlist[mandateId][recipient];
+    }
+
+    /// @dev The permanent half of `isLive`: the mandate does not exist, has been revoked, or is
+    /// past its own expiry. No later block can undo any of the three.
+    ///
+    /// Split out for `isCosignApproved`, which needs exactly these three and must not fold in
+    /// the `notBefore` test the way `isLive` does. Approving ahead of a mandate's start is a
+    /// supported flow — the scheduled-payment case — so a stored approval waiting for its
+    /// mandate to open is live, and F35 reused `isLive` here and reported every such approval as
+    /// unapproved for the whole pre-start period. Factored rather than copied, because the
+    /// expiry rule is now read from two places and two copies of a rule drift apart.
+    ///
+    /// The timestamp read is deliberate, for the reasons set out in `isLive` below.
+    ///
+    /// @param m The mandate, already resolved.
+    /// @return True if no later block can make this mandate spendable again.
+    function _isPermanentlyDead(Mandate storage m) private view returns (bool) {
+        if (m.payer == address(0) || m.revoked) return true;
+        // forge-lint: disable-next-line(block-timestamp)
+        return m.flags & F_EXPIRY != 0 && block.timestamp >= m.expiresAt;
     }
 
     /// @notice Whether the mandate exists, has not been revoked, and is inside its own time
@@ -1564,11 +1791,15 @@ contract MandateManager {
     /// @return True if a spend would pass the existence, revocation and timing checks.
     function isLive(bytes32 mandateId) public view returns (bool) {
         Mandate storage m = _mandates[mandateId];
-        if (m.payer == address(0) || m.revoked) return false;
-        // Both timestamp reads below are deliberate, and the lint's usual objection —
-        // that a proposer can nudge block.timestamp — is answered structurally rather
-        // than by avoiding the opcode. There is no other clock available on-chain, and
-        // "expires at a wall-clock time" is the semantics a payer actually wants.
+        // Existence, revocation and expiry are `_isPermanentlyDead` above; this function is that
+        // plus the one condition a later block can undo. The split changes no answer — `isLive`
+        // is false when any of the four conditions holds, exactly as it was before.
+        if (_isPermanentlyDead(m)) return false;
+        // Both timestamp reads — the one below and the expiry test in the helper above — are
+        // deliberate, and the lint's usual objection — that a proposer can nudge
+        // block.timestamp — is answered structurally rather than by avoiding the opcode. There
+        // is no other clock available on-chain, and "expires at a wall-clock time" is the
+        // semantics a payer actually wants.
         //
         // What matters is that nothing here *grants* capacity from a timestamp. Window
         // accounting deliberately has no upper bound on bucket index (see
@@ -1582,11 +1813,9 @@ contract MandateManager {
         //
         // Arc-specific: timestamps are documented as non-decreasing but NOT strictly
         // increasing, because sub-second blocks share one. Nothing here assumes
-        // strictness; equality is handled by the >= on expiresAt.
+        // strictness; equality is handled by the `>=` on `expiresAt` in the helper.
         // forge-lint: disable-next-line(block-timestamp)
         if (block.timestamp < m.notBefore) return false;
-        // forge-lint: disable-next-line(block-timestamp)
-        if (m.flags & F_EXPIRY != 0 && block.timestamp >= m.expiresAt) return false;
         return true;
     }
 

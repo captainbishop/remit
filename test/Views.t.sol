@@ -432,6 +432,46 @@ contract ViewsTest is Base {
         assertFalse(mm.isAllowedRecipient(id, address(0)));
     }
 
+    /// F36. The view used to answer the allowlist question alone and document the rules it left
+    /// out. Accurate, and still the wrong job: callers use it as a pre-flight check, so a `true`
+    /// that `spend` then refuses is display and enforcement disagreeing. It now applies every
+    /// recipient rule `spend` applies, which is the list below.
+    function test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies() public {
+        bytes32 id = grant(simpleParams()); // no allowlist: the widest mandate there is
+        assertTrue(mm.isAllowedRecipient(id, vendor), "an ordinary third party is still payable");
+
+        assertFalse(mm.isAllowedRecipient(id, address(0)), "ZeroRecipient");
+        assertFalse(mm.isAllowedRecipient(id, payer), "SelfPayment");
+        assertFalse(mm.isAllowedRecipient(id, address(mm)), "UnrecoverableRecipient: this contract");
+        assertFalse(mm.isAllowedRecipient(id, address(token)), "UnrecoverableRecipient: the token");
+
+        // Each of the four is refused by `spend` too, so the view and the payment agree on all
+        // of them. Without this half the assertions above would also pass against a view that
+        // simply returned false more often than it should.
+        payReverts(id, address(0), usd(10), MandateManager.ZeroRecipient.selector);
+        payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
+        payReverts(
+            id,
+            address(mm),
+            usd(10),
+            abi.encodeWithSelector(MandateManager.UnrecoverableRecipient.selector, address(mm))
+        );
+        payReverts(
+            id,
+            address(token),
+            usd(10),
+            abi.encodeWithSelector(MandateManager.UnrecoverableRecipient.selector, address(token))
+        );
+    }
+
+    /// F36. An unknown mandate has no payer, so no spend against it can succeed and every
+    /// address is refused. It used to report `true` for any non-zero address, because a
+    /// zero-flag mandate takes the no-allowlist branch.
+    function test_isAllowedRecipient_unknownMandate_refusesEveryAddress() public view {
+        assertFalse(mm.isAllowedRecipient(bytes32("nope"), vendor));
+        assertFalse(mm.isAllowedRecipient(bytes32("nope"), address(0)));
+    }
+
     function test_unknownMandate_readsAsEmptyRatherThanReverting() public view {
         MandateManager.Mandate memory m = mm.getMandate(bytes32("nope"));
         assertEq(m.payer, address(0), "payer == 0 is how callers detect absence");

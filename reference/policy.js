@@ -65,12 +65,25 @@ const Denial = {
   // class of spend a reconciler could not see. Refused on both the spend path and the cosign
   // approval, since `payer` is fixed at creation and the equality can never stop holding.
   SELF_PAYMENT: 'SELF_PAYMENT',
+  // NEW IN v2 (F29). Two addresses can receive a payment and can never send it on: the manager
+  // itself, which holds no USDC by design and has no sweep function, and the token contract,
+  // which has no recovery path either. Neither is a plausible payee, so refusing both costs
+  // nothing legitimate — and unlike every other denial here, the mistake it prevents cannot be
+  // undone by anyone once the transfer has settled.
+  UNRECOVERABLE_RECIPIENT: 'UNRECOVERABLE_RECIPIENT',
   AMOUNT_TOO_LARGE: 'AMOUNT_TOO_LARGE',
   OVER_PER_TX_CAP: 'OVER_PER_TX_CAP',
   OVER_WINDOW_CAP: 'OVER_WINDOW_CAP',
   OVER_TOTAL_CAP: 'OVER_TOTAL_CAP',
   TOTAL_SPENT_CEILING: 'TOTAL_SPENT_CEILING',
   NONCE_ALREADY_USED: 'NONCE_ALREADY_USED',
+  // NEW IN v2 (F30). A nonce named in a live co-signature is held for the exact spend that
+  // signature approved. Without this, any spend on that nonce — a one-unit payment to an
+  // address the agent controls — consumed the nonce and left the approval pointing at a hash
+  // no spend could ever reach again, so the cosigner's signature was destroyed by a payment
+  // they never saw. Distinct from NONCE_ALREADY_USED: that nonce is spent and gone, this one
+  // is spoken for and the request that owns it still works.
+  NONCE_RESERVED: 'NONCE_RESERVED',
   COSIGN_REQUIRED: 'COSIGN_REQUIRED',
   // NEW IN v2 (F16). Split from COSIGN_REQUIRED rather than folded into it: the two need
   // different actions from whoever reads the denial. COSIGN_REQUIRED means nobody approved
@@ -242,6 +255,32 @@ function createMandate(spec) {
   if (!payer) throw new Error('createMandate(): payer required');
   if (!spender) throw new Error('createMandate(): spender required');
 
+  // The three checks above are truthiness tests, and the zero address is a truthy string.
+  // Found by the mutation gate on 2026-08-29: neutering `spender required` changed no test
+  // result, and probing why turned up a divergence rather than a missing test. The contract
+  // refuses `p.spender == address(0)` outright with BadConfig, so this model was minting a
+  // mandate the chain would reject — and minting one that reads as ordinary, since every
+  // later guard treats the zero address as just another spender that never matches
+  // `msg.sender`. The mandate would have been permanently unusable, not dangerous, but
+  // "unusable" is exactly what the payer needed to be told at grant time.
+  //
+  // `payer` gets the same refusal for a different reason: on-chain the payer IS msg.sender,
+  // so a zero payer is not refused anywhere in the contract because it cannot arise. A model
+  // that accepts one describes a mandate with no counterpart, and every allowance and
+  // transferFrom in it would be against an account nobody holds.
+  if (normalizeAddr(payer) === ZERO_ADDRESS) {
+    throw new Error(
+      'createMandate(): payer cannot be the zero address — on-chain the payer is ' +
+        'msg.sender, so this mandate has no on-chain counterpart',
+    );
+  }
+  if (normalizeAddr(spender) === ZERO_ADDRESS) {
+    throw new Error(
+      'createMandate(): spender cannot be the zero address — the contract refuses this ' +
+        'with BadConfig, and the mandate would be unspendable for its whole life',
+    );
+  }
+
   // Only `totalCap` and `expiresAt` bound LIFETIME exposure. A per-transaction cap alone
   // does not — the delegate spends it again, and again, until the payer's allowance is dry
   // — and neither does a window alone, which is bounded per period and unbounded over a
@@ -316,6 +355,58 @@ function createMandate(spec) {
       throw new Error(
         'createMandate(): credential minResponse must be positive — 0 accepts a FAILED ' +
           'attestation, because ERC-8004 encodes failure as a low response',
+      );
+    }
+    // NEW IN v2. The other end of the same range. 100 is a pass under ERC-8004 and nothing
+    // above it is reachable, so a higher threshold names a bar no honest attestation can clear
+    // and the gate refuses every spend for the life of the mandate. The bound is `> 100` rather
+    // than `!= 100` so a payer who wants a stricter partial score can still ask for one; that
+    // choice can be tightened before deployment and never after, which is the note the
+    // contract carries at the same check.
+    if (credential.minResponse !== undefined && BigInt(credential.minResponse) > 100n) {
+      throw new Error(
+        'createMandate(): credential minResponse cannot exceed 100 — ERC-8004 scores a pass ' +
+          'as 100, so a higher bar denies every spend rather than raising the standard',
+      );
+    }
+    // NEW IN v2 (F34). `requestHash` is the entire lookup key: the registry is queried on it
+    // alone. Zero is the default value of the on-chain bytes32 and cannot address a real
+    // attestation, so a mandate carrying it is one whose credential gate can only ever answer
+    // CREDENTIAL_MISSING. Refused at the one moment the payer can still supply the right value.
+    if (!credential.requestHash || /^0x0*$/.test(String(credential.requestHash))) {
+      throw new Error(
+        'createMandate(): credential requires a non-zero requestHash — it is the whole ' +
+          'registry lookup key, so a zero one denies every spend',
+      );
+    }
+  }
+  // NEW IN v2 (F33). Both identity fields, refused for the same reason as the credential ones:
+  // the configuration is unusable and this is the last moment it can be fixed.
+  //
+  // `agentId: 0` is not registrable under ERC-8004, so `ownerOf(0)` either reverts or answers
+  // the zero address, and both land on IDENTITY_NOT_HELD forever.
+  //
+  // `expectedOwner` naming anyone other than the spender is the subtler one. The gate requires
+  // the CALLER to hold the identity and `evaluate` requires the caller to be the spender, so a
+  // pin at a third party contradicts a check the same function already made and refuses every
+  // spend. It reads like a tightening and it is a brick, which is why it is refused rather than
+  // documented. Zero still means "do not pin", and naming the spender is accepted as a no-op.
+  if (identity) {
+    if (identity.agentId === undefined || identity.agentId === null || BigInt(identity.agentId) === 0n) {
+      throw new Error(
+        'createMandate(): identity requires a non-zero agentId — agent 0 is not registrable, ' +
+          'so the gate could never find an owner',
+      );
+    }
+    if (
+      identity.expectedOwner &&
+      normalizeAddr(identity.expectedOwner) !== ZERO_ADDRESS &&
+      normalizeAddr(identity.expectedOwner) !== normalizeAddr(spender)
+    ) {
+      throw new Error(
+        'createMandate(): identity expectedOwner must be the spender or unset — the gate ' +
+          'already requires the caller to hold the identity, so pinning anyone else refuses ' +
+          'every spend for the life of the mandate',
       );
     }
   }
@@ -424,6 +515,11 @@ function createMandate(spec) {
     // timestamp the approval dies AT, exclusive. Absent from the Map is the model's
     // equivalent of the contract's stored zero.
     cosignApprovals: new Map(),
+    // v2 (F30): nonce => the spend hash that nonce is held for. Absent means free. Written by
+    // `approveCosignFor`, cleared by `commit` and by `withdrawCosign`. Keyed on the nonce rather
+    // than on the hash because the question being asked is "what is this nonce spoken for", and
+    // a hash cannot be turned back into the nonce inside it.
+    cosignReservedNonces: new Map(),
   };
 }
 
@@ -535,6 +631,18 @@ function evaluate(mandate, request, ctx) {
   if (normalizeAddr(recipient) === mandate.payer) {
     return deny(Denial.SELF_PAYMENT, { payer: mandate.payer });
   }
+  // F29, and ahead of the allowlist for F19's reason: the request is the mistake, not the
+  // config. `ctx.manager` is the contract's own address and `ctx.token` the USDC contract's,
+  // the two destinations from which nobody can move the money on again.
+  //
+  // A caller that names neither cannot have this checked, because the model has no other way
+  // to learn a deployment's addresses — a limitation worth stating rather than hiding, since
+  // the contract always knows both. Anything comparing this model against a live deployment
+  // has to supply them or it is comparing a weaker rule.
+  const unrecoverable = [ctx.manager, ctx.token].filter(Boolean).map(normalizeAddr);
+  if (unrecoverable.includes(normalizeAddr(recipient))) {
+    return deny(Denial.UNRECOVERABLE_RECIPIENT, { recipient });
+  }
   if (mandate.allowlist !== null && !mandate.allowlist.has(normalizeAddr(recipient))) {
     return deny(Denial.RECIPIENT_NOT_ALLOWED, { recipient });
   }
@@ -574,10 +682,21 @@ function evaluate(mandate, request, ctx) {
     if (!owner || normalizeAddr(owner) !== normalizeAddr(spender)) {
       return deny(Denial.IDENTITY_NOT_HELD, { agentId: mandate.identity.agentId, owner });
     }
-    if (
-      mandate.identity.expectedOwner &&
-      normalizeAddr(owner) !== normalizeAddr(mandate.identity.expectedOwner)
-    ) {
+    // FIXED IN v2 (F28). This used to test `mandate.identity.expectedOwner` for bare
+    // truthiness, and the zero address as a STRING is truthy in JavaScript — so the one
+    // spelling the contract documents as "do not pin" (MandateManager.sol reads
+    // `g.expectedOwner != address(0)`) made the model deny every spend on a mandate the chain
+    // would honour. Wrong in the safe direction for the money and the unsafe direction for the
+    // payer, who is told their mandate is bricked while it works.
+    //
+    // Now compared against ZERO_ADDRESS explicitly, like the four other places in this file
+    // that handle the same zero-means-unset hazard. `createMandate` also refuses a pin at
+    // anyone but the spender, so the surviving branch is the redundant one — see the note at
+    // Denial.IDENTITY_TRANSFERRED's contract twin about why it is kept rather than deleted.
+    const pin = mandate.identity.expectedOwner
+      ? normalizeAddr(mandate.identity.expectedOwner)
+      : ZERO_ADDRESS;
+    if (pin !== ZERO_ADDRESS && normalizeAddr(owner) !== pin) {
       return deny(Denial.IDENTITY_TRANSFERRED, {
         expected: mandate.identity.expectedOwner,
         got: owner,
@@ -651,13 +770,25 @@ function evaluate(mandate, request, ctx) {
     // select the permissive branch, otherwise a payer who omits the field gets a
     // mandate that can never spend. Documented in the README as a known footgun.
     //
-    // The `now > lastUpdate` guard matters on-chain: an attestation dated in the
-    // future would underflow an unsigned subtraction. Kept here so the two read the
-    // same, even though BigInt arithmetic would merely go negative.
+    // FIXED IN v2 (F31), and this model had the bug first. The old condition was
+    // `now > lastUpdate && now - lastUpdate > staleAfter`, where the first conjunct existed
+    // to stop the on-chain unsigned subtraction underflowing. It did that, and it also
+    // skipped the freshness test entirely whenever `lastUpdate` was ahead of the clock — so
+    // `maxStaleness` bound every attestation except the one class that cannot be honest about
+    // its own age. One future-dated stamp bought a credential that never went stale.
+    //
+    // A registry with a fast clock produces that by accident, so it is not a story about a
+    // malicious validator. An attestation dated in the future has an age nobody can compute,
+    // and refusing it is the only answer that does not amount to trusting it.
     const staleAfter = maxStaleness === null ? 0n : BigInt(maxStaleness);
-    if (staleAfter > 0n && now > BigInt(att.lastUpdate) && now - BigInt(att.lastUpdate) > staleAfter) {
+    if (
+      staleAfter > 0n &&
+      (BigInt(att.lastUpdate) > now || now - BigInt(att.lastUpdate) > staleAfter)
+    ) {
       return deny(Denial.CREDENTIAL_STALE, {
-        age: now - BigInt(att.lastUpdate),
+        age: BigInt(att.lastUpdate) > now ? null : now - BigInt(att.lastUpdate),
+        lastUpdate: BigInt(att.lastUpdate),
+        now,
         maxStaleness: staleAfter,
       });
     }
@@ -716,6 +847,18 @@ function evaluate(mandate, request, ctx) {
   // reachable ONLY with the mandate's own spender, closing the path where a cosigner is
   // handed the hash of a spend nobody can perform.
   const hash = spendHash({ mandate, recipient, amount, ref, nonce });
+  // F30, and OUTSIDE the cosign branch on purpose. A nonce held for a live approval is held
+  // against every spend, not only against spends large enough to need a signature — the whole
+  // attack was a spend too small to enter the branch below, consuming the nonce and stranding
+  // the approval on a hash no spend could reach again. Checking inside the branch would leave
+  // the hole exactly where it was.
+  //
+  // The reservation is satisfied by the request that owns it, so the comparison is against
+  // this request's hash rather than merely against presence.
+  const reservedHash = mandate.cosignReservedNonces.get(nonce);
+  if (reservedHash !== undefined && reservedHash !== hash) {
+    return deny(Denial.NONCE_RESERVED, { nonce, reservedHash });
+  }
   if (mandate.cosignThreshold !== null && amount > mandate.cosignThreshold) {
     // v2 (F16): a Map keyed by hash whose value is the deadline. Absent and expired are
     // distinct denials — see the note on Denial.COSIGN_EXPIRED.
@@ -778,6 +921,10 @@ function commit(mandate, decision) {
   }
 
   mandate.usedNonces.add(e.nonce);
+  // F30. Unconditional, and the nonce is now spent, so the reservation has nothing left to
+  // protect. Deleting a key that was never set is a no-op here; the contract guards the same
+  // delete with a zero test only to avoid paying for a pointless storage write.
+  mandate.cosignReservedNonces.delete(e.nonce);
   if (e.consumesCosign) {
     // A co-signature authorises exactly one spend.
     mandate.cosignApprovals.delete(decision.hash);
@@ -962,6 +1109,16 @@ function approveCosignFor(mandate, caller, request, ctx) {
   if (normalizeAddr(recipient) === mandate.payer) {
     throw refuse(Denial.SELF_PAYMENT, 'the recipient is the payer, so no spend can ever consume this');
   }
+  // F29's mirror, in the same position relative to the allowlist as on the spend path. It
+  // belongs to F17's rule as squarely as F19 does: neither address can stop being unrecoverable,
+  // so an approval naming one is authority over a payment `evaluate` will refuse forever.
+  const unrecoverable = [ctx.manager, ctx.token].filter(Boolean).map(normalizeAddr);
+  if (unrecoverable.includes(normalizeAddr(recipient))) {
+    throw refuse(
+      Denial.UNRECOVERABLE_RECIPIENT,
+      `${recipient} has no path to send the funds on, so no spend can ever consume this`,
+    );
+  }
   // The allowlist is fixed at creation in the contract and has no mutator, so absence is
   // permanent. F20 asks whether a payer-only REMOVE-only mutator should exist; it would not
   // weaken this, since removal shrinks the set and a recipient absent today can never become
@@ -1055,8 +1212,62 @@ function approveCosignFor(mandate, caller, request, ctx) {
     ref: request.ref ?? '',
     nonce: request.nonce,
   });
+  // F30. One nonce holds one approval. A second approval on a nonce already held for a
+  // different spend is refused rather than allowed to overwrite it, because the two cannot both
+  // be consumed: the first spend to land burns the nonce and the survivor is stranded. The
+  // cosigner who wants to replace an approval withdraws it first, which is one extra call and
+  // an explicit decision instead of a silent loss.
+  //
+  // Re-approving the SAME request is allowed and lands on the write below, so extending a
+  // deadline needs no withdrawal.
+  const reservedHash = mandate.cosignReservedNonces.get(request.nonce);
+  if (reservedHash !== undefined && reservedHash !== hash) {
+    throw refuse(
+      Denial.NONCE_RESERVED,
+      `nonce ${request.nonce} is already held for a different approved spend — withdraw that ` +
+        `approval first`,
+    );
+  }
+  mandate.cosignReservedNonces.set(request.nonce, hash);
   mandate.cosignApprovals.set(hash, validUntil);
   return hash;
+}
+
+/**
+ * Withdraw a co-signature before it is used. Only the cosigner may call it.
+ *
+ * NEW IN v2 (F30), and the reason this function exists in the model at all. The contract has
+ * always had it; the model did not, because deleting an approval had no consequence beyond the
+ * approval itself. The nonce reservation changes that: without a release path, a cosigner who
+ * approved and then withdrew would leave the nonce held for a hash no longer in the Map, and
+ * that nonce would be unspendable for the life of the mandate. The fix for one denial-of-service
+ * would have introduced another.
+ *
+ * The nonce is a parameter because a hash cannot be turned back into the nonce inside it. The
+ * release is conditional on the pair matching, so a wrong nonce cannot free a nonce belonging to
+ * a different live approval — the call is simply repeatable with the right one.
+ *
+ * @param {object} mandate
+ * @param {string} caller
+ * @param {string} hash   the spend hash to withdraw, as returned by approveCosignFor
+ * @param {string} nonce  the nonce that hash was approved under
+ * @returns {boolean} whether an approval was actually present and removed
+ */
+function withdrawCosign(mandate, caller, hash, nonce) {
+  if (!mandate) throw new Error('withdrawCosign(): unknown mandate');
+  if (!mandate.cosigner || normalizeAddr(caller) !== mandate.cosigner) {
+    const err = new Error('withdrawCosign(): only the cosigner may withdraw');
+    err.code = ApprovalRefusal.NOT_COSIGNER;
+    throw err;
+  }
+  const had = mandate.cosignApprovals.delete(hash);
+  if (nonce !== undefined && mandate.cosignReservedNonces.get(nonce) === hash) {
+    mandate.cosignReservedNonces.delete(nonce);
+  }
+  // Withdrawing an approval that is not there is not an error, matching the contract: the
+  // post-state the caller asked for is the post-state they get, and a cosigner racing a spend
+  // should not have their cancellation revert because the spend won.
+  return had;
 }
 
 /**
@@ -1227,6 +1438,7 @@ module.exports = {
   spend,
   revoke,
   approveCosignFor,
+  withdrawCosign,
   headroom,
   headroomAcross,
 };

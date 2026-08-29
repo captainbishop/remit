@@ -27,6 +27,9 @@ const {
   createMandate,
   revoke,
   approveCosignFor,
+  // NEW IN v2 (F30). The model gained a withdrawal because the nonce reservation needs a release
+  // path; without one, a fix for one denial-of-service would have introduced another.
+  withdrawCosign,
   MAX_AMOUNT,
   MAX_COSIGN_TTL,
   Denial,
@@ -76,6 +79,13 @@ const AGENT = '0xAGENT000000000000000000000000000000000002';
 const VENDOR = '0xVENDOR00000000000000000000000000000000003';
 const OTHER = '0xOTHER000000000000000000000000000000000004';
 const BOSS = '0xBOSS0000000000000000000000000000000000005';
+// v2 (F29). The two addresses a payment can reach and never leave: the manager, which holds no
+// USDC by design and has no sweep function, and the token itself. They live in `ctx` rather than
+// on the mandate because they are facts about a deployment, not about a grant — see the note at
+// the check in policy.js about what an omitted pair costs.
+const MANAGER = '0xMANAGER0000000000000000000000000000000006';
+const TOKEN = '0xTOKEN000000000000000000000000000000000007';
+const DEPLOY = { manager: MANAGER, token: TOKEN };
 
 let nonceCounter = 0;
 const n = () => `n${++nonceCounter}`;
@@ -275,6 +285,81 @@ test('construction: window length must divide evenly into buckets', () => {
   assert.doesNotThrow(() => win(DAY, usdc('1'), 24));
 });
 
+test('construction: id, payer and spender are required, and the zero address is not one', () => {
+  // All five guards this test and the next one cover already existed, and not one of them was
+  // asserted. The mutation gate neutered each in turn on 2026-08-29 and the suite stayed green
+  // at 89 passing, which is the whole argument for the gate: these three look self-evidently
+  // covered, because every other mandate in this file supplies all three fields.
+  const base = { id: 'x', payer: PAYER, spender: AGENT, perTxCap: usdc('1'), expiresAt: FAR };
+  assert.doesNotThrow(() => createMandate(base));
+
+  // Each guard is checked in its own right, and against every falsy spelling a caller reaches by
+  // accident: a field left off the object, one set to null by a serialiser, an empty string from
+  // a form, a zero from a numeric default.
+  for (const missing of [undefined, null, '', 0]) {
+    assert.throws(() => createMandate({ ...base, id: missing }), /id required/);
+    assert.throws(() => createMandate({ ...base, payer: missing }), /payer required/);
+    assert.throws(() => createMandate({ ...base, spender: missing }), /spender required/);
+  }
+
+  // NEW IN v2. Probing the three survivors turned up a divergence rather than only a missing
+  // test. The guards above are truthiness tests and the zero address is a truthy string, so the
+  // model used to mint a mandate the contract refuses outright — MandateManager.sol reverts
+  // BadConfig on `p.spender == address(0)`. Nothing downstream would have caught it either: the
+  // zero address is simply a spender that never equals the caller, so the grant reads as
+  // ordinary and denies every spend for the rest of its life. The payer learns at spend time
+  // what they could have been told at grant time.
+  assert.throws(
+    () => createMandate({ ...base, spender: ZERO_ADDRESS }),
+    /spender cannot be the zero address/,
+  );
+  // The payer is refused for the opposite reason: the contract has no check for it, because
+  // on-chain the payer IS msg.sender and a transaction cannot come from the zero address. A
+  // model that accepts one is describing a mandate with no on-chain counterpart at all.
+  assert.throws(
+    () => createMandate({ ...base, payer: ZERO_ADDRESS }),
+    /payer cannot be the zero address/,
+  );
+  // Both normalise before comparing, so an uppercase `0X` prefix is the same refusal and not a
+  // way around it. There are no letters in the zero address, so this is the only spelling that
+  // differs, and it is one a hand-written config reaches.
+  const upper = `0X${'0'.repeat(40)}`;
+  assert.throws(() => createMandate({ ...base, spender: upper }), /spender cannot be/);
+  assert.throws(() => createMandate({ ...base, payer: upper }), /payer cannot be/);
+});
+
+test('construction: windows must come from window(), and at most MAX_WINDOWS of them', () => {
+  const base = { id: 'x', payer: PAYER, spender: AGENT, expiresAt: FAR };
+
+  // A plain object with the two fields a caller thinks a window has is the plausible mistake,
+  // and the guard exists because the failure without it lands nowhere near the cause: the
+  // bucket ring is missing, so the first spend does arithmetic on undefined inside `headroom`.
+  assert.throws(
+    () => createMandate({ ...base, windows: [{ length: DAY, cap: usdc('500') }] }),
+    /built with window\(\)/,
+  );
+  // One real window and one raw one still fails. The check is per window, not "the first one",
+  // which is the version of this guard that would pass a careless review.
+  assert.throws(
+    () =>
+      createMandate({
+        ...base,
+        windows: [win(DAY, usdc('500'), 12), { length: WEEK, cap: usdc('1000') }],
+      }),
+    /built with window\(\)/,
+  );
+
+  // MAX_WINDOWS is a gas bound rather than a policy one: the contract walks every window's ring
+  // on every spend, so an unbounded count is an unbounded cost per transaction, paid by the
+  // delegate and unpayable at some size. The ceiling is inclusive — exactly MAX_WINDOWS is fine.
+  const rings = (k) => Array.from({ length: k }, (_, i) => win(DAY * (i + 1), usdc('500'), 12));
+  assert.doesNotThrow(() => createMandate({ ...base, windows: rings(P.MAX_WINDOWS) }));
+  assert.throws(
+    () => createMandate({ ...base, windows: rings(P.MAX_WINDOWS + 1) }),
+    new RegExp(`at most ${P.MAX_WINDOWS} windows`),
+  );
+});
+
 test('construction: every grant-time refusal the contract makes, the model makes too', () => {
   // Found by auditing zero-means-unset fields, not by a failing test — which is why it
   // is worth having. The contract refuses these at createMandate; the model used to
@@ -318,6 +403,49 @@ test('construction: every grant-time refusal the contract makes, the model makes
     /zero address/,
   );
 
+  // NEW IN v2. The other end of the minResponse range. 100 is a pass under ERC-8004 and
+  // nothing above it can be scored, so a higher bar refuses every spend for the life of the
+  // mandate — the same defect as a zero, pointing the other way.
+  assert.throws(
+    () => createMandate({ ...base, credential: { validator: BOSS, requestHash: '0xk', minResponse: 101n } }),
+    /cannot exceed 100/,
+  );
+  assert.doesNotThrow(
+    () => createMandate({ ...base, credential: { validator: BOSS, requestHash: '0xk', minResponse: 100n } }),
+  );
+
+  // F34. `requestHash` is the whole registry lookup key, so a zero one addresses no
+  // attestation and the gate can only ever answer CREDENTIAL_MISSING.
+  for (const empty of [undefined, '', '0x0', '0x00', '0x' + '0'.repeat(64)]) {
+    assert.throws(
+      () => createMandate({ ...base, credential: { validator: BOSS, requestHash: empty } }),
+      /requestHash/,
+      `requestHash ${JSON.stringify(empty)} must be refused`,
+    );
+  }
+
+  // F33. Agent 0 is not registrable, so `ownerOf(0)` reverts or answers the zero address and
+  // the identity gate denies forever.
+  assert.throws(() => createMandate({ ...base, identity: { agentId: 0n } }), /agentId/);
+  assert.throws(() => createMandate({ ...base, identity: {} }), /agentId/);
+
+  // F33's second half, and the one that reads like a tightening. The gate requires the CALLER
+  // to hold the identity and `evaluate` requires the caller to be the spender, so pinning
+  // `expectedOwner` at a third party contradicts a check the same function already made. The
+  // mandate is not protected by it, it is bricked by it.
+  assert.throws(
+    () => createMandate({ ...base, identity: { agentId: 42n, expectedOwner: BOSS } }),
+    /expectedOwner/,
+  );
+  // Unset, and pinned at the spender, are both accepted — the second as a deliberate no-op.
+  assert.doesNotThrow(() => createMandate({ ...base, identity: { agentId: 42n } }));
+  assert.doesNotThrow(
+    () => createMandate({ ...base, identity: { agentId: 42n, expectedOwner: P.ZERO_ADDRESS } }),
+  );
+  assert.doesNotThrow(
+    () => createMandate({ ...base, identity: { agentId: 42n, expectedOwner: AGENT } }),
+  );
+
   // And the shapes that are legitimate still construct: minResponse defaults to the
   // ERC-8004 passing value, and an omitted expiry means no expiry.
   assert.doesNotThrow(() => createMandate({ ...base, credential: { validator: BOSS, requestHash: '0xk' } }));
@@ -348,16 +476,18 @@ test('construction: the stored credential is encodable — no undefined where a 
     assert.notEqual(v, undefined, `credential.${k} must be encodable`);
   }
 
-  // Explicit values survive untouched, including the permissive ones.
+  // Explicit values survive untouched, including the permissive ones. `minResponse` is a
+  // partial score rather than the 200n this test used before v2 bounded the field at 100 —
+  // the point being made is pass-through, and 60 makes it against a value that is legal.
   const explicit = createMandate({
     id: 'y',
     payer: PAYER,
     spender: AGENT,
     perTxCap: usdc('1'),
     expiresAt: FAR,
-    credential: { validator: BOSS, requestHash: '0xk', minResponse: 200n, maxStaleness: 0n, agentId: 42n },
+    credential: { validator: BOSS, requestHash: '0xk', minResponse: 60n, maxStaleness: 0n, agentId: 42n },
   });
-  assert.equal(explicit.credential.minResponse, 200n);
+  assert.equal(explicit.credential.minResponse, 60n);
   assert.equal(explicit.credential.maxStaleness, 0n);
   assert.equal(explicit.credential.agentId, 42n);
 
@@ -495,6 +625,82 @@ test('F19: SELF_PAYMENT outranks the allowlist, even when the payer is ON it', (
   assert.equal(evaluate(onIt, req(usdc('10'), { recipient: PAYER }), { now: 1 }).reason, Denial.SELF_PAYMENT);
   const offIt = simpleMandate({ allowlist: [VENDOR] });
   assert.equal(evaluate(offIt, req(usdc('10'), { recipient: PAYER }), { now: 1 }).reason, Denial.SELF_PAYMENT);
+});
+
+test('F29: the manager and the token are refused as recipients, because nobody can send it back', () => {
+  // The failure mode is what separates this from every other denial in the file. An overspend
+  // is refused and retried; a payment to an address with no way to move funds on is final, and
+  // no key, no signature and no upgrade recovers it. The manager holds no USDC by design and has
+  // no sweep function; the token contract has no recovery path either. Neither is a plausible
+  // payee, so refusing both costs nothing anyone wanted.
+  const m = simpleMandate();
+  for (const bad of [MANAGER, TOKEN]) {
+    const d = evaluate(m, req(usdc('10'), { recipient: bad }), { now: 1, ...DEPLOY });
+    assert.equal(d.allowed, false);
+    assert.equal(d.reason, Denial.UNRECOVERABLE_RECIPIENT);
+  }
+  // Case-insensitive, like every other address comparison here.
+  assert.equal(
+    evaluate(m, req(usdc('10'), { recipient: MANAGER.toUpperCase() }), { now: 1, ...DEPLOY }).reason,
+    Denial.UNRECOVERABLE_RECIPIENT,
+  );
+  // An ordinary recipient is untouched, so the guard is not simply refusing more often.
+  assert.equal(evaluate(m, req(usdc('10')), { now: 1, ...DEPLOY }).allowed, true);
+});
+
+test('F29: it is refused AHEAD of the allowlist, and refused whether or not it is on one', () => {
+  // Shape before policy, the same ordering argument as F19: answering RECIPIENT_NOT_ALLOWED
+  // would send a reader to edit a list when the request itself is the mistake. And a payer who
+  // put the token on an allowlist by mistake gets the same protection as one who did not —
+  // which is the case that matters, because that payer believes the address is fine.
+  const onIt = simpleMandate({ allowlist: [VENDOR, MANAGER, TOKEN] });
+  const offIt = simpleMandate({ allowlist: [VENDOR] });
+  for (const m of [onIt, offIt]) {
+    for (const bad of [MANAGER, TOKEN]) {
+      assert.equal(
+        evaluate(m, req(usdc('10'), { recipient: bad }), { now: 1, ...DEPLOY }).reason,
+        Denial.UNRECOVERABLE_RECIPIENT,
+      );
+    }
+  }
+});
+
+test('F29: a cosigner cannot approve one either, so the refusal is not only on the spend path', () => {
+  // F17's rule: an approval must name a spend `evaluate` could accept. Neither address can stop
+  // being unrecoverable, so this approval is authority over a payment that is refused forever,
+  // and it is refused with the SAME code by both functions — which is what lets a caller treat
+  // the two surfaces as one policy.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  for (const bad of [MANAGER, TOKEN]) {
+    assert.throws(
+      () =>
+        approveCosignFor(
+          m,
+          BOSS,
+          { ...req(usdc('50'), { recipient: bad }), validUntil: DAY },
+          { now: 1, ...DEPLOY },
+        ),
+      (err) => err.code === Denial.UNRECOVERABLE_RECIPIENT,
+    );
+  }
+});
+
+test('F29: a caller that names neither address gets the weaker rule, and that is the documented cost', () => {
+  // Stated as a test rather than only in a comment, because it is the one way this mirror can be
+  // less than the contract's: on-chain, `address(this)` and `address(usdc)` are always known, so
+  // the guard cannot be skipped. Here they arrive in `ctx`. Anything comparing this model to a
+  // live deployment has to supply them, and this test is where that obligation is visible.
+  const m = simpleMandate();
+  assert.equal(evaluate(m, req(usdc('10'), { recipient: MANAGER }), { now: 1 }).allowed, true);
+  assert.equal(
+    evaluate(m, req(usdc('10'), { recipient: MANAGER }), { now: 1, token: TOKEN }).allowed,
+    true,
+    'naming only the token leaves the manager unchecked',
+  );
+  assert.equal(
+    evaluate(m, req(usdc('10'), { recipient: MANAGER }), { now: 1, manager: MANAGER }).reason,
+    Denial.UNRECOVERABLE_RECIPIENT,
+  );
 });
 
 test('only the named spender may spend', () => {
@@ -718,16 +924,205 @@ test('ATTACK: a cosign approval cannot be redirected to another recipient or amo
   const approved = req(usdc('50'), { recipient: VENDOR });
   approveCosignFor(m, BOSS, { ...approved, validUntil: DAY }, { now: 1 });
 
-  // same nonce, different recipient — must not inherit the approval
+  // CHANGED IN v2 (F30). A redirect on the APPROVED NONCE is now refused one step earlier than
+  // it used to be. It answered COSIGN_REQUIRED, which was true — the redirected tuple hashes
+  // differently and has no approval — and it also meant the redirected spend would have been
+  // free to consume the nonce, stranding the cosigner's approval on a hash nothing could reach
+  // again. The nonce is held for the tuple it was approved for, so the redirect never gets that
+  // far. Strictly stronger, and the reason to assert the new code rather than loosen the test.
   const swapRecipient = { ...approved, recipient: OTHER };
-  assert.equal(evaluate(m, swapRecipient, { now: 1 }).reason, Denial.COSIGN_REQUIRED);
+  assert.equal(evaluate(m, swapRecipient, { now: 1 }).reason, Denial.NONCE_RESERVED);
 
-  // same nonce and recipient, larger amount — must not inherit the approval
   const swapAmount = { ...approved, amount: usdc('99') };
-  assert.equal(evaluate(m, swapAmount, { now: 1 }).reason, Denial.COSIGN_REQUIRED);
+  assert.equal(evaluate(m, swapAmount, { now: 1 }).reason, Denial.NONCE_RESERVED);
+
+  // And the hash binding itself, which is what this test was always about, shown on a FRESH
+  // nonce where the reservation says nothing. Without this pair the two assertions above would
+  // no longer be evidence that an approval is tuple-bound — only that a nonce is spoken for.
+  assert.equal(
+    evaluate(m, req(usdc('50'), { recipient: OTHER }), { now: 1 }).reason,
+    Denial.COSIGN_REQUIRED,
+  );
+  assert.equal(evaluate(m, req(usdc('99'), { recipient: VENDOR }), { now: 1 }).reason, Denial.COSIGN_REQUIRED);
 
   // the exact approved tuple still works
   assert.equal(evaluate(m, approved, { now: 1 }).allowed, true);
+});
+
+test('ATTACK (F30): a tiny spend cannot burn the nonce out from under a live approval', () => {
+  // THE ATTACK, as a sequence rather than as a claim.
+  //
+  // The cosigner approves 50 USDC to VENDOR under nonce N. The agent then spends one unit, on
+  // nonce N, to an address it controls. Before v2 that spend was legal — it is below the
+  // threshold, so it never consulted the approval — and it consumed N. The approval stayed in
+  // the Map, pointing at a hash whose nonce was now spent, so the 50 could never be paid and the
+  // cosigner's signature was destroyed by a payment they never saw. One unit of USDC to cancel
+  // an arbitrary approval, repeatable for every approval the cosigner ever makes.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const approved = req(usdc('50'), { recipient: VENDOR });
+  approveCosignFor(m, BOSS, { ...approved, validUntil: DAY }, { now: 1, ...DEPLOY });
+
+  const burn = { ...approved, amount: 1n, recipient: OTHER };
+  const d = evaluate(m, burn, { now: 1, ...DEPLOY });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, Denial.NONCE_RESERVED, 'the nonce is held for the approved spend');
+
+  // The approval survived, and the payment it authorises still goes through.
+  assert.equal(spend(m, approved, { now: 1, ...DEPLOY }).allowed, true);
+  assert.equal(m.totalSpent, usdc('50'));
+
+  // The same small payment on its own nonce was never the problem, and still is not.
+  assert.equal(spend(m, req(1n, { recipient: OTHER }), { now: 1, ...DEPLOY }).allowed, true);
+});
+
+test('F30: the approved spend passes straight through, and releases its own nonce', () => {
+  // The reservation must not block the payment it exists to protect, and must not outlive it —
+  // a reservation left behind after the nonce is spent would be invisible, because
+  // NONCE_ALREADY_USED answers first from then on.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  assert.equal(m.cosignReservedNonces.get(r.nonce), hash);
+
+  assert.equal(spend(m, r, { now: 1, ...DEPLOY }).allowed, true);
+  assert.equal(m.cosignReservedNonces.has(r.nonce), false, 'spent nonces hold nothing');
+  assert.equal(m.cosignApprovals.has(hash), false, 'one signature, one spend');
+});
+
+test('F30: a nonce nobody reserved is untouched, so the guard costs an ordinary spend nothing', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  assert.equal(m.cosignReservedNonces.size, 0);
+  assert.equal(spend(m, req(usdc('10')), { now: 1, ...DEPLOY }).allowed, true);
+  assert.equal(spend(m, req(usdc('20')), { now: 1, ...DEPLOY }).allowed, true);
+  // And on a mandate with no cosign gate at all, which is the common case.
+  const plain = simpleMandate();
+  assert.equal(spend(plain, req(usdc('10')), { now: 1, ...DEPLOY }).allowed, true);
+});
+
+test('F30: withdrawing the approval releases the nonce, so the fix does not strand it instead', () => {
+  // The half that makes the fix safe rather than merely stricter. A reservation with no release
+  // path would mean a cosigner who approved and then changed their mind left that nonce
+  // unspendable for the life of the mandate — trading one denial-of-service for another.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+
+  assert.equal(withdrawCosign(m, BOSS, hash, r.nonce), true);
+  assert.equal(m.cosignReservedNonces.has(r.nonce), false);
+
+  // The nonce is ordinary again: usable for any spend, including one the cosigner never saw.
+  assert.equal(spend(m, { ...r, amount: usdc('10'), recipient: OTHER }, { now: 1, ...DEPLOY }).allowed, true);
+
+  // A wrong nonce cannot free a nonce belonging to a DIFFERENT live approval — that is what the
+  // conditional release is for. What it does instead is worth naming, because it is the one rough
+  // edge of the pair and the contract behaves identically: the approval is deleted either way, so
+  // a wrong nonce cancels the signature and leaves the nonce held for a hash that no longer
+  // exists. Nothing can use that nonce until the cosigner acts again — the approved spend now
+  // wants a signature that is gone, and any other spend on it meets the reservation.
+  const other = req(usdc('60'));
+  const otherHash = approveCosignFor(m, BOSS, { ...other, validUntil: DAY }, { now: 1, ...DEPLOY });
+  assert.equal(withdrawCosign(m, BOSS, otherHash, 'not-the-nonce'), true, 'the approval went');
+  assert.equal(m.cosignReservedNonces.get(other.nonce), otherHash, 'the reservation stayed');
+  assert.equal(evaluate(m, other, { now: 1, ...DEPLOY }).reason, Denial.COSIGN_REQUIRED);
+  assert.equal(
+    evaluate(m, { ...other, amount: usdc('20') }, { now: 1, ...DEPLOY }).reason,
+    Denial.NONCE_RESERVED,
+  );
+
+  // Both ways out are available and neither needs the payer. Repeating the withdrawal with the
+  // right nonce frees it.
+  assert.equal(withdrawCosign(m, BOSS, otherHash, other.nonce), false, 'nothing left to cancel');
+  assert.equal(m.cosignReservedNonces.has(other.nonce), false, 'but the nonce is free');
+  assert.equal(spend(m, { ...other, amount: usdc('20') }, { now: 1, ...DEPLOY }).allowed, true);
+
+  // Or re-approving the same request, which is satisfied by its own reservation and restores the
+  // signature the wrong nonce cancelled.
+  const third = req(usdc('60'));
+  const thirdHash = approveCosignFor(m, BOSS, { ...third, validUntil: DAY }, { now: 1, ...DEPLOY });
+  withdrawCosign(m, BOSS, thirdHash, 'not-the-nonce');
+  assert.equal(
+    approveCosignFor(m, BOSS, { ...third, validUntil: DAY }, { now: 1, ...DEPLOY }),
+    thirdHash,
+  );
+  assert.equal(spend(m, third, { now: 1, ...DEPLOY }).allowed, true);
+});
+
+test('F30: only the cosigner may withdraw, and withdrawing nothing is not an error', () => {
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  for (const stranger of [AGENT, PAYER, OTHER]) {
+    assert.throws(() => withdrawCosign(m, stranger, hash, r.nonce), /only the cosigner/);
+  }
+  assert.equal(m.cosignApprovals.has(hash), true, 'a stranger changed nothing');
+
+  // Withdrawing an approval that is not there returns false rather than throwing: the caller
+  // asked for a post-state and that is the post-state they get. A cosigner racing a spend should
+  // not have their cancellation revert because the spend won.
+  assert.equal(withdrawCosign(m, BOSS, 'no-such-hash', 'no-such-nonce'), false);
+  assert.equal(withdrawCosign(m, BOSS, hash, r.nonce), true);
+  assert.equal(withdrawCosign(m, BOSS, hash, r.nonce), false);
+});
+
+test('F30: two different approvals on one nonce are refused, and replacing one is explicit', () => {
+  // Sequencing rule, not a prohibition. Both approvals could never be consumed — the first spend
+  // to land burns the nonce and the survivor is stranded — so the second is refused at the moment
+  // the cosigner can still choose. Replacing means withdrawing first, which is one extra call and
+  // a decision instead of a silent loss.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const first = req(usdc('50'));
+  const firstHash = approveCosignFor(m, BOSS, { ...first, validUntil: DAY }, { now: 1, ...DEPLOY });
+
+  assert.throws(
+    () =>
+      approveCosignFor(
+        m,
+        BOSS,
+        { ...first, amount: usdc('60'), validUntil: DAY },
+        { now: 1, ...DEPLOY },
+      ),
+    (err) => {
+      assert.equal(err.code, Denial.NONCE_RESERVED, err.message);
+      return true;
+    },
+  );
+  assert.throws(
+    () =>
+      approveCosignFor(
+        m,
+        BOSS,
+        { ...first, recipient: OTHER, validUntil: DAY },
+        { now: 1, ...DEPLOY },
+      ),
+    (err) => {
+      assert.equal(err.code, Denial.NONCE_RESERVED, err.message);
+      return true;
+    },
+  );
+  assert.equal(m.cosignApprovals.get(firstHash), BigInt(DAY), 'the first approval is intact');
+
+  withdrawCosign(m, BOSS, firstHash, first.nonce);
+  const replaced = approveCosignFor(
+    m,
+    BOSS,
+    { ...first, amount: usdc('60'), validUntil: DAY },
+    { now: 1, ...DEPLOY },
+  );
+  assert.notEqual(replaced, firstHash);
+  assert.equal(spend(m, { ...first, amount: usdc('60') }, { now: 1, ...DEPLOY }).allowed, true);
+});
+
+test('F30: re-approving the SAME request is allowed, so extending a deadline needs no withdrawal', () => {
+  // The reservation is satisfied by the request that owns it, so this lands on the write rather
+  // than the guard. Refusing it would make a deadline extension a two-call dance for no gain.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  const again = approveCosignFor(m, BOSS, { ...r, validUntil: 2 * DAY }, { now: 1, ...DEPLOY });
+  assert.equal(again, hash);
+  assert.equal(m.cosignApprovals.get(hash), BigInt(2 * DAY), 'the later deadline replaced it');
+  assert.equal(m.cosignReservedNonces.get(r.nonce), hash);
+  assert.equal(evaluate(m, r, { now: DAY + 1, ...DEPLOY }).allowed, true, 'past the old deadline');
 });
 
 test('cosign: only the named cosigner may approve', () => {
@@ -995,6 +1390,40 @@ test('cosign (F17): a malformed recipient, amount or nonce is refused', () => {
   approveCosignFor(gated, BOSS, { ...req(usdc('50')), recipient: VENDOR, ...at }, { now: 1 });
 });
 
+test('a request with no nonce is refused by BOTH entry points, not stored or evaluated', () => {
+  // FOUND BY THE MUTATION GATE, 2026-08-29, the first run after it learned to neuter
+  // `throw new Error(`. Both of these guards could be deleted with the whole suite green: no
+  // test in 88 had ever omitted a nonce. The gate does not care that omitting one is a caller
+  // mistake — an unasserted guard is an unasserted guard.
+  //
+  // Why the approve-path one matters, in F17's own terms: `evaluate` requires a nonce, so an
+  // approval stored under a nonce-less hash is authority that no spend can ever consume. It is
+  // the same defect as approving a spent nonce, arriving by omission rather than by reuse, and
+  // omission is the likelier of the two from a caller assembling a request field by field.
+  //
+  // These throw plain Errors rather than carrying a refusal code, and deliberately: a missing
+  // nonce is a harness mistake, not a policy outcome. The contract has no analogue because
+  // `bytes32` has no absent value — `0x00…00` is a nonce like any other, and the contract treats
+  // it as one. So this pair guards the model against a shape the ABI cannot express, which is
+  // exactly where a model needs its own rules.
+  const m = cosignMandate();
+  for (const missing of [undefined, null, '']) {
+    assert.throws(
+      () => approveCosignFor(m, BOSS, { ...req(usdc('50')), nonce: missing, validUntil: DAY }, { now: 1 }),
+      /nonce is required/,
+    );
+    assert.throws(() => evaluate(m, { ...req(usdc('5')), nonce: missing }, { now: 1 }), /nonce is required/);
+  }
+  assert.equal(m.cosignApprovals.size, 0, 'nothing was stored under a nonce-less hash');
+  assert.equal(m.cosignReservedNonces.size, 0);
+
+  // Zero is a value, not an absence, and the contract stores exactly this nonce. `'0'` and `0n`
+  // both have to work or the model would refuse a spend the chain accepts.
+  for (const zero of ['0', 0n, '0x0']) {
+    assert.equal(spend(m, { ...req(usdc('5')), nonce: zero }, { now: 1 }).allowed, true);
+  }
+});
+
 test('cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not', () => {
   const m = cosignMandate({ perTxCap: usdc('100'), totalCap: usdc('100') });
   const at = { validUntil: DAY };
@@ -1256,6 +1685,57 @@ test('credential gate: maxStaleness of 0 means no freshness requirement at all',
   // And a positive value still enforces.
   const strict = credMandate({ maxStaleness: BigInt(DAY) });
   assert.equal(evaluate(strict, req(usdc('10')), withCred(ancient)).reason, Denial.CREDENTIAL_STALE);
+});
+
+test('credential gate (F31): a future-dated attestation is refused, not fresh forever', () => {
+  // THE BUG THIS CLOSES. The old condition read
+  //   `now > lastUpdate && now - lastUpdate > maxStaleness`
+  // and the first half was there for one reason: `now - lastUpdate` is unsigned, so a stamp
+  // ahead of the clock would underflow into an enormous age. It prevented that, and in doing so
+  // it skipped the freshness test altogether for exactly the one class of attestation that
+  // cannot be honest about its age. A validator whose clock runs fast files one stamp in the
+  // future and buys a credential that never expires — no attack required, just a wrong clock.
+  const m = credMandate({ maxStaleness: BigInt(DAY) });
+  const future = attestation({ lastUpdate: 1_000_000 + 365 * DAY });
+  assert.equal(evaluate(m, req(usdc('10')), withCred(future)).reason, Denial.CREDENTIAL_STALE);
+
+  // Refused for as long as the stamp leads the clock, then ordinary once the clock catches up.
+  // The rule is about an age nobody can measure, not a permanent blacklisting of the stamp.
+  assert.equal(
+    evaluate(m, req(usdc('10')), { ...withCred(future), now: 1_000_000 + 364 * DAY }).reason,
+    Denial.CREDENTIAL_STALE,
+  );
+  assert.equal(
+    evaluate(m, req(usdc('10')), { ...withCred(future), now: 1_000_000 + 365 * DAY }).allowed,
+    true,
+  );
+
+  // One second ahead is enough, which is what proves the guard is a comparison against the clock
+  // and not a tolerance band — and it is also the case that would have underflowed.
+  assert.equal(
+    evaluate(m, req(usdc('10')), withCred(attestation({ lastUpdate: 1_000_001 }))).reason,
+    Denial.CREDENTIAL_STALE,
+  );
+
+  // A stamp at exactly the current second is fresh, so the ordinary case is untouched: the new
+  // first leg is a strict `>`, and getting that wrong would refuse every attestation filed in
+  // the same block as the spend.
+  assert.equal(
+    evaluate(m, req(usdc('10')), withCred(attestation({ lastUpdate: 1_000_000 }))).allowed,
+    true,
+  );
+
+  // The reported age is null rather than a wrapped number when the stamp leads the clock. A
+  // denial that answered "age: 18446744073709551516" would send whoever read it hunting for a
+  // stale credential instead of a broken validator clock.
+  const d = evaluate(m, req(usdc('10')), withCred(future));
+  assert.equal(d.detail.age, null);
+  assert.equal(d.detail.lastUpdate, BigInt(1_000_000 + 365 * DAY));
+
+  // And maxStaleness 0 still means "no freshness requirement", so F31 tightened the freshness
+  // rule without quietly turning the permissive setting into a strict one.
+  const zero = credMandate({ maxStaleness: 0n });
+  assert.equal(evaluate(zero, req(usdc('10')), withCred(future)).allowed, true);
 });
 
 test('credential gate: agentId of 0 means unset, and unset with no identity skips the check', () => {
@@ -1688,84 +2168,82 @@ test('evaluate refuses a mandate that does not exist (the gate found this one un
   }
 });
 
-test('identity gate (F27): pinning expectedOwner to anyone but the spender BRICKS the mandate', () => {
+test('identity gate (F27): pinning expectedOwner to anyone but the spender is refused at grant time', () => {
   // `Denial.IDENTITY_TRANSFERRED` had no test at all: every `expectedOwner` in this file was
   // set to AGENT, which is also the spender, so the guard was never once reached. Asking why
   // is what turned a coverage hole into a finding.
   //
-  // The gate is two conditions on one value. `owner` must equal the SPENDER (line 574) and
-  // then must equal `expectedOwner` (line 578). Both compare against the same `owner`, so
-  // together they say `expectedOwner === spender` — and `spender` is already checked against
-  // the caller before the gate ever runs. So the second condition is not a second fact about
-  // the world. It has exactly three outcomes, none of which is the one a payer reading
-  // "pin the owner I intended" would expect:
+  // The gate is two conditions on one value. `owner` must equal the SPENDER and then must equal
+  // `expectedOwner`. Both compare against the same `owner`, so together they say
+  // `expectedOwner === spender` — and `spender` is already checked against the caller before the
+  // gate ever runs. So the second condition is not a second fact about the world. It has exactly
+  // three outcomes, none of which is the one a payer reading "pin the owner I intended" expects:
   //
-  //   absent/null          the guard is skipped
+  //   absent/zero          the guard is skipped
   //   equal to the spender the guard is redundant with the check above it
   //   anything else        NO caller can ever spend, for the mandate's whole life
   //
-  // Nothing refuses the third case at grant time — `createMandate` stores `identity` verbatim
-  // (policy.js:405), exactly as the contract stores `p.identity` unvalidated
-  // (MandateManager.sol:651). That is F5's shape (an expiresAt nothing reads) and F17's shape
-  // (a cosign approval nothing can consume): a config accepted at grant time that cannot work.
-  const bricked = simpleMandate({ identity: { agentId: 42n, expectedOwner: BOSS } });
+  // CHANGED IN v2 (F33). This test used to grant the third case and assert IDENTITY_TRANSFERRED,
+  // which was accurate and was still endorsing a bug: the mandate was not protected by the pin,
+  // it was bricked by it, and the payer could not tell those apart from the denial. Both
+  // `createMandate` and the contract now refuse the configuration at the one moment the payer
+  // can still fix it, so the assertion is a throw and the old denial is unreachable.
+  assert.throws(
+    () => simpleMandate({ identity: { agentId: 42n, expectedOwner: BOSS } }),
+    /expectedOwner/,
+  );
 
-  // AGENT is the named spender and DOES hold #42, so the first condition passes. The mandate
-  // still cannot spend, and the denial names a transfer that never happened.
-  const d = evaluate(bricked, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT });
-  assert.equal(d.allowed, false);
-  assert.equal(d.reason, Denial.IDENTITY_TRANSFERRED);
-
-  // The brick is total, and this is the half a single-case test would miss: there is no owner
-  // the registry could report that makes this mandate spendable. BOSS is who the payer pinned,
-  // and BOSS holding the token fails one line EARLIER, because BOSS is not the spender.
-  for (const owner of [AGENT, BOSS, OTHER, null]) {
-    const r = evaluate(bricked, req(usdc('10')), { now: 1, resolveIdentityOwner: () => owner });
-    assert.equal(r.allowed, false, `expectedOwner=BOSS must stay unspendable when owner=${owner}`);
-  }
-
-  // And the contrast that makes the redundancy claim concrete rather than asserted: the only
-  // pin that spends is the one that repeats the spender check above it.
+  // The only pin that constructs is the one that repeats the spender check above it, and it
+  // spends — which is the redundancy claim made concrete rather than asserted.
   const pinned = simpleMandate({ identity: { agentId: 42n, expectedOwner: AGENT } });
   assert.equal(
     evaluate(pinned, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT }).allowed,
     true,
   );
+
+  // And the first condition still does the work the pin was imagined to do: an identity the
+  // spender does not hold denies, whoever holds it. This is the check that actually protects a
+  // payer against the ERC-721 being sold, and it needs no `expectedOwner` at all.
+  for (const owner of [BOSS, OTHER, null]) {
+    const r = evaluate(pinned, req(usdc('10')), { now: 1, resolveIdentityOwner: () => owner });
+    assert.equal(r.allowed, false, `owner=${owner} is not the spender, so the gate must deny`);
+    assert.equal(r.reason, Denial.IDENTITY_NOT_HELD);
+  }
 });
 
-test('identity gate (F28): the model reads expectedOwner = address(0) as a PIN, the contract as "do not pin"', () => {
-  // KNOWN DIVERGENCE, PINNED SO IT CANNOT BE LOST — the model is wrong here, not the contract.
+test('identity gate (F28): expectedOwner = address(0) means "do not pin" in the model too, now', () => {
+  // CLOSED DIVERGENCE, kept as a regression test rather than deleted.
   //
-  // MandateManager.sol:276 documents `address(0) = do not pin`, and :941 implements it with an
-  // explicit `g.expectedOwner != address(0)`. The model at policy.js:578 tests bare truthiness
-  // instead, and the zero address as a STRING is truthy in JavaScript. So the same mandate is
+  // The model used to test `expectedOwner` for bare truthiness, and the zero address as a
+  // STRING is truthy in JavaScript. The contract documents `address(0) = do not pin` and
+  // implements it with an explicit `g.expectedOwner != address(0)`, so the same mandate was
   // spendable on-chain and permanently dead in the model.
   //
-  // The direction is what makes this worth a test rather than a comment. A model that is
-  // stricter than the contract does not cause a bad spend, but it tells a payer their mandate
-  // is bricked when the chain would honour it — and F27 above means a reader who is told
-  // IDENTITY_TRANSFERRED has every reason to believe it.
+  // The direction is what made it worth fixing rather than noting. A model stricter than the
+  // contract causes no bad spend, but it tells a payer their mandate is bricked when the chain
+  // would honour it — and with F27 above, a reader told IDENTITY_TRANSFERRED had every reason
+  // to believe it.
   //
-  // This is the SECOND instance of one hazard: a zero that the contract reads as "unset" and
-  // the model reads as a value. test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement
-  // in test/Gates.t.sol says so in as many words — "the model is wrong; the contract is right".
-  // policy.js already compares against ZERO_ADDRESS in four other places (324, 527, 611, 956),
-  // and line 623 documents this exact trap for `credential.agentId` and handles it on purpose.
-  // `expectedOwner` is the one field that was left on truthiness.
+  // It was fixed here, in the same pass as F33, because F33 made it untenable: `createMandate`
+  // now refuses three configurations for being unspendable, and would have gone on minting this
+  // one. The original note deferred the fix to #23 to keep a mutation run clean; the run it was
+  // protecting is finished.
   //
-  // The one-line fix belongs with #23, which validates both ERC-8004 gates at grant time and is
-  // where the whole `expectedOwner` question gets settled; changing `evaluate` in the same pass
-  // as the tests the mutation gate demanded would muddy what the gate proved. Until then this
-  // test fails the day the model is corrected, which is the intended alarm.
+  // This is one of two instances of a single hazard, a zero the contract reads as "unset" and
+  // the model read as a value. The other is `maxStaleness`, where the model is still wrong and
+  // test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement in test/Gates.t.sol says
+  // so in as many words.
   const zeroPinned = simpleMandate({ identity: { agentId: 42n, expectedOwner: ZERO_ADDRESS } });
   const d = evaluate(zeroPinned, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT });
-  assert.equal(d.allowed, false, 'if this now passes, the model was fixed — delete this test');
-  assert.equal(d.reason, Denial.IDENTITY_TRANSFERRED);
-  assert.equal(String(d.detail.expected).toLowerCase(), ZERO_ADDRESS);
+  assert.equal(d.allowed, true, 'the zero address is the absence of a pin, not a pin at nobody');
 
-  // Omitting the field entirely is the only spelling of "do not pin" the model honours, and it
-  // is the one the suite has always used, which is why nothing caught this.
-  for (const identity of [{ agentId: 42n }, { agentId: 42n, expectedOwner: null }]) {
+  // Every spelling of "do not pin" behaves identically, which is the property that was missing:
+  // the suite only ever used the third one, which is why nothing caught this.
+  for (const identity of [
+    { agentId: 42n, expectedOwner: ZERO_ADDRESS },
+    { agentId: 42n, expectedOwner: null },
+    { agentId: 42n },
+  ]) {
     assert.equal(
       evaluate(simpleMandate({ identity }), req(usdc('10')), {
         now: 1,
@@ -1773,7 +2251,61 @@ test('identity gate (F28): the model reads expectedOwner = address(0) as a PIN, 
       }).allowed,
       true,
     );
+    // And none of them weakens the gate that matters: the spender must still hold the identity.
+    assert.equal(
+      evaluate(simpleMandate({ identity }), req(usdc('10')), {
+        now: 1,
+        resolveIdentityOwner: () => OTHER,
+      }).reason,
+      Denial.IDENTITY_NOT_HELD,
+    );
   }
+});
+
+test('identity gate: IDENTITY_TRANSFERRED is unreachable by construction, and denies if reached', () => {
+  // A test for dead code, written deliberately, and labelled so that nobody removes it later as
+  // redundant with F27 and F28 above.
+  //
+  // F33 closed the last route to this denial. A pin at anyone but the spender is refused at grant
+  // time, the zero address means "do not pin", and so the only pin that constructs is the one
+  // that repeats the ownership check sitting above it. The guard stays rather than being deleted
+  // for two reasons: dead code whose only possible effect is to REFUSE a payment fails in the
+  // safe direction, and the contract keeps its twin, so removing one would put the two languages
+  // out of step over a branch neither can reach.
+  //
+  // The mutation gate reports that decision as a survivor — neuter the line and no test fails,
+  // because nothing can build the state that reaches it. This reaches it by assigning the
+  // forbidden pin straight onto the mandate, which is the only route left, and it buys two
+  // things. The gate goes clean, so a survivor at that line in future means something changed
+  // instead of "that is the known one". And the retained branch is shown to deny rather than
+  // assumed to.
+  //
+  // Expect the same survivor on the Solidity side for the same reason: test/Gates.t.sol carries
+  // test_identityGate_expectedOwnerNotTheSpender_isRefusedAtGrantTime, which documents
+  // `IdentityTransferred` as unreachable, and the spend gate was clean at 17/17 before F33.
+  const m = simpleMandate({ identity: { agentId: 42n, expectedOwner: AGENT } });
+  m.identity = { ...m.identity, expectedOwner: OTHER }; // the state createMandate refuses to mint
+
+  const d = evaluate(m, req(usdc('10')), { now: 1, resolveIdentityOwner: () => AGENT });
+  assert.equal(d.allowed, false, 'a pin the owner does not satisfy must deny');
+  assert.equal(d.reason, Denial.IDENTITY_TRANSFERRED);
+  // The detail is the whole reason this denial has its own code rather than reusing
+  // IDENTITY_NOT_HELD: it tells the payer the identity exists and moved, and to whom.
+  assert.equal(d.detail.expected, OTHER);
+  assert.equal(d.detail.got, AGENT);
+
+  // The ordering still holds underneath. The spender-holds-it check runs first, so an owner who
+  // is neither the spender nor the pin gets the reachable denial, not this one.
+  assert.equal(
+    evaluate(m, req(usdc('10')), { now: 1, resolveIdentityOwner: () => BOSS }).reason,
+    Denial.IDENTITY_NOT_HELD,
+  );
+  // And `createMandate` still refuses to produce the object this test had to assemble by hand,
+  // which is the claim that makes the guard dead in the first place.
+  assert.throws(
+    () => simpleMandate({ identity: { agentId: 42n, expectedOwner: OTHER } }),
+    /expectedOwner/,
+  );
 });
 
 test('F22: a delegate may be paid by its own mandate — recipient == spender stays ALLOWED', () => {

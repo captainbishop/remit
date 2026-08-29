@@ -565,6 +565,57 @@ contract CreationTest is Base {
         mm.createMandate(bytes32("i"), p);
     }
 
+    /// F34, the other end of the same field. ERC-8004 puts a pass at 100, so a threshold above
+    /// it refuses every attestation the standard can produce and the mandate is born dead —
+    /// while reading, at the call site, like a payer being extra careful.
+    function test_createMandate_credentialMinResponseAboveThePassScore_reverts() public {
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0);
+        p.credential.minResponse = 101;
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// And exactly 100 stays creatable, so the bound above refuses the unmeetable values without
+    /// taking the ordinary one with it.
+    function test_createMandate_credentialMinResponseAtThePassScore_isAccepted() public {
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0);
+        p.credential.minResponse = 100;
+        bytes32 id = grant(p);
+        assertTrue(mm.isLive(id));
+    }
+
+    /// F34. `getValidationStatus(0)` names no request, so it answers with an empty record and
+    /// the zero-validator check refuses it — `CredentialMissing`, on every spend, forever.
+    function test_createMandate_credentialWithZeroRequestHash_reverts() public {
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0);
+        p.credential.requestHash = bytes32(0);
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// F32. `flags` is caller-supplied and nothing tied it to the structs, so a payer who filled
+    /// the identity gate and forgot its flag got a mandate with no identity gate at all — the
+    /// data dropped on the floor here, and `MandateCreated` reporting flags rather than fields,
+    /// so nothing in the receipt said the gate was missing.
+    function test_createMandate_identityDataWithoutTheFlag_reverts() public {
+        MandateManager.MandateParams memory p = withIdentity(simpleParams(), AGENT_ID, agent);
+        p.flags &= ~F_IDENTITY; // the struct stays filled; only the bit is gone
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// The credential half of the same mistake.
+    function test_createMandate_credentialDataWithoutTheFlag_reverts() public {
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
+        p.flags &= ~F_CREDENTIAL;
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// And the ordinary case is untouched: no gate data, no gate flags, still creatable. Without
+    /// this the two tests above would also pass against a `createMandate` that refused every
+    /// grant.
+    function test_createMandate_noGateDataAndNoGateFlags_isAccepted() public {
+        bytes32 id = grant(simpleParams());
+        assertTrue(mm.isLive(id));
+    }
+
     /// A gate that cannot be evaluated must not be grantable, or the mandate looks
     /// gated and is not.
     function test_createMandate_gateWithoutRegistry_reverts() public {

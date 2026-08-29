@@ -16,14 +16,14 @@
 //
 // It checks BOTH directions, because F17 is a claim in both directions.
 //
-//   REMOVAL   — for each refusal in the target function, neuter that single line. There are two
-//               spellings in this model and the gate handles both, because they were written for
-//               different call styles and a gate that knew only one silently covered half the
-//               file: `throw refuse(...)` becomes `void refuse(...)`, and `return deny(...)`
-//               becomes `void deny(...)`. Either rewrite is syntactically valid, keeps the
-//               message and the code object, and removes only the transfer of control. A mutant
-//               that survives means no test asserts that refusal, or a neighbouring guard is
-//               shadowing it.
+//   REMOVAL   — for each refusal in the target function, neuter that single line. There are
+//               three spellings in this model and the gate handles all three, because a gate
+//               that knew only one silently covered a third of the file: `throw refuse(...)`
+//               becomes `void refuse(...)`, `return deny(...)` becomes `void deny(...)`, and
+//               `throw new Error(...)` becomes `void new Error(...)`. Each rewrite is
+//               syntactically valid, keeps the message and the code object, and removes only the
+//               transfer of control. A mutant that survives means no test asserts that refusal,
+//               or a neighbouring guard is shadowing it.
 //
 //   INJECTION — add a guard the function is REQUIRED NOT to have. Removal-mutation cannot
 //               reach a "must not refuse" requirement, and F17's harder half is exactly that:
@@ -31,12 +31,21 @@
 //               ERC-8004 credential all CLEAR, so refusing them would turn our caution into
 //               somebody's unapprovable payment. Each injection must be caught.
 //
-// THE TWO SPELLINGS ARE NOT COSMETIC, AND UNTIL 2026-08-28 ONE OF THEM WAS UNGATED. Every one
-// of the 18 `throw refuse(` lines is inside `approveCosignFor`; every one of the 24
-// `return deny(` lines is inside `evaluate`. So a gate that mutated only `throw refuse(`
-// reported a clean sweep while the spend path — the function that decides whether real money
-// moves — had never had a single guard broken on purpose. `node reference/mutation-gate.js
-// evaluate` is the run that closes that, and it is the more important of the two.
+// THE SPELLINGS ARE NOT COSMETIC, AND EACH ONE ADDED HAS REACHED A FUNCTION THE GATE HAD NEVER
+// TOUCHED. Counted from policy.js on 2026-08-29 rather than remembered: all 20 `throw refuse(`
+// lines sit inside `approveCosignFor`, all 26 `return deny(` lines inside `evaluate`, and the 33
+// `throw new Error(` lines are spread over nine functions with 18 of them inside `createMandate`.
+// So the original gate, which knew only `throw refuse(`, reported a clean sweep while the spend
+// path — the function that decides whether real money moves — had never had a single guard broken
+// on purpose; and the gate that followed it still said nothing about the function that decides
+// what a mandate may even be. `node reference/mutation-gate.js evaluate` closes the first gap and
+// `node reference/mutation-gate.js createMandate` the second. `evaluate` remains the most
+// important of the three.
+//
+// The three targets do not partition the file. `evaluate` and `approveCosignFor` each contain a
+// `throw new Error(` for a missing `ctx.now` or nonce — harness mistakes rather than policy
+// outcomes, since the contract cannot forget `block.timestamp` — so those lines are now mutated
+// as part of their own function's run and appear in its count.
 //
 // A REMOVAL IN `evaluate` FALLS THROUGH RATHER THAN THROWING, WHICH CHANGES WHAT A KILL MEANS.
 // Neutering a `throw` leaves the function to carry on with valid state. Neutering a `return`
@@ -46,6 +55,14 @@
 // separates the two: a crash-kill proves the suite would not stay green, an assertion-kill proves
 // the suite knows what the right answer was. Only the second is what this gate is for, so crash
 // kills are counted and named instead of being folded into the total.
+//
+// `evaluate` has exactly two of them, decided on 2026-08-29 and not to be re-probed: line 602's
+// `if (!mandate)` and line 728's `if (!att)`. Both guard against an ABSENT object rather than a
+// wrong value, so a fall-through immediately dereferences null — `mandate.revoked`, `att.validator`
+// — and no test can ever observe a returned denial to assert on. Neither is a gap in the suite and
+// neither can be converted into an assertion-kill without inventing state the guard exists to
+// refuse. Any THIRD crash-kill appearing in `evaluate` is new and should be read rather than
+// assumed to belong to this pair.
 //
 // A survivor is not automatically a gap in the suite. It may be a broken mutant: the first
 // version of the window injection compared `windowUsage(...)` — which returns an object — to a
@@ -249,13 +266,26 @@ const results = [];
 
 // ---- removal ----
 //
-// The two spellings the model actually uses. Order matters only in that a line is mutated once:
-// `throw refuse(` for the functions that signal by throwing, `return deny(` for the ones that
-// return a decision object. A multi-line `return deny(Denial.X, {` is still handled by rewriting
-// its FIRST line — `void deny(Denial.X, { ... });` remains one valid expression statement.
+// The three spellings the model actually uses. Order matters only in that a line is mutated once:
+// `throw refuse(` for the functions that signal by throwing a coded refusal, `return deny(` for
+// the ones that return a decision object, and `throw new Error(` for `createMandate`, which
+// refuses at GRANT time and has no decision object to return.
+//
+// THE THIRD SPELLING WAS ADDED ON 2026-08-29 AND IT REACHES A FUNCTION THIS GATE HAD NEVER
+// TOUCHED. `createMandate` states every rule about what a mandate may even BE, and all of its
+// refusals are plain `throw new Error(`, so the gate skipped the lot of them while the Solidity
+// sibling had been gating the same function since 2026-08-28 — and found a shadowed survivor
+// there on its first run. Two suites, one gated and one not, is how a divergence lives for a
+// week. `void new Error('...')` is a valid expression statement, so the rewrite keeps the
+// message and removes only the transfer of control, exactly like the other two.
+//
+// A multi-line `throw new Error(` is handled the same way as a multi-line `return deny(`: only
+// the FIRST line is rewritten, and `void new Error(` + the continuation lines is still one valid
+// expression statement.
 const NEUTERINGS = [
   ['throw refuse(', 'void refuse('],
   ['return deny(', 'void deny('],
+  ['throw new Error(', 'void new Error('],
 ];
 
 const removalTargets = [];
@@ -268,9 +298,42 @@ if (removalTargets.length === 0) {
   console.error(`mutation-gate: ${TARGET} contains no ${spellings} guards to mutate`);
   process.exit(2);
 }
+// A label a reader can act on. `throw refuse(` and `return deny(` carry a `Denial` or
+// `ApprovalRefusal` code, which is the best label there is: it is the claim the test asserts.
+// `throw new Error(` carries no code — that is the whole difference between a grant-time refusal
+// and a spend-time denial — so the message stands in for one. Without this, every `createMandate`
+// mutant would report as `? (line N)` and a survivor would be unreadable, which is the failure
+// mode this gate exists to avoid: evidence that degrades quietly.
+//
+// Two corrections, both from watching the first `createMandate` run on 2026-08-29:
+//
+// All three of JavaScript's string delimiters have to be accepted, not just `'`. The MAX_WINDOWS
+// guard interpolates the constant, so its message is a template literal, and it reported as
+// `? (line 420)` — a survivor with no name, on the run whose whole purpose was to find out
+// whether that guard had a test. The one label the gate could not print was the one it was
+// printing about.
+//
+// And the search starts at the neutering marker rather than at the start of the blob, because the
+// blob is three lines wide and any apostrophe in a nearby comment — "the payer's allowance" —
+// matches `'([^']*)'` earlier than the real message does and wins. That was luck rather than
+// design in the two-spelling version: every `refuse(`/`deny(` call sits on a line of its own with
+// no prose around it.
+function labelFor(blob, from) {
+  const at = blob.indexOf(from);
+  const tail = at === -1 ? blob : blob.slice(at + from.length);
+  const code = /(ApprovalRefusal|Denial)\.[A-Z_]+/.exec(tail);
+  if (code) return code[0];
+  const msg = /'([^']*)'|"([^"]*)"|`([^`]*)`/.exec(tail);
+  if (!msg) return '?';
+  // Strip the `fn():` prefix every message in this model carries; it is the same on all of them
+  // and eats the part that distinguishes one guard from the next.
+  const text = (msg[1] ?? msg[2] ?? msg[3]).replace(/^\w+\(\):\s*/, '').trim();
+  return text.length > 56 ? `${text.slice(0, 56)}…` : text;
+}
+
 for (const [ln, [from, to]] of removalTargets) {
   const blob = original.slice(ln - 1, ln + 2).join(' ');
-  const code = (/(ApprovalRefusal|Denial)\.[A-Z_]+/.exec(blob) || ['?'])[0];
+  const code = labelFor(blob, from);
   const mutated = original.slice();
   mutated[ln - 1] = mutated[ln - 1].replace(from, to);
   results.push({ kind: 'removed', label: `${code} (line ${ln})`, ...runAgainst(mutated) });

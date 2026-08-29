@@ -279,7 +279,12 @@ contract BoundsTest is Base {
         p.flags |= F_ALLOWLIST;
         bytes32 id = grant(p);
 
-        assertTrue(mm.isAllowedRecipient(id, payer), "the allowlist must really contain the payer");
+        // F36 changed how this is observed, and deliberately. `isAllowedRecipient` now applies
+        // every recipient rule `spend` applies, so it refuses the payer whether or not the list
+        // holds it — which makes it useless as evidence that the list was written. The other
+        // member is the evidence instead.
+        assertTrue(mm.isAllowedRecipient(id, vendor), "the allowlist must really have been written");
+        assertFalse(mm.isAllowedRecipient(id, payer), "F36: the view refuses the payer, list or no list");
         payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
 
         // And the same code when the payer is absent from the allowlist, so the answer does
