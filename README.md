@@ -135,16 +135,23 @@ one of which lives in USDC rather than in this codebase.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   94 tests, including boundary-aiming fuzzers
+reference/policy.test.js   99 tests, including boundary-aiming fuzzers
+reference/                 also holds the seven checkers, and the house style they enforce
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
-test/                      225 Forge tests in 11 files, against the real storage layout
+test/                      232 Forge tests in 11 files, against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 script/Deploy.s.sol        deploys with the constructor arguments pinned per chain
 demo/playground.html       browser simulation with 7 scripted attacks
+evidence/                  the testnet logs every gas and receipt figure is quoted from
 scope.md                   what an auditor is being asked to read, and what they are not
 DESIGN.md                  rationale, worked examples, verification worksheet
-THREAT-MODEL.md            the adversarial review: assets, boundaries, 37 findings
+THREAT-MODEL.md            the adversarial review: assets, boundaries, 40 findings
 IMMUTABILITY.md            what "no upgrade path" means for a payer, and the migration runbook
+PRIVACY.md                 what a mandate leaks, and the layers that could stop it
+CONFIDENTIAL-USDC.md       the unanswered question underneath them, and who owns it
+L3-VAULT.md                the shielded-vault spec, kept for its contract findings
+GAS-ABSTRACTION.md         who can pay for a spend, across 3009, 4337 and 7702
+CHANGELIST.md              every signature and behaviour change since v1 shipped
 FORGE.md                   how to run the Forge suite, and what to expect
 START-HERE.md              the on-ramp, if this is your first project
 ```
@@ -168,7 +175,7 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-A second suite now exists in Solidity — 225 Forge tests in `test/` — covering the same
+A second suite now exists in Solidity — 232 Forge tests in `test/` — covering the same
 ground plus the three properties a JavaScript model structurally cannot express: a failed
 spend consumes nothing (real transaction rollback), rewinding onto the same physical ring
 slot accumulates rather than overwrites (real storage aliasing), and `totalSpent` panics
@@ -212,7 +219,7 @@ encrypted keystore instead: the key is never printed and never written in plaint
 
 ```
 forge build                                    # clean; forge-std 1.9.6 is vendored in lib/
-forge test                                     # 225 tests, all passing
+forge test                                     # 232 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;
                                                     # prints the address, never the key
@@ -261,7 +268,7 @@ by `createMandate(salt, params)`, and then the delegate can `spend`.
 
 ## Status
 
-**Verified.** The reference model runs and passes 94 tests. It found six real
+**Verified.** The reference model runs and passes 99 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
 collision at low timestamps) and two in the credential check (unchecked validator,
@@ -434,7 +441,7 @@ the model returns encodes directly into the contract's struct with no second lay
 defaults to disagree with. A specification that needs a translator has moved the bug
 rather than fixed it.
 
-The model now matches on all ten, which took its suite from 41 tests to 46 — and to 94 over
+The model now matches on all ten, which took its suite from 41 tests to 46 — and to 99 over
 the course of v2, which added the counter-ceiling denial, three co-signature refusals, six
 joint-ceiling tests, the lifetime-bound narrowing, and every later fix's own regression.
 One Forge test was also rewritten for proving nothing — it tripped two `BadWindow`
@@ -544,7 +551,7 @@ launch. The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 225 tests, including exact-ledger property tests and
+The Forge port is written and runs — 232 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence, and all of them pass.
 Gas is measured against Arc's real USDC, `K=24` is settled as affordable, and the contract
 is deployed and exercised on testnet.
