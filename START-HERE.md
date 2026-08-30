@@ -8,7 +8,7 @@ one is written for someone who is starting out, and it assumes nothing.
 
 **All five stages below are done, as of 2026-08-24.** Node is installed and the reference
 tests pass — 94 of them in the current tree, since v2 has been adding to that suite. Foundry
-is installed under WSL, the contract compiles, and all 219 Forge tests pass, including
+is installed under WSL, the contract compiles, and all 225 Forge tests pass, including
 2,048 randomised fuzz runs and 49,152 invariant calls. Gas is measured, and stage 4 is
 complete: the contract is deployed to Arc Testnet with its source published, a mandate has
 been granted, and **an agent has spent your money under policy without ever holding your
@@ -41,11 +41,11 @@ now, and its 94 tests pass.
 
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
 Solidity, the language blockchains run. It first compiled on 2026-08-24 against 140 tests,
-every one of which passed; the suite has since grown to 219, and all 219 pass. It is
+every one of which passed; the suite has since grown to 225, and all 225 pass. It is
 **deployed and working on Arc's test network** — five real mandates, five real payments, and
 thirty-one transactions in all, every one visible in the explorer.
 
-The **Forge tests** (`test/`, 219 of them) check the contract against its real storage
+The **Forge tests** (`test/`, 225 of them) check the contract against its real storage
 layout, including thousands of randomised runs. They all pass.
 
 The **demo** (`demo/playground.html`) is a web page that simulates the whole thing in a
@@ -242,14 +242,14 @@ with the whole account in `FORGE.md`. The pattern matters more than the detail h
 warning you have decided to ignore stops being read, and the count I was carrying in my
 head had drifted from five to ninety-one without anyone noticing.
 
-## Stage 3 — run the 219 contract tests ✅ done
+## Stage 3 — run the 225 contract tests ✅ done
 
 ```
 forge test
 ```
 
-All 219 pass. The last timed run took seventeen seconds at 207 tests, so expect roughly
-that. Then two specific checks, which matter more than they look:
+All 225 pass. The last timed run took under fourteen seconds at 225 tests, so expect
+roughly that. Then two specific checks, which matter more than they look:
 
 ```
 forge test --match-test test_flagConstants_matchTheContract

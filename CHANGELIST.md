@@ -456,7 +456,7 @@ would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
 functions by static count across eleven files at #22, up two net — a static count, not a
 `forge test` count, and therefore **unverified** then, because forge did not run in the
-environment these edits were made in, and `forge test` reports **219** today.
+environment these edits were made in, and `forge test` reports **225** today.
 
 **What it broke.** `DESIGN.md`'s flagship worked example and the narrative `THREAT-MODEL.md`
 F2 is built on are now un-creatable for a *second and independent* reason:

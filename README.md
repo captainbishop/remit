@@ -137,7 +137,7 @@ one of which lives in USDC rather than in this codebase.
 reference/policy.js        the normative spec — executable model of every decision
 reference/policy.test.js   94 tests, including boundary-aiming fuzzers
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
-test/                      219 Forge tests in 11 files, against the real storage layout
+test/                      225 Forge tests in 11 files, against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 script/Deploy.s.sol        deploys with the constructor arguments pinned per chain
 demo/playground.html       browser simulation with 7 scripted attacks
@@ -168,11 +168,11 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-A second suite now exists in Solidity — 219 Forge tests in `test/` — covering the same
+A second suite now exists in Solidity — 225 Forge tests in `test/` — covering the same
 ground plus the three properties a JavaScript model structurally cannot express: a failed
 spend consumes nothing (real transaction rollback), rewinding onto the same physical ring
 slot accumulates rather than overwrites (real storage aliasing), and `totalSpent` panics
-rather than wrapping near 2^96 (real packed arithmetic). All 219 pass, under `solc` 0.8.28
+rather than wrapping near 2^96 (real packed arithmetic). All 225 pass, under `solc` 0.8.28
 — 2,048 fuzz runs and 49,152 invariant calls. Coverage of the contract was last measured
 at 100% of lines, statements, branches and functions, before v2 added to the contract.
 **[FORGE.md](FORGE.md)** covers setup, the two commands that check the suite is not
@@ -212,7 +212,7 @@ encrypted keystore instead: the key is never printed and never written in plaint
 
 ```
 forge build                                    # clean; forge-std 1.9.6 is vendored in lib/
-forge test                                     # 219 tests, all passing
+forge test                                     # 225 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;
                                                     # prints the address, never the key
@@ -544,7 +544,7 @@ launch. The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 219 tests, including exact-ledger property tests and
+The Forge port is written and runs — 225 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence, and all of them pass.
 Gas is measured against Arc's real USDC, `K=24` is settled as affordable, and the contract
 is deployed and exercised on testnet.

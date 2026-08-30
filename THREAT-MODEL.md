@@ -410,6 +410,37 @@ what it does not, and which areas remain unexamined.
 > that same list inside the same pass, so the cardinal was removed and the deniers named instead.
 > **A fix in one finding can falsify a premise in another with nothing failing**, which F3 recorded
 > once already, and the two mutation gates still do not cover it.
+>
+> **2026-08-30, the window geometries: four accepted shapes now have a spend through them, and the
+> suite is 225 cases.** Six tests went into `test/Windows.t.sol`, which moves 14 → 20, taking the
+> total 219 → **225** — 222 named `test*` plus 3 named `invariant_`, read off
+> `reference/vacuity-check.py` rather than counted by hand. The other case-bearing files are
+> unmoved at `Cosign` 53, `Creation` 44, `Bounds` 32, `Views` 26, `Gates` 24, `Idempotency` 13,
+> `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4 and `Base` 0, and `FORGE.md`'s per-file
+> column was corrected in the same pass so the two agree. The model stays at **94**: none of the
+> six describes behaviour the model has, because the model carries no window ring.
+>
+> **What the six pin is narrower than "the geometry is covered".** Two take the one-second
+> sub-period, one at the ordinary release and one at `FAR - 3`, where the bucket index reaches
+> `2^40 - 4`, the largest index this suite can construct and 40 of that field's 64 bits. One takes
+> `buckets == 1`, whose ring is two slots wide and therefore charges up to twice the nominal
+> window: the behaviour is correct and startling, so the test states it rather than leaving a
+> reader to derive it. One takes `buckets == 32` with 33 spends into 33 consecutive sub-periods
+> that a 32-slot ring would have admitted with a bucket to spare, so the assertion tells the two
+> ring widths apart. One takes `MAX_WINDOWS` at `MAX_BUCKETS`, the 132-slot maximum-cost spend
+> those two constants exist to bound. The sixth is no extreme at all: four windows of differing
+> lengths with the tightest last, so a refusal raised by the fourth arrives after three have been
+> written, and each of the three is then asserted back at its full cap.
+>
+> **The measurement §5 asked for is still owed, and the harness is the reason.** `--gas-report`
+> perturbs `gasleft()` in this suite, and every call inside one Foundry test function shares a
+> transaction, leaving a ring warm from the second spend onward. No assertion in the six names a
+> gas number, and the cold figure needs `forge test --isolate --gas-report`, which stays with #14.
+> **Much of what the six pin is also beyond either mutation census.** The recycle and accumulate
+> branches of `_checkAndCommitWindows` contain no `revert`, and a released amount is a
+> `windowRemaining` return, so removal mutation reaches neither: the arguments carried by the
+> refusal after a spend are what tell one branch from the other. That is the blind spot #24
+> recorded above, met a second time in a different function.
 
 ## Why this document exists
 
@@ -676,7 +707,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F35 `isCosignApproved` ignored the mandate's own death | **DONE in `af9df40`, 2026-08-29.** 1 conjunct + a factored `_isPermanentlyDead`, 2 Solidity tests. **Wrong on its first attempt** — it used `isLive`, which folded in `notBefore` and reported a live scheduled approval as dead; two tests caught it. No model surface, since the model has no pre-flight views | — |
 | ✅ F36 `isAllowedRecipient` disagreed with `spend` | **DONE in `af9df40`, 2026-08-29.** 3 guards, 2 Solidity tests, one of them shared with F29 so the two claims check each other. No model surface | — |
 | ✅ F37 the model minted mandates with a zero payer or spender | **DONE in `af9df40`, 2026-08-29.** 2 throws in `reference/policy.js`, asserted by the grant-time construction test. **Not named in that commit's message** — it was folded into the gate work; this document is where it gets named. Found by the JS mutation gate, which reported a survivor and turned out to be reporting a divergence | — |
-| §5 coverage gaps | **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
+| §5 coverage gaps | **1 test, 4 testnet transactions, later the same day on 2026-08-30.** Six tests landed in `test/Windows.t.sol` and four items came off together — the four-window maximum-cost spend and all three window geometries — which is the largest single drop this row has recorded, and the four fell to one commit because they shared one file and one harness. What remains is 1 spend through a `minResponse` between 1 and 99, which is a decision before it is a test, and F34's OPEN cell in this table holds that same question. The gas measurement the maximum-cost item asked for stays out of this count, for the reason the view-reaching mutation operator stays out: a measurement is not a test. The layer this replaces follows, reading as it did. **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list risks funds in
 the sense of letting a spend exceed a granted cap; the window search found no such case in 3.0M
@@ -2900,6 +2931,22 @@ still be hiding there.
   stops, so the worst case those two caps exist to make survivable has never been
   executed, let alone measured. Closing this costs less than any other gap on this list, and
   it belongs in #14, since it needs a gas number anyway.
+
+  **CLOSED 2026-08-30.** `test_fourWindowsAtMaxBuckets_theMaximumCostSpend_succeeds` in
+  `test/Windows.t.sol` executes it. The four windows are **identical**, at `(DAY, 3300, 32)` each,
+  which is deliberate: a slot stays live for `K + 1` sub-periods, so windows of differing
+  sub-lengths fill and empty on different schedules, and no instant exists at which all 132 slots
+  hold an amount. Thirty-three spends of 100 at thirty-three consecutive sub-periods fill every
+  slot in all four rings, `windowRemaining` reads 0 on each of the four, and the spend after them
+  reads all 132 slots, counts 128 and recycles 4. The refusal that closes the test names the first
+  window, since identical windows bind together and `spend` reports the first one to bind.
+
+  **The measurement is still owed and still belongs to #14.** The test asserts no gas number, for
+  two reasons that come from the harness rather than from the contract: `--gas-report` perturbs
+  `gasleft()` in this suite, and every call inside one Foundry test function shares a transaction,
+  leaving the ring warm from the second spend onward. The cold figure needs
+  `forge test --isolate --gas-report` against this one test, and that figure is the one this
+  bullet asked for rather than the 7,423,098 an ordinary run reports.
 - **Three accepted window geometries are never spent through**, confirmed by enumerating
   every window constructed in `test/`: `buckets == 1`, `buckets == 32` exactly, and
   `subLength == 1`. The first is a ring of two, which charges up to twice the nominal window —
@@ -2908,6 +2955,28 @@ still be hiding there.
   precise end of the practical range)", which is an accurate description of the *practical*
   range and not of the *accepted* one. `createMandate` accepts K up to 32 and
   `lengthSeconds = 1, buckets = 1`.
+
+  **CLOSED 2026-08-30.** Four tests in `test/Windows.t.sol` cover all three geometries, and a
+  fifth landed with them.
+  `test_bucketsOfOne_chargesTwoWindowsBeforeReleasing` spends the cap, holds the mandate out to
+  `2L` to watch the whole cap return at once, then spends onto the ring slot that bucket `b + 2`
+  shares with bucket `b`. The refusal after that spend reports `used` as one cap rather than two,
+  which is the only way to separate the recycle branch from the accumulate branch: neither branch
+  contains a `revert`, so no removal mutant can reach either of them, and the test is the whole of
+  the evidence there.
+  `test_bucketsAtTheMaximum_keepsThirtyThreeBucketsLiveAtOnce` fills a 33-unit cap with 33 spends
+  at 33 consecutive sub-periods, which a 32-slot ring would have admitted with a bucket to spare;
+  the assertion therefore separates the two ring widths instead of restating the arithmetic, and a
+  second assertion one sub-period later pins the finest release the contract can be configured to
+  give. The one-second sub-period is taken twice:
+  `test_subLengthOfOneSecond_releasesAfterTwoSeconds` covers the ordinary release, and
+  `test_subLengthOfOneSecond_atTheLastSpendableSecond_stillBuckets` runs it at `FAR - 3`, where the
+  bucket index reaches `2^40 - 4` — the largest value any mandate this suite can build hands to
+  the `uint64` cast, and 40 of that field's 64 bits. The fifth test,
+  `test_fourWindows_refusalByTheLast_unwindsTheFirstThree`, sits outside the accepted extremes and
+  is instead the shape a payer would grant: four differing lengths with the tightest last, so a
+  refusal raised by the fourth window arrives with three windows already written, and each of the
+  three is asserted back at its full cap.
 - **`forge lint` on the v2 tree.** `windowRemaining`'s `uint64` cast carries no
   suppression comment where its twin in `_checkAndCommitWindows` does; whether that is a
   new warning is #14's to find out.

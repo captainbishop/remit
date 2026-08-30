@@ -1,16 +1,16 @@
 # Running the Forge suite
 
-219 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
+225 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
 is the port of `reference/policy.test.js`, which has 94 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 219 pass, and `forge lint` is clean.** First compiled and first run on
-2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at 200 runs, in about
-twelve seconds; the last timed run was seventeen seconds at 207. That covers 2,048 fuzz
-runs across the four property tests and 49,152 calls across the three stateful invariants.
+**Status: all 225 pass; `forge lint` was last clean before v2 reached the contract.** First
+compiled and first run on 2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at
+200 runs, in about twelve seconds; the last timed run was 13.84 seconds at 225. That covers
+2,048 fuzz runs across the four property tests and 49,152 calls across the three invariants.
 What the first compile and the first run each cost is recorded below, because a suite's
 first green is the only time you learn whether it was testing anything.
 
@@ -161,7 +161,7 @@ pre-audit setting and takes minutes.
 
 **The deep profile was run on 2026-08-25 at 140 tests: 140 passed, 0 failed, 0 skipped,
 exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence/deep.log`.
-The suite is 219 tests now, so the deep profile has not been run against its current form.
+The suite is 225 tests now, so the deep profile has not been run against its current form.
 What that run bought, in calls rather than runs: each of the three `invariant_` functions in
 `WindowInvariant.t.sol` ran 2,000 sequences of 256 handler calls, so 512,000 calls apiece
 and 1,536,000 in total, against 16,384 apiece under the default profile. Each of the four
@@ -205,7 +205,7 @@ success having tested nothing.
 test/Base.t.sol            harness: mocks, actors, params builders, denial helpers
 test/Creation.t.sol        44  grant-time validation — every way a mandate is refused
 test/Bounds.t.sol          32  per-tx, lifetime, allowlist, spender, time, revocation
-test/Windows.t.sol         14  the rolling-window ring, by hand, with the boundary probes
+test/Windows.t.sol         20  the rolling-window ring, by hand, with the boundary probes
 test/Gates.t.sol           24  ERC-8004 identity and credential gates
 test/Cosign.t.sol          53  what a co-signature actually commits to
 test/Idempotency.t.sol     13  nonce replay, and that a denial consumes nothing
@@ -216,7 +216,7 @@ test/ArcParity.t.sol        4  matched local control for the real Arc Testnet tr
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-Ten of the 219 are named attack simulations (`test_ATTACK_*`), one is a regression for
+Ten of the 225 are named attack simulations (`test_ATTACK_*`), one is a regression for
 a bug that shipped into the model (`test_REGRESSION_*`), and three pin behaviour that is
 deliberately weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
@@ -226,7 +226,7 @@ Eleven files hold fourteen non-abstract contracts; `ArcParity.t.sol` alone decla
 one per measured transaction, because each needs cold storage. Subtract `WindowHandler` —
 non-abstract but a fuzzing handler with no test functions of its own — and you get 13.
 `Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. In total: 11 files,
-13 suites, 219 tests, and all three numbers are correct at the same time.
+13 suites, 225 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
 
