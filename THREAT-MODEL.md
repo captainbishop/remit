@@ -312,6 +312,52 @@ what it does not, and which areas remain unexamined.
 > `python3 reference/code-unchanged.py HEAD` reports `540 code lines, all identical, none moved`.
 > **A survivor is also a claim-checker**: the sentence explaining why a guard matters is exactly the
 > sentence a mutation run is able to contradict.
+>
+> **2026-08-30, later the same day: F22's property reaches Solidity, and the census is 91 mutants.**
+> The suite is **212 cases** — 209 named `test*` plus 3 named `invariant_`, which
+> `reference/vacuity-check.py` reports directly — with `Cosign` 47 → 48, `Bounds` 29 → 31 and the
+> other eight case-bearing files unmoved.
+> `contracts/MandateManager.sol` is **byte-identical to HEAD**, so the census moved because the gate
+> learned a property rather than because the contract grew a guard. That is a first for this banner,
+> and it is the honest reading of the figure: a mutant count is a property of the pair (contract,
+> operator set) and not of the contract alone.
+>
+> **What was missing.** `recipient == m.spender` is legal, and it is the case F22 exists to
+> document — a delegate paid by its own mandate is most of what mandates are for. That property was
+> asserted in `reference/policy.test.js` by name and nowhere in Solidity. No case among the 209 had
+> ever named the delegate as a recipient, checked by grep over `test/` rather than assumed, so
+> `if (recipient == m.spender) revert SelfPayment();` injected into `spend` would have survived a
+> fully green suite. The guard it imitates is real and one identifier away:
+> `contracts/MandateManager.sol:983` is F19's `if (recipient == m.payer) revert SelfPayment();`, and
+> `:1476` is its mirror. **`payer` and `spender` in that position are opposite claims sharing one
+> error name**, which is why F19's condition rather than its name is the claim.
+>
+> **Three cases close it, and both paths are mutated now.** `test/Bounds.t.sol` gained
+> `test_f22_theSpenderMayBePaidByItsOwnMandate`, which asserts the money arrived at the delegate and
+> left the payer instead of asserting that some revert failed to fire, and
+> `test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid`, which pins `F_ALLOWLIST` as the only
+> mechanism that refuses a delegate.
+> `test/Cosign.t.sol` gained `test_f22_approvingTheSpenderAsRecipient_isAccepted`, the one case on
+> the approval path that must be **accepted** — and F17's `_assertSameRefusal` parity could never
+> have reached it, because parity checks that the two paths answer alike, so folding the spender
+> into `SelfPayment` would make both paths refuse and report them in agreement.
+>
+> **The runs, at baseline 212 passed, 0 failed in both.** `spend`'s injection was caught by three
+> cases, 3 failing — all three of the above, since each moves money to the delegate through
+> `spend`. `approveCosignFor` returned **5 of 5 caught**: its four F17 injections unchanged, which
+> is a regression check rather than a new result, and the fifth killed by exactly one case,
+> `test_f22_approvingTheSpenderAsRecipient_isAccepted`. **A single killer is a fact to record rather
+> than a result to be satisfied by** — delete that one case and the mirror injection survives again,
+> with nothing else among the 212 noticing.
+>
+> **Both runs were narrowed, and each log says so on its closing line.** `--injections` is new today
+> and builds a target's injection cases without its removals, taking these two questions from 45
+> mutants to 6. The licence is directional, in that adding a case can only enlarge the killer set,
+> so the bare removal census recorded earlier this same day cannot have regressed. The guard against
+> misreading is the gate's own `SCOPE: injections only` block, which names the 19 and 20 removals it
+> declined to build. **A narrowed log is not a census, and the gate now refuses to let one look like
+> one.** The census stands at **91 — 85 removals plus 6 injections**, one of the six on `spend` and
+> five on `approveCosignFor`, against the 89 this banner recorded earlier the same day.
 
 ## Why this document exists
 
@@ -542,7 +588,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F19 refuse `recipient == m.payer` | **DONE in #28, 2026-08-28.** Not "1 error + 1 line" — **1 error and 2 guards**, because F17 had shipped the day before and F17's rule is that every permanent refusal `spend` makes is mirrored in `approveCosignFor`. `m.payer` is assigned once and has no mutator, so this is permanent, and omitting the mirror would have holed F17's invariant one day after it landed. Plus 4 tests (3 in `Bounds.t.sol`, 1 in `Cosign.t.sol`), 4 model refusals, and 2 more gate mutants — `approveCosignFor` 17 → 18 guards, both gates 21 → 22. **The undercount was mine and it is the second in a row**; see F17's row above for the first | — |
 | F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
 | F21 `ZeroRecipient`'s Arc citation | comment only | — |
-| ✅ F22 §2's missing self-payment boundary | **DONE 2026-08-26**, in this document, in the commit that found it | — |
+| ✅ F22 §2's missing self-payment boundary | **DONE 2026-08-26**, in this document, in the commit that found it. **A second half landed 2026-08-30** — the property that paragraph asserts, `recipient == m.spender` staying ALLOWED, was executable nowhere in Solidity, so 3 tests and 2 gate injections hold it now, one injection on `spend` and one on `approveCosignFor`. Cost: 3 tests, one new `INJECTIONS` entry, and not a single contract line, which is why the census rose while the contract stayed byte-identical | — |
 | ✅ F23 §2's missing ERC-8004 registry boundary | **DONE 2026-08-26**, in this document — §2's seventh boundary; 0 lines of Solidity, and none available anyway since the addresses are `immutable` | — |
 | F24 codeless-but-non-zero registry | a 4-line test, which decides whether there is anything else to fix | **what Solidity 0.8.28 does with a decode failure inside `try` — not settleable by reading source, and both answers are denials** |
 | ✅ F25 `MockUSDC` self-transfer log | **DONE in #28, 2026-08-28.** A 20-line header block plus a note at the `emit`, landing in the same change as F19 because F19 is the only reason the divergence matters. The mock's behaviour is deliberately left divergent rather than corrected: matching Arc here would make the mock look authoritative about a rule only a testnet transaction can confirm | — |
@@ -558,7 +604,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F35 `isCosignApproved` ignored the mandate's own death | **DONE in `af9df40`, 2026-08-29.** 1 conjunct + a factored `_isPermanentlyDead`, 2 Solidity tests. **Wrong on its first attempt** — it used `isLive`, which folded in `notBefore` and reported a live scheduled approval as dead; two tests caught it. No model surface, since the model has no pre-flight views | — |
 | ✅ F36 `isAllowedRecipient` disagreed with `spend` | **DONE in `af9df40`, 2026-08-29.** 3 guards, 2 Solidity tests, one of them shared with F29 so the two claims check each other. No model surface | — |
 | ✅ F37 the model minted mandates with a zero payer or spender | **DONE in `af9df40`, 2026-08-29.** 2 throws in `reference/policy.js`, asserted by the grant-time construction test. **Not named in that commit's message** — it was folded into the gate work; this document is where it gets named. Found by the JS mutation gate, which reported a survivor and turned out to be reporting a divergence | — |
-| §5 coverage gaps | **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece | fold into #14, which needs the gas number anyway |
+| §5 coverage gaps | **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list risks funds in
 the sense of letting a spend exceed a granted cap; the window search found no such case in 3.0M
@@ -1374,6 +1420,17 @@ found a hole. **A mutation gate's yield tracks how long the tests have had to ac
 how important the function is** — which also means a clean `spend` run is the weaker of the two
 results, not the stronger.
 
+[**2026-08-30: both counts in the two paragraphs above are stale, and one sentence has gone false
+outright.** "Injects the four guards the function must not have" is **five** for `approveCosignFor`
+as of 2026-08-30, F22's mirror having joined F17's four. The sentence that turned false is the
+parenthetical about `spend` — *"which works because `INJECTIONS.get(TARGET)` returns `None` and the
+injection block is skipped"*. That target has an `INJECTIONS` entry of its own now, holding one
+case, so the injection block runs for it rather than being skipped, and a bare `spend` run today
+builds 20 mutants rather than 19. The historical figures beside them stand exactly as written: 21
+mutants at a baseline of 178 green on 2026-08-28, and 17 for `spend` the same day.
+**Read this pair as the reason a dated note beats an edit** — those numbers are evidence of runs
+that happened, and a run's count does not improve when the gate later grows.]
+
 The rest of this finding is kept as written, so that the gap between what it predicted and what
 the fix cost stays visible.
 
@@ -1706,6 +1763,26 @@ unfixable by construction, and says plainly which claim about Remit is false ("t
 cannot steal") and which is true. The residue is `README.md`, which describes the flags
 without ranking them — that folds into F18's documentation pass rather than needing its own.
 
+[**2026-08-30: the §2 paragraph was the whole fix for four days, and a paragraph is not
+executable.** F22 was filed and closed as documentation, which was right — the defect was that §2
+never said `recipient == m.spender` is legal. What went unasked is whether anything *enforces* the
+legality the paragraph asserts, and the answer was nothing. `reference/policy.test.js` asserts it
+by name, while the 209-case Solidity suite had never named the delegate as a recipient at all,
+checked by grep over `test/` rather than assumed. **A trust boundary that only prose defends is one
+edit away from deletion by accident**, and the edit is small: F19's guard at
+`contracts/MandateManager.sol:983` reads `if (recipient == m.payer) revert SelfPayment();`, and
+changing `m.payer` to `m.spender` there inverts §2's most important sentence while leaving the
+error name, the line count and the shape of the file untouched. **One identifier is the whole
+product.** Three cases hold it now — `test_f22_theSpenderMayBePaidByItsOwnMandate` and
+`test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid` in `test/Bounds.t.sol`, plus
+`test_f22_approvingTheSpenderAsRecipient_isAccepted` in `test/Cosign.t.sol` — and the mutation gate
+carries that exact inversion as an injection on both `spend` and `approveCosignFor`, caught
+by three named cases on the first and by exactly one on the second. The status row above still
+reads DONE 2026-08-26 and stays that way, because the documentation fix did land that day; what is
+added is that the property became falsifiable four days later. **F19 and F22 are opposite claims
+wearing one error name**, so a mutation gate holding both directions is the point — removal proves
+`m.payer` is refused, and injection proves `m.spender` is not.]
+
 ---
 
 ### What a hostile recipient cannot do
@@ -1927,8 +2004,14 @@ by command rather than by argument: `reference/mutation-gate.js` and
 `throw refuse(` → `void refuse(`, `revert X(…);` → `{}` — and require a **named test** to fail
 for each; a mutant that will not compile or will not run is reported INCONCLUSIVE and never
 "caught", because a mutation gate that scored a broken mutant as a pass would manufacture
-exactly the confidence this section exists to withhold. Each also *injects* four guards the
+exactly the confidence this section exists to withhold. Each also *injects* guards the
 function is required NOT to have, since removal cannot reach a "must not refuse" claim.
+[**The figure here read "four guards" apiece when the sentence was written on 2026-08-28, and it is
+neither of the two live figures now** — `reference/mutation-gate.js` reached 7 injections with
+F27 and F28, while `reference/mutation-gate-sol.py` reached 6 on 2026-08-30, when F22's inversion
+was added to `spend` and to `approveCosignFor`. The count has moved out of the sentence and into
+this note, where going stale costs a reader nothing, which is the discipline F10 exists to argue
+for.]
 
 Both mutation gates found real holes on their first run, which is the only reason to trust
 either. In the model, `BAD_CONFIG` survived a green 68 because neutering the no-cosigner check
@@ -2777,6 +2860,20 @@ still be hiding there.
   on a function the gate has never addressed. The logs are `mutgate-sol-<target>.log`, plus
   `mutgate-only-approveCosignFor.log` and `mutgate-only-createMandate.log` for the two `--only`
   confirmations; they are on disk and they outrank this table.
+  **The census moved 89 → 91 later the same day, with the contract byte-identical throughout.**
+  F22's inversion was added to `INJECTIONS` for `spend`, which had none before, and as a fifth for
+  `approveCosignFor`, so the totals are **91 mutants, 85 removals plus 6 injections** and the
+  per-target figures become `approveCosignFor` 25 and `spend` 20. Nothing about the contract changed
+  to produce that, which makes it the first census move in this project's history no `git diff` can
+  explain: **a mutant count is a property of the pair (contract, operator set)**, so a mutation gate
+  learning a new property raises it exactly the way a new guard does. Both confirmations ran under a
+  new `--injections` flag at baseline **212 passed, 0 failed**, and each returned every queued mutant
+  caught by a named test — 1 of 1 for `spend`, 5 of 5 for `approveCosignFor`. Each log closes with
+  the gate's own `SCOPE: injections only` block naming the 19 and 20 removals the run declined to
+  build, so neither is quotable as a census and the gate says so without being asked. What licenses
+  skipping those removals is directional rather than convenient: adding a test can only enlarge the
+  killer set, so the 84-mutant sweep recorded above cannot have regressed under three new tests. A
+  bare run of either target is still the only thing that re-establishes a census, and #14 owns it.
 - **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
   coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
   `_checkCredential:1261` is the `catch` arm's
@@ -2816,7 +2913,10 @@ still be hiding there.
   deployment, `if (_usdc == address(0)) revert BadConfig();`, and it is the one refusal in the
   file that no "the gate is clean" claim has ever covered. `Creation.t.sol:673` does assert it, so
   this was a hole in the verification rather than in the contract. The opener now accepts both
-  spellings and the target runs, which is how the census above reaches 89 and not 88.
+  spellings and the target runs, which is how the census above reaches 89 and not 88. [**That step
+  belongs to the constructor alone and it still does.** The census reads 91 as of 2026-08-30 for a
+  separate reason, the two F22 injections, so read 88 → 89 as this bullet's own contribution rather
+  than as a running total.]
 - **The ValidationRegistry's pending state.** Arc documents a two-step flow, so a `requestHash`
   can be requested and unanswered — a state `MockValidationRegistry`'s binary `set` flag cannot
   express, and one the 2026-08-24 live probe did not reach, since those three hashes had never

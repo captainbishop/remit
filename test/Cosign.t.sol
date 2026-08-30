@@ -992,6 +992,36 @@ contract CosignTest is Base {
         payReverts(id, address(token), usd(50), unrecoverable(address(token)));
     }
 
+    /**
+     * F22's mirror, and the one case on this path that must be ACCEPTED rather than refused.
+     *
+     * The three tests above refuse a recipient; this one requires a recipient to work. A
+     * co-signer must be able to authorise a payment to the delegate itself, because a delegate
+     * being paid by its own mandate is the ordinary case — an agent buying its own compute, a
+     * contractor drawing their own invoice. F17's `_assertSameRefusal` parity cannot see this
+     * direction. If the spender were ever folded into the `SelfPayment` guard, both paths would
+     * refuse and the parity test would report them in agreement, because parity checks that the
+     * two paths answer alike and not that either answers correctly.
+     *
+     * The approval and the spend share one nonce deliberately. `approveCosignFor` binds the hash,
+     * which binds the nonce; only the spend consumes it. So the assertion that the money arrived
+     * is also the proof that the approval covered this exact request rather than some other.
+     */
+    function test_f22_approvingTheSpenderAsRecipient_isAccepted() public {
+        bytes32 id = grant(cosignParams()); // threshold 10, no allowlist
+        bytes32 nonce = nextNonce();
+
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, agent, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, hash), "the cosigner may approve a payment to the spender");
+
+        payWithNonce(id, agent, usd(50), nonce);
+        assertEq(token.balanceOf(agent), usd(50), "the co-signed self-payment actually paid");
+
+        // The payer on the same mandate, so the acceptance above is not the guard being absent.
+        approveReverts(id, payer, usd(50), nextNonce(), MandateManager.SelfPayment.selector);
+    }
+
     /// `perTxCap` is fixed at creation and `totalSpent` only grows, so both refusals are
     /// permanent. The second case is the interesting one: the amount fits the lifetime cap in
     /// the abstract and does not fit what is LEFT of it, and since headroom never widens, no

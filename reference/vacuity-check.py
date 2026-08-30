@@ -61,7 +61,7 @@ def suites(code: str):
     Forge reports "Ran N test suites" where a suite is a CONTRACT, not a file, and
     the two counts differ here: ArcParity.t.sol holds four one-case contracts over
     a shared abstract base, and WindowInvariant.t.sol holds a handler with none. So
-    eleven files, thirteen suites and 209 cases are all correct simultaneously.
+    eleven files, thirteen suites and 212 cases are all correct simultaneously.
     This is derived rather than typed because the hand-typed version of this number
     was the one figure in the last threat-model pass that came out wrong.
     """

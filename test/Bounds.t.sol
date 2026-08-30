@@ -301,6 +301,64 @@ contract BoundsTest is Base {
         assertEq(mm.getMandate(id).totalSpent, usd(10), "the refused self-payment must not have consumed the cap");
     }
 
+    // ------------------------------------------- F22: the opposite case, which must stay legal
+
+    /**
+     * The counterpart to the three tests above, and the reason the guard's *condition* is the
+     * claim rather than its name. F19 refuses paying the payer; paying the *spender* moves real
+     * money to the delegate and has to remain allowed, because a delegate being the recipient of
+     * its own mandate is most of what mandates are for. An agent buying its own compute, a
+     * contractor drawing their own invoice and a subscription service collecting its own fee are
+     * all this shape. Widening the F19 guard to cover the spender would leave every test above
+     * passing and break the product.
+     *
+     * No removal mutation reaches this. Deleting a guard makes the contract more permissive, and
+     * the failure here is the contract becoming STRICTER, so `reference/mutation-gate-sol.py`
+     * reaches it by INJECTING `if (recipient == m.spender) revert SelfPayment();` into `spend` and
+     * requiring a test to fail. Until this test existed, that injection survived.
+     *
+     * The balance assertions are the substance. An `expectRevert` that does not fire proves only
+     * that some path completed; these prove the money arrived at the delegate and left the payer.
+     */
+    function test_f22_theSpenderMayBePaidByItsOwnMandate() public {
+        bytes32 id = grant(simpleParams());
+        uint256 payerBefore = token.balanceOf(payer);
+        bytes32 nonce = nextNonce();
+
+        bytes32 expectedHash = mm.spendHash(id, agent, usd(40), REF, nonce);
+        vm.expectEmit(true, true, true, true, address(mm));
+        emit MandateManager.Spend(id, agent, agent, usd(40), REF, nonce, expectedHash, usd(40));
+
+        // The prank is inline rather than through `payWithNonce` so that nothing sits between
+        // `expectEmit` and the call it describes, which is the shape the happy-path test uses.
+        vm.prank(agent);
+        bytes32 hash = mm.spend(id, agent, usd(40), REF, nonce);
+
+        assertEq(hash, expectedHash, "the returned hash must match the view");
+        assertEq(token.balanceOf(agent), usd(40), "the spender was actually paid");
+        assertEq(token.balanceOf(payer), payerBefore - usd(40), "the payer was actually debited");
+        assertEq(mm.getMandate(id).totalSpent, usd(40), "and it consumed the cap like any other spend");
+        assertTrue(mm.isAllowedRecipient(id, agent), "F36: the view has to agree with the spend path");
+
+        // Both directions on one mandate, so the pair cannot pass by the guard being absent.
+        payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
+    }
+
+    /// `F_ALLOWLIST` is the mechanism that stops a delegate paying itself, and the only one. A
+    /// payer who does not want that outcome writes a list; a payer who writes no list has bounded
+    /// an amount and not a set of counterparties. Both halves matter: an unlisted spender is
+    /// refused for the ordinary allowlist reason, and a listed spender is payable like any other
+    /// member — so the refusal comes from the list's contents rather than from the spender's role.
+    function test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid() public {
+        bytes32 id = grant(withAllowlist(simpleParams(), vendor));
+        payReverts(id, agent, usd(10), MandateManager.RecipientNotAllowed.selector);
+        assertFalse(mm.isAllowedRecipient(id, agent), "the view agrees, and for the same reason");
+
+        bytes32 listed = grant(withAllowlist(simpleParams(), agent));
+        payTo(listed, agent, usd(10));
+        assertEq(token.balanceOf(agent), usd(10), "an allowlisted spender is payable like anyone else");
+    }
+
     // ---------------------------------------------------------- spender
 
     /// A mandate names exactly one spender. This is what makes the grant a delegation

@@ -5,6 +5,7 @@
 #
 #     python3 reference/mutation-gate-sol.py [functionName]              # default: approveCosignFor
 #     python3 reference/mutation-gate-sol.py createMandate --only 873    # one guard, named by line
+#     python3 reference/mutation-gate-sol.py spend --injections          # the must-not-refuse half
 #
 # WHY THIS EXISTS, and why it is a second file rather than a flag on the first.
 #
@@ -54,11 +55,12 @@
 # `contracts/MandateManager.sol` before and after and refuses to exit 0 if the two differ.
 #
 # COST. Ten runs on 2026-08-30 put this at 18-21s per mutant including its recompile, plus one
-# baseline of about the same per target, so the contract's whole census of 89 mutants is roughly
-# half an hour. An earlier note here guessed ~57s each from the compile and suite times measured
-# separately, which overstated it threefold — forge caches almost all of that between mutants. The
-# whole suite runs against every mutant, with no --match-path shortcut, so "caught" means some
-# named test in the repo noticed rather than a chosen one.
+# baseline of about the same per target, so the contract's whole census — 85 removals over 11
+# targets plus 6 injections, 91 mutants — is roughly half an hour. An earlier note here guessed
+# ~57s each from the compile and suite times measured separately, which overstated it threefold —
+# forge caches almost all of that between mutants. The whole suite runs against every mutant, with
+# no --match-path shortcut, so "caught" means some named test in the repo noticed rather than a
+# chosen one.
 
 
 import hashlib
@@ -95,10 +97,17 @@ REL_SRC = Path("contracts") / "MandateManager.sol"
 #
 # It narrows the run and changes nothing else. The baseline still has to be green, the whole
 # suite still runs against the mutant, and a line carrying no mutable `revert` is an error
-# rather than a run of zero mutants reporting success. Injections have no line number to name,
-# so `--only` skips them and reports that it did; run the target bare to reach those.
+# rather than a run of zero mutants reporting success. Injections have no line number to name, so
+# `--only` skips them and reports that it did.
+#
+# `--injections` is the same economy for the other direction, and it was added on 2026-08-30 for
+# the same reason: F22's new injection needed confirming, and reaching it bare meant 20 mutants of
+# `spend` and 25 of `approveCosignFor` for two questions whose answer is one mutant each. It queues
+# the target's injections and no removals. Neither flag can stand in for a full run — both print
+# their partial scope on the last line, because the census claims in THREAT-MODEL.md rest on bare
+# runs and a partial one must not be quotable as though it were.
 def parse_args(argv):
-    target, only = None, None
+    target, only, inj_only = None, None, False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -109,25 +118,29 @@ def parse_args(argv):
             only = argv[i]
         elif a.startswith("--only="):
             only = a.split("=", 1)[1]
+        elif a == "--injections":
+            inj_only = True
         elif a.startswith("-"):
-            die(f"unknown option {a!r}. The only option is --only LINE[,LINE...]")
+            die(f"unknown option {a!r}. The options are --only LINE[,LINE...] and --injections")
         elif target is None:
             target = a
         else:
             die(f"unexpected argument {a!r}. One target function per run.")
         i += 1
+    if only is not None and inj_only:
+        die("--only names removals by line and --injections excludes removals; pick one")
     if only is None:
-        return target or "approveCosignFor", None
+        return target or "approveCosignFor", None, inj_only
     try:
         wanted = {int(x) for x in only.replace(",", " ").split()}
     except ValueError:
         die(f"--only {only!r} is not a list of line numbers")
     if not wanted:
         die("--only was given no line numbers")
-    return target or "approveCosignFor", wanted
+    return target or "approveCosignFor", wanted, inj_only
 
 
-TARGET, ONLY = parse_args(sys.argv[1:])
+TARGET, ONLY, INJ_ONLY = parse_args(sys.argv[1:])
 
 # The project's established seed. Pinned for the baseline AND every mutant, so a failure is
 # attributable to the mutation rather than to a fresh fuzz corpus. See foundry.toml on what
@@ -141,6 +154,21 @@ SEED = "5042002"
 # chosen so that `nowTs`, `m`, `mandateId`, `amount` and `recipient` are all already in scope.
 # `amount96` is NOT — it is declared later — so these use `amount`.
 INJECTIONS = {
+    "spend": {
+        "anchor": "if (m.revoked) revert Revoked();",
+        "cases": [
+            (
+                # F22, and the reason `SelfPayment`'s condition is the claim rather than its name.
+                # F19 refuses `recipient == m.payer` and must; widening it to the spender would
+                # forbid a delegate from being paid by its own mandate, which is most of what a
+                # mandate is for. Every F19 test still passes under this mutant, so nothing in the
+                # F19 block can be the thing that catches it — `test/Bounds.t.sol`'s
+                # `test_f22_theSpenderMayBePaidByItsOwnMandate` is.
+                "F22: the spender refused as its own recipient",
+                "        if (recipient == m.spender) revert SelfPayment();",
+            ),
+        ],
+    },
     "approveCosignFor": {
         "anchor": "if (m.revoked) revert Revoked();",
         "cases": [
@@ -167,6 +195,13 @@ INJECTIONS = {
                 # this path can produce it, which makes the mutant unmistakable in the output.
                 "the maximal wrong design: approve only what could be spent RIGHT NOW",
                 "        if (policyHeadroom(mandateId) < amount) revert Unbounded();",
+            ),
+            (
+                # The same mutant as `spend`'s, on the mirror. F17's parity test compares the two
+                # paths' refusals and would report them in agreement if both grew the guard, so
+                # the mirror needs its own case rather than inheriting the one above.
+                "F22: the spender refused as its own recipient, on the approval path",
+                "        if (recipient == m.spender) revert SelfPayment();",
             ),
         ],
     },
@@ -338,7 +373,7 @@ for i in range(start, end + 1):
     if "revert " not in line or not is_code(line) or not REVERT.search(line):
         continue
     mutable.append(i + 1)
-    if ONLY is not None and i + 1 not in ONLY:
+    if INJ_ONLY or (ONLY is not None and i + 1 not in ONLY):
         continue
     err = re.search(r"revert\s+(\w+)", line).group(1)
     mutated = list(original)
@@ -354,6 +389,12 @@ if ONLY is not None:
         )
 
 inj = INJECTIONS.get(TARGET)
+if INJ_ONLY and not inj:
+    die(
+        f"--injections was asked for {TARGET}, which has no INJECTIONS entry. A target with no "
+        f"must-not-refuse property to state is not the same as one that passes; run it bare for "
+        f"its {len(mutable)} removal(s), or write the entry first."
+    )
 if inj and ONLY is not None:
     print(f"  --only is set, so the {len(inj['cases'])} injection(s) for {TARGET} are skipped")
 elif inj:
@@ -361,6 +402,8 @@ elif inj:
     if len(anchor) != 1:
         die(f"anchor {inj['anchor']!r} matched {len(anchor)} code lines in {TARGET}; need exactly 1")
     at = anchor[0]
+    if INJ_ONLY:
+        print(f"  --injections is set, so the {len(mutable)} removal(s) for {TARGET} are skipped")
     for label, code in inj["cases"]:
         mutants.append(("injected", label, original[: at + 1] + code.split("\n") + original[at + 1 :], None))
 
@@ -458,7 +501,10 @@ for kind, label, verdict, r, eq, at, note in results:
 
 stale = []
 for k in sorted(set(EQUIVALENT) - claimed):
-    if k[0] != TARGET or ONLY is not None:
+    # A narrowed run reaches only some of the target's mutated lines, so an entry it never touched
+    # is unexamined rather than stale. Reporting it as stale would teach the reader to ignore the
+    # warning on the bare runs, where it means something.
+    if k[0] != TARGET or ONLY is not None or INJ_ONLY:
         continue
     stale.append(k)
     print(f"\n  STALE ENTRY  EQUIVALENT names {k[1]!r} in {TARGET}, and no mutant this run carried")
@@ -495,6 +541,14 @@ if not bad:
         # at the last line would otherwise take a bookkeeping problem for a clean run.
         print(f"     {len(stale)} EQUIVALENT entr(y/ies) above no longer match any mutant. Verification")
         print("     is unaffected and the table needs an edit.")
+    # The scope of the claim, on the same screen as the claim. A narrowed run says nothing about the
+    # mutants it did not build, and this line is what stops its log being quoted as a clean target.
+    if INJ_ONLY:
+        print(f"     SCOPE: injections only. {TARGET}'s {len(mutable)} removal(s) were not built,")
+        print("     so this run is not a census of the target. Run it bare for that.")
+    elif ONLY is not None:
+        print(f"     SCOPE: --only. {len(mutable) - len(mutants)} other removal(s) and every injection")
+        print(f"     for {TARGET} were not built, so this run is not a census of the target.")
     sys.exit(0)
 print(f"{len(bad)} mutant(s) not caught. Each is a HYPOTHESIS: probe it before believing it,")
 print("then either fix the mutant or add the test it is missing.")
