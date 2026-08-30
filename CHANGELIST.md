@@ -325,6 +325,27 @@ event signature and therefore its topic0, while the actual defect was the illegi
 panic and not the range. The declined option and its reasoning are written into the contract so
 an auditor can see it was considered rather than missed.
 
+**CORRECTED on 2026-08-30 (F3): the comparison in the paragraph above is backwards, and the
+counter is now guarded too.** `spendCount` needing 4.29e9 transactions to wrap is a real
+difference in reachability, but not in the direction that sentence implies — it makes the counter
+the *nearer* of the two ceilings by a factor of about 300. Reaching 2^96 base units in fewer than
+2^32 spends needs an average spend near 2^64, about 18.4 trillion USDC, against a circulating USDC
+supply near 6.1e10. Any history a real balance can fund therefore arrives at the counter first, so
+the ceiling this entry called astronomical is the one that binds second, and the one it waved past
+is the one a long-lived mandate would actually meet. The error was in the reasoning rather than in
+the arithmetic: reachability was judged by comparing each ceiling to its own type's width instead
+of comparing the two against a single history.
+
+v2 gives the counter the treatment `totalSpent` got. `spend` refuses the increment at
+`type(uint32).max` with a named `SpendCountCeiling()` in place of a Panic 0x11, and
+`approveCosignFor` refuses an approval written against a mandate already there — the strongest
+case F17's block has, because a mandate at that ceiling can consume no spend of any size ever
+again, so the approval is unconsumable for its whole life rather than at the amount it names.
+`reference/policy.js` mirrors both, for the reason its `MAX_AMOUNT` comment gives: a BigInt has no
+width, and a model that permits what the contract refuses is not a specification of it. The
+`uint120` widening stays declined on the reasoning above, which the correction leaves standing —
+the defect was the illegibility of the panic, not the range.
+
 **The test's own prediction was also wrong, and it matters more than the fix.** `Bounds.t.sol`
 said: *"If this test starts failing with `OverTotalCap` instead of a panic, someone moved the
 addition below the flag check."* It does not, and could not. That test grants
@@ -664,6 +685,47 @@ common path.
 comparison; `withdrawCosign` still checks only `msg.sender != m.cosigner`. So both properties
 above survive the rename, F11 in #24 is still the open item, and the two live receipts
 (`0x6515918e…`, `0x7e10b4bd…`) remain the evidence for behaviour v2 has not changed.
+
+**F11 is DONE in v2 as of 2026-08-30, and it closes both properties above plus one this file had
+ruled out.** `withdrawCosign` now checks the two things its sibling checks, in the same order:
+`UnknownMandate()` for an absent mandate and `BadConfig()` for one without `F_COSIGN`, where both
+used to fall through to `NotCosigner()`. The live receipt recorded above is what that used to look
+like from outside, and it stays as the v1 record. Nothing was exploitable in either case, because
+`createMandate` enforces a biconditional between `F_COSIGN` and the cosigner address, so
+`m.cosigner` is the zero address in both and no transaction can come from there; the call already
+reverted and merely named the wrong cause. The event is the third change: `CosignWithdrawn` is now
+conditional on something having actually been removed, so the "withdrawal of authority that was
+never granted" this file describes no longer appears in the log. The delete itself stays
+unconditional and the function still cannot revert past its three checks, because withdrawal only
+ever *removes* authority — an atomic batch clearing several approvals must not lose the live ones
+to a stale entry beside it, which is why a hash matching nothing is answered rather than refused.
+
+**The redundant `MandateRevoked` is fixed too, which reverses the decision recorded above.** The
+paragraph above ruled a guard against the duplicate off this list, on the grounds that it would
+cost gas on the common path to prevent a harmless duplicate. Two things were wrong with it. The
+duplicate is not harmless to an indexer counting revocations, which can see any number of them for
+one mandate, and either holder of the authority can add more for the price of the gas — the
+instruction to "tolerate duplicates" asks integrators to absorb a defect rather than fixing it.
+The other error is that the fix needs no guard on the call at all: the condition goes on the
+*event*, so `revoke` stays non-reverting and idempotent, which
+`Bounds.t.sol:test_revoke_isIdempotent` had pinned on purpose and still pins. Refusing the repeat
+with a `Revoked()` error was the other candidate and was rejected for the same reason
+`withdrawCosign` answers rather than refuses: revocation is the kill switch, and a batch revoking
+several mandates must not lose the whole batch to one already-dead entry. The comparison reads the
+slot the write targets, so the cost is a comparison and a branch rather than a load; the number is
+owed to the next gas report, which this pass makes stale for `spend` and `approveCosignFor`
+regardless.
+
+**Two functions changed signature in v2, and this is the list the contract points at.** `spendHash`
+lost its `spender_` parameter under F15, described above. `withdrawCosign(bytes32,bytes32)` became
+`withdrawCosign(bytes32,bytes32,bytes32)` under F30, because the nonce reservation is keyed by
+nonce and a hash cannot be turned back into one: without the third argument a withdrawal would
+clear the approval and leave the nonce reserved for a hash that no longer exists, making that nonce
+unspendable for the life of the mandate. A nonce that does not match the hash leaves the
+reservation alone rather than freeing one that belongs to a different live approval, so the call is
+simply repeated with the right value. Both are breaking changes against the deployed v1 ABI, and
+the v1 selector for the two-argument form is the one recorded in `DESIGN.md` beside the live
+receipts, which describes v1 and stays as written.
 
 The same run re-measured `approveCosign` and the result retires a question this
 file used to track. A second live approval cost **53,102** against the first one's

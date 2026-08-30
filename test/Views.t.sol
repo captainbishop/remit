@@ -277,6 +277,56 @@ contract ViewsTest is Base {
         assertLt(widest, 2 ** 99);
     }
 
+    /**
+     * F9. THE TWO SIBLING VIEWS HAVE TO ANSWER THE SAME QUESTION THE SAME WAY.
+     *
+     * NEW IN v2. `spendableAcross` clamps every term at `type(uint96).max`, because that is the
+     * largest amount `spend` accepts. `spendable` did not, so on one mandate the two parted company:
+     * the joint view returned 2^96 - 1 and the single view returned the payer's whole balance. The
+     * condition needs a balance and an allowance both above 2^96, which no real USDC position
+     * reaches and `MockUSDC` reaches in one line — which is why this suite could see it and the
+     * testnet run could not.
+     *
+     * It matters because `spendable` is the number an agent reads before building a transaction.
+     * Over-reporting it loosened no policy, since `spend` refused the amount anyway, but it turned
+     * the view's one job into a source of transactions that were always going to fail.
+     */
+    function test_spendable_agreesWithSpendableAcross_forASingleMandate() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.expiresAt = uint40(block.timestamp + 1 days);
+        p.flags = F_EXPIRY;
+        bytes32 id = grant(p);
+
+        bytes32[] memory one = new bytes32[](1);
+        one[0] = id;
+
+        // The input condition, asserted rather than assumed: the policy is unbounded, so only the
+        // clamp and the payer's position can decide either answer.
+        assertEq(mm.policyHeadroom(id), type(uint256).max, "the mandate must be bounded only by its expiry");
+
+        // Below the clamp the two agreed before the fix as well. Asserting that here is what shows
+        // the fix corrected one answer rather than replacing both: Base funds the payer well under
+        // 2^96 and approves the maximum, so the balance decides, and it decided before too.
+        assertEq(mm.spendable(id), token.balanceOf(payer), "below 2^96 the balance decides");
+        assertEq(mm.spendableAcross(one), mm.spendable(id), "and both views say so");
+
+        // Past the clamp is where they used to disagree.
+        token.mint(payer, type(uint128).max);
+        assertEq(mm.spendable(id), uint256(type(uint96).max), "the single view clamps");
+        assertEq(mm.spendableAcross(one), mm.spendable(id), "and the joint view agrees with it");
+
+        // The clamp is what answers, not either intersection: the balance and the allowance are both
+        // strictly larger than the number the views return, so neither is the binding term.
+        assertGt(token.balanceOf(payer), mm.spendable(id), "the balance is not what binds");
+        assertGt(token.allowance(payer, address(mm)), mm.spendable(id), "nor is the allowance");
+
+        // And the number is reachable, which is what makes it the right answer rather than only the
+        // consistent one. `spend` refuses one base unit more and accepts exactly this much.
+        payReverts(id, uint256(type(uint96).max) + 1, MandateManager.AmountTooLarge.selector);
+        pay(id, mm.spendable(id));
+        assertEq(uint256(mm.getMandate(id).totalSpent), uint256(type(uint96).max), "the whole clamp moved");
+    }
+
     /// There is no joint ceiling across two payers: each has a separate allowance and
     /// a separate balance, so no single clamp applies and the sum is meaningless.
     /// Refused in both orders — the payer is read from the first element, and taking

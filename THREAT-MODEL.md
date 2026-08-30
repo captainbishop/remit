@@ -358,6 +358,45 @@ what it does not, and which areas remain unexamined.
 > declined to build. **A narrowed log is not a census, and the gate now refuses to let one look like
 > one.** The census stands at **91 — 85 removals plus 6 injections**, one of the six on `spend` and
 > five on `approveCosignFor`, against the 89 this banner recorded earlier the same day.
+>
+> **2026-08-30, #24: four findings closed, and two of their own fix sketches were falsified on the
+> way.** F3, F9, F10 and F11 all landed, taking the fixed-in-code bucket from eighteen to
+> **twenty-two of thirty-seven**. `contracts/MandateManager.sol` is **2,138 lines and 38 errors**,
+> from 2,043 and 37 at `db1c08c`, both counted from the file. The suite is **219 cases** — 216 named
+> `test*` plus 3 named `invariant_`, which `reference/vacuity-check.py` reports directly and whose
+> per-file distribution sums to the figure the run log prints. The model is **94 tests**, all
+> passing, so 212 and 92 are history, as 209, 207, 182, 178 and 177 were before them.
+>
+> **Both mutation censuses moved, and one of the moves has no fix behind it.** The Solidity census is
+> **95 — 89 removals plus 6 injections** over eleven targets, from 91, and the four new sites are
+> F3's two `SpendCountCeiling` guards and F11's `UnknownMandate` and `BadConfig` in
+> `withdrawCosign`. The JS census is **82**, at 27 for `approveCosignFor`, 35 for `evaluate` and 20
+> for `createMandate`, up from 78, and only two of those four new mutants came from F3. The other two
+> came from a header in `reference/mutation-gate.js` that said 18 for `createMandate` while the file
+> held 20: the `throw new Error(` spelling went 28 → 35 in `af9df40` and the target had not been run
+> since, so a census sat restated rather than derived for a day. The run is clean at 20 of 20, so no
+> test was ever missing, and the header now records the correction against itself.
+>
+> **Four targets were re-run, and the four were chosen by a comparison rather than by a reading.** A
+> code-only diff of every gate target's body against `db1c08c` named `spend`, `approveCosignFor`,
+> `withdrawCosign` and `revoke`. `revoke` is the one a quick reading would have skipped: its two
+> refusals are untouched and its behaviour is unchanged, and its body is still not the body the
+> earlier run mutated. All four ran bare rather than narrowed, so each re-establishes its own
+> census — 21, 26, 3 and 2, for **52 mutants, every one caught by a named test at a baseline of 219
+> green**.
+>
+> **Two of the four fixes are invisible to both censuses.** F9's clamp and F11's two conditional
+> emits contain no `revert`, and removal mutation rewrites a `revert` and nothing else, so no mutant
+> can reach any of the three. For those, a test read line by line is the whole of the evidence, which
+> is the blind spot §5 already records for eleven view definitions that carry no refusal at all.
+>
+> **The two falsifications, and each was caught by something that already existed.** F11's sketch
+> said `revoke` should check `m.revoked`; a guard there would have turned `test_revoke_isIdempotent`
+> red, because that case asserts the second revoke succeeds on purpose, so the condition went on the
+> event and `revoke` stayed idempotent. F10's sketch said "four → five"; F3 added a sixth denier to
+> that same list inside the same pass, so the cardinal was removed and the deniers named instead.
+> **A fix in one finding can falsify a premise in another with nothing failing**, which F3 recorded
+> once already, and the two mutation gates still do not cover it.
 
 ## Why this document exists
 
@@ -537,13 +576,14 @@ category.
 **Thirty-seven findings, counted from the headings below rather than asserted** — `grep -c
 "^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 37, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **eighteen are
-already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; and eleven in `af9df40` on
-2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`); **two
+long the search ran. They partition exactly, which is more useful than the total: **twenty-two are
+already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; eleven in `af9df40` on
+2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; and F3,
+F9, F10, F11 in #24 on 2026-08-30); **two
 were fixed in this document as it was being written** (F22 and F23, both missing trust boundaries —
-§2 gained its sixth and seventh in one day); **four have a fix that changes v2's behaviour** (F3,
-F9, F11, F13); **seven
-are comment rewrites** that change nothing any code does (F4, F7, F8, F10, F14, F21 in the
+§2 gained its sixth and seventh in one day); **one has a fix that changes v2's behaviour** (F13);
+**six
+are comment rewrites** that change nothing any code does (F4, F7, F8, F14, F21 in the
 contract, F26 in the mocks — and the last is in `test/`, so it is free of the frozen-metadata
 constraint that governs `contracts/`); **three are documentation** (F2, F6, F18); **one needs a
 decision before it can be sized** (F20, whether the contract gains a sixth state-changing
@@ -551,7 +591,7 @@ function, and its first that mutates a mandate after creation); **one
 needs a four-line test before it can be sized at all**,
 because one of its two possible answers cannot be settled by reading source (F24); and **one
 needs nothing** (F12).
-18 + 2 + 4 + 7 + 3 + 1 + 1 + 1 = 37, which is the arithmetic and not a second assertion of the
+22 + 2 + 1 + 6 + 3 + 1 + 1 + 1 = 37, which is the arithmetic and not a second assertion of the
 same number.
 
 **A whole bucket emptied on 2026-08-29, by this document's own rule.** The first bucket is a status
@@ -564,6 +604,25 @@ the same day, which is why the fixed bucket doubled while nothing else grew. F27
 2026-08-28 from a different direction entirely — neither came from reading the contract, which is
 what §6 now has to account for, along with F37, which came from the same place a day later.
 
+**Four more findings landed on 2026-08-30, and two of the eight buckets shrank to make room.** #24
+took F3, F9, F10 and F11 — the four the table below priced at one error, five lines and a comment
+between them. F3, F9 and F11 came out of "changes v2's behaviour", leaving F13 alone in it, and F10
+came out of "comment rewrites", leaving six. The fixed bucket is twenty-two of thirty-seven now, so
+a majority of the findings in this document are closed, and the remainder is one behavioural change,
+six comments, three documents, one decision, one test and one finding that needs nothing.
+
+**Two of the four cost more than the rows that priced them, both for one reason.** A fix sketch is
+written against the guard the finding names, and this contract has mirrors: F3's guard needed F17's
+twin in `approveCosignFor`, and F11's three lines became two guards, three reads and two conditional
+emits across two functions. That is the third and fourth time a row in this table has undersized a
+mirror, after F17 and F19, and the pattern is old enough now that a sketch naming one guard should be
+read as naming a pair until `spend` and `approveCosignFor` are checked against each other.
+
+**F13 is the only member of its bucket now, and this pass did not settle whether it belongs there.**
+F32, F33 and F34 all validate ERC-8004 gate data at grant time, which is F13's stated remedy in a
+narrower form. Recorded as a question rather than answered, because answering it means reading F13
+against three fixes that postdate it.
+
 **Two decisions are open and only one of them is a bucket, so counting buckets undercounts them.**
 F20 cannot be sized until the decision is made. F34's decision is attached to a finding already
 fixed: `minResponse` is bounded at `> 100` and could instead be pinned at `!= 100`, and the choice
@@ -573,10 +632,10 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | :--- | :--- | :--- |
 | ✅ F1 `expiresAt` grant-time refusal | **DONE in #22.** 1 line + 1 test; no model mirror, and F1 says why | — |
 | F2 `DESIGN.md` worked example | numbers derived, needs a doc sweep — and it grew a second defect, see F2 | — |
-| F3 `SpendCountCeiling` guard | 1 error + 1 line | or leave it and fix the changelist text |
-| F9 `spendable` clamp | 1 line | — |
-| F10 four → five | comment only | — |
-| F11 `withdrawCosign` two guards, `revoke` idempotence | 3 lines | — |
+| ✅ F3 `SpendCountCeiling` guard | **DONE in #24, 2026-08-30.** Not "1 error + 1 line" — **1 error and 2 guards**, under F17's rule that a permanent refusal in `spend` is mirrored in `approveCosignFor`. Plus 2 Solidity tests, 2 model refusals, and 2 gate mutants, one per path, each caught by a named test. **The third mirror this table undercounted**, after F17 and F19 | **both branches were taken.** The guard shipped *and* `CHANGELIST.md`'s comparison was corrected, so the row's "or" was answered with "and" |
+| ✅ F9 `spendable` clamp | **DONE in #24, 2026-08-30.** 1 line, as estimated. No mutant can reach a clamp, so a single Solidity test carries the whole proof, and it pins the clamped value rather than checking that the two views agree | — |
+| ✅ F10 four → five | **DONE in #24, 2026-08-30.** Comment only, as estimated, but **not** "four → five": F3 added a sixth denier to the same list the same day, so the cardinal was removed and the deniers named | — |
+| ✅ F11 `withdrawCosign` two guards, `revoke` idempotence | **DONE in #24, 2026-08-30.** Not 3 lines — 2 guards, 3 local reads and 2 conditional emits across two functions. **The `revoke` half of this row was wrong**: a guard there would have failed `test_revoke_isIdempotent`, which asserts the non-reverting behaviour on purpose, so the condition went on the event instead. 5 gate mutants re-run over the two functions, all caught, plus 2 tests for the emits, which no mutant can reach | — |
 | F4, F7, F8, F14 wrong justifications | comment rewrites | — |
 | ✅ F5 `Unbounded()` scope | **DONE in #22.** 1 line, +1 model test, and a horizon threaded through both suites | **DECIDED 2026-08-26: refuse** |
 | F6 threshold splitting | doc + one composition test | **DECIDED: document, recommend pairing with a window** |
@@ -754,7 +813,7 @@ what remains for #26 is #11's reachability guard.
 
 ### F3 — The `uint32 spendCount` panic shadows the named `TotalSpentCeiling` error that #10 added
 
-**Severity: low as a fault, medium as a correction to a documented rationale · Status: OPEN · Confidence: certain on the arithmetic.**
+**Severity: low as a fault, medium as a correction to a documented rationale · Status: FIXED 2026-08-30 (#24) · Confidence: certain on the arithmetic.**
 
 `m.spendCount += 1` at `v2:697` is the only checked arithmetic site in the contract with
 no guard in front of it, and `spendCount` is `uint32`. At 2^32 spends it raises
@@ -812,6 +871,43 @@ The cheap branch is therefore the safe one for once: a named error and a guard,
 struct, no slot count, no event and no gas path. The honest minimum, independent of
 whether the guard is added, is to correct `CHANGELIST.md`'s comparison, because the
 current text argues the opposite of the arithmetic.
+
+[**#24, fixed 2026-08-30 — the cheap branch shipped, and it shipped in two places.** The guard is
+`if (m.spendCount == type(uint32).max) revert SpendCountCeiling();`, with a new
+`error SpendCountCeiling();` beside the other thirty-seven. This finding sized that at one error and
+one line, and it went in at one error and two guards, because F17's rule is that a refusal reachable
+through `spend` is reachable through `approveCosignFor` in the same form, so the approval path
+carries a mirror. Sizing a fix by counting the guard the finding names is how a mirror gets dropped,
+and F17's `_assertSameRefusal` harness is what would have failed. The reference model carries the
+pair too, as `Denial.SPEND_COUNT_CEILING` in `evaluate` and a refusal in its own
+`approveCosignFor`, since F28 is the finding that exists for a divergence between the model and the
+contract.
+
+**Both new guards were mutated and both were caught**, in whole-target runs at a baseline of 219
+green:
+
+```
+mutation gate: spend — 21 mutants, baseline 219 green
+  caught       removed  SpendCountCeiling (line 1093)
+               by: test_spendCount_atTheUint32Ceiling_deniesWithANameNotAPanic, test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused   [2 failing]
+
+mutation gate: approveCosignFor — 26 mutants, baseline 219 green
+  caught       removed  SpendCountCeiling (line 1565)
+               by: test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused   [1 failing]
+```
+
+The model's pair was killed in the JS mutation gate at 35 of 35 for `evaluate` and 27 of 27 for
+`approveCosignFor`, by *the uint32 spend counter denies by name rather than wrapping, whatever the
+amount* and *cosign (F3): an approval on a mandate at the spend-count ceiling is refused*. **The
+Solidity mirror has exactly one killer** — delete
+`test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused` and that mutant survives a green
+suite, which is the shape F22's single killer had one finding earlier.
+
+**What the guard leaves standing.** The panic is gone from the counter, and the counter was the only
+place it lived. The 300× ratio between the two ceilings stands as written, because the guard changes
+which error names the refusal rather than which ceiling a real balance reaches first.
+`CHANGELIST.md`'s comparison was corrected in the same pass, so both halves of the honest minimum
+above were met rather than one.]
 
 ---
 
@@ -1002,7 +1098,7 @@ second wide are the ones nothing exercises.
 
 ### F9 — `spendable` omits the `uint96` clamp that `spendableAcross` spends fifteen lines justifying
 
-**Severity: note (unreachable with real USDC) · Status: OPEN · Confidence: certain.**
+**Severity: note (unreachable with real USDC) · Status: FIXED 2026-08-30 (#24) · Confidence: certain.**
 
 `spendableAcross` hoists `maxSingleSpend = type(uint96).max` and clamps every term, because
 `policyHeadroom` returns `type(uint256).max` for a mandate bounded only by an expiry while
@@ -1016,11 +1112,33 @@ it cannot arise with real USDC. It **is** reachable with `MockUSDC`, which means
 suite can observe two sibling views disagreeing about the same mandate. One line makes the
 pair consistent.
 
+[**#24, fixed 2026-08-30 — one line, and it sits outside the mutation gate's reach.** `spendable`
+now clamps its policy limit before folding in the allowance and the balance:
+`if (limit > type(uint96).max) limit = type(uint96).max;`. The sizing in the row above was right
+for once, at one line and nothing else.
+
+**No mutant can reach a clamp.** The Solidity mutation gate rewrites one `revert X(...);` to `{}`,
+an operator that finds unasserted refusals and nothing else. A clamp refuses nothing, and
+`spendable` carries no `revert` at all: it is one of eleven view definitions in that position,
+recorded in §5 as the largest known hole in the operator set.
+
+**A test is therefore the whole of the available evidence, so it was read rather than counted.**
+`test/Views.t.sol`'s `test_spendable_agreesWithSpendableAcross_forASingleMandate` asserts
+`policyHeadroom` at `type(uint256).max`, shows the balance deciding below 2^96 with both views in
+agreement, then mints `type(uint128).max` and asserts `spendable` returns exactly
+`type(uint96).max`. A case that asserted only that the two views agree would pass against an
+unclamped `spendable` for every balance a fixture normally sets up, which is why the clamped value
+is pinned rather than compared.
+
+**The pair is consistent now, and the disagreement it removed was visible only under `MockUSDC`.**
+Real USDC cannot mint past 2^96, so the fix changes a number no payer will ever read and closes the
+one place the suite could have watched two siblings contradict each other.]
+
 ---
 
 ### F10 — `policyHeadroom`'s doc comment counts four blind spots. There are five.
 
-**Severity: note · Status: OPEN · Confidence: certain.**
+**Severity: note · Status: FIXED 2026-08-30 (#24) · Confidence: certain.**
 
 The comment opens *"Four things can still deny a spend this function calls affordable"* and
 enumerates the allowlist, the cosign threshold, both ERC-8004 checks and the nonce.
@@ -1043,11 +1161,30 @@ denied with `CosignExpired` — which does not move F10's count, because it is a
 the same listed item to deny, but does mean "needs an `approveCosignFor` first" is no longer the
 whole of what the co-signature requirement can do to a spend this function called affordable.]
 
+[**#24, fixed 2026-08-30 — the cardinal was removed rather than incremented, and the reason arrived
+inside the same pass.** The sketch above says "four → five". Incrementing would have been stale
+before the pass ended: F3's `SpendCountCeiling` landed the same day and added a sixth denier to the
+very list this finding counts, so a comment reading "Five" would have aged between two edits to one
+file. The replacement names the deniers, counts none of them, and says why the count went — a
+cardinal in a comment goes stale in silence, and this one already had, reading "Four" while naming
+five and surviving an edit to the line beside it.
+
+**Both unconditional counter ceilings are named now**, `TotalSpentCeiling` and `SpendCountCeiling`,
+alongside the allowlist, the two ERC-8004 checks, the nonce, and the co-signature requirement in
+both of its failure modes: absent, and present but lapsed as `CosignExpired`. That second pair is
+what #28 recorded above as one listed item denying two ways, a shape a cardinal cannot carry and a
+list can.
+
+**Nothing any code does changed.** The comment is prose in a view's doc block, so the mutation gate
+has no opinion about it and `forge fmt` leaves it alone, which makes a careful reader the whole of
+the available verification. The rule that would have caught the original is #12's: count a counted
+claim, or stop counting in prose.]
+
 ---
 
 ### F11 — `withdrawCosign` is missing both guards its sibling has
 
-**Severity: low · Status: OPEN · Confidence: certain.**
+**Severity: low · Status: FIXED 2026-08-30 (#24) · Confidence: certain.**
 
 `approveCosignFor` checks `payer == address(0)` → `UnknownMandate`, then
 `F_COSIGN == 0` → `BadConfig`, then `msg.sender != m.cosigner` → `NotCosigner`.
@@ -1063,6 +1200,60 @@ never approved, putting a withdrawal in the audit trail with no matching approva
 `revoke` likewise does not check `m.revoked`, so a mandate can be revoked repeatedly and
 emit duplicate `MandateRevoked` events. For a contract whose product is a reconcilable
 audit trail, event pairs that do not reconcile are a real if minor cost.
+
+[**#24, fixed 2026-08-30 — two parts landed as sketched, and the third was falsified by a test that
+already existed.** `withdrawCosign` gained both missing guards,
+`if (m.payer == address(0)) revert UnknownMandate();` and
+`if (m.flags & F_COSIGN == 0) revert BadConfig();`, in the sibling's order, so an unknown mandate
+reverts with the truth instead of with `NotCosigner`. All three of its refusals were mutated and all
+three were caught:
+
+```
+mutation gate: withdrawCosign — 3 mutants, baseline 219 green
+
+  caught       removed  UnknownMandate (line 1647)
+               by: test_withdrawCosign_onUnknownMandate_reverts   [1 failing]
+  caught       removed  BadConfig (line 1648)
+               by: test_withdrawCosign_withoutTheCosignFlag_reverts   [1 failing]
+  caught       removed  NotCosigner (line 1649)
+               by: test_withdrawCosign_byAStranger_reverts   [1 failing]
+```
+
+**The third part of the sketch was wrong, and a green suite is what proved it.** This finding says
+"`revoke` likewise does not check `m.revoked`" and priced the whole fix at three lines. A guard there
+would have turned `test/Bounds.t.sol`'s `test_revoke_isIdempotent` red, because that case asserts a
+second revoke succeeds, on purpose and by name. Idempotence is the documented behaviour and the
+duplicate event is the defect, so the condition belongs on the event rather than on the call.
+`revoke` now wraps its write and its `MandateRevoked` inside `if (!m.revoked)`, and a second revoke
+is still accepted while announcing nothing. **A fix sketch is a hypothesis, and the suite is
+entitled to refuse one** — this one was refused by a case written earlier for an unrelated reason.
+
+`withdrawCosign`'s spurious event went the same way. The function reads the reservation and the
+approval before deleting either, and emits `CosignWithdrawn` only when one of them was really
+present, so a withdrawal in the audit trail again implies an approval it can be reconciled against.
+
+**Both conditional emits sit in the mutation gate's blind spot.** Neither is a `revert`, so no
+mutant reaches either, and the two cases that pin them had to be read rather than counted.
+`test_f11_aWithdrawalThatRemovesNothing_emitsNothing` records logs and asserts an empty list three
+times, once with `bytes32(0)` against an unreserved nonce, so that zero is refused as a match for
+an empty reservation rather than accepted as one.
+`test_f11_eitherHalfOfTheRemovalIsEnoughToAnnounce` uses `vm.expectEmit` twice, once per half, and
+then shows the freed nonce spendable again. `revoke`'s own two mutants were re-run for a moved body
+rather than for a changed refusal, and both came back caught:
+
+```
+mutation gate: revoke — 2 mutants, baseline 219 green
+
+  caught       removed  UnknownMandate (line 1356)
+               by: test_revoke_unknownMandate_reverts   [1 failing]
+  caught       removed  NotAuthorised (line 1357)
+               by: test_revoke_byStranger_reverts   [1 failing]
+```
+
+**What the sizing missed.** Three lines became two guards, three local reads, two conditional
+emits and one wrapped block across two functions, so the shape of the fix moved as well as its
+size. The row above is left as written, because a triage estimate corrected after the fact stops
+being a record of what was known when it was made.]
 
 ---
 
@@ -2874,6 +3065,17 @@ still be hiding there.
   skipping those removals is directional rather than convenient: adding a test can only enlarge the
   killer set, so the 84-mutant sweep recorded above cannot have regressed under three new tests. A
   bare run of either target is still the only thing that re-establishes a census, and #14 owns it.
+  **A bare run happened on 2026-08-30, over four targets, and the census is 95.** #24 changed the
+  bodies of `spend`, `approveCosignFor`, `withdrawCosign` and `revoke`, and those four were chosen by
+  a code-only comparison of every target's body against `db1c08c` rather than by eye — which is what
+  caught `revoke`, whose two refusals are untouched while its body is no longer the body the earlier
+  run mutated. All four ran bare, so each re-establishes its own census: 21 for `spend`, 26 for
+  `approveCosignFor`, 3 for `withdrawCosign` and 2 for `revoke`, 52 mutants in total, every one
+  caught by a named test at a baseline of 219 green. The four new removal sites are the two
+  `SpendCountCeiling` guards from F3 and `withdrawCosign`'s `UnknownMandate` and `BadConfig` from
+  F11, which takes the whole-contract figure to **95 — 89 removals plus 6 injections** over eleven
+  targets, against the 91 recorded earlier the same day. Both `EQUIVALENT` shadows were confirmed
+  present exactly once inside their own target before the runs, so neither claim has lapsed.
 - **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
   coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
   `_checkCredential:1261` is the `catch` arm's

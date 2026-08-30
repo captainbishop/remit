@@ -76,6 +76,12 @@ const Denial = {
   OVER_WINDOW_CAP: 'OVER_WINDOW_CAP',
   OVER_TOTAL_CAP: 'OVER_TOTAL_CAP',
   TOTAL_SPENT_CEILING: 'TOTAL_SPENT_CEILING',
+  // NEW IN v2 (F3). The other unconditional ceiling, one counter over from the one above.
+  // The contract packs its spend counter as a uint32 beside the uint96 total, and v1 let it
+  // wrap into an unnamed arithmetic panic instead of denying. This code is the panic given a
+  // name, and it is in the model for the same reason MAX_AMOUNT is: a BigInt has no width,
+  // so leaving the bound out would make the model allow a spend the contract refuses.
+  SPEND_COUNT_CEILING: 'SPEND_COUNT_CEILING',
   NONCE_ALREADY_USED: 'NONCE_ALREADY_USED',
   // NEW IN v2 (F30). A nonce named in a live co-signature is held for the exact spend that
   // signature approved. Without this, any spend on that nonce — a one-unit payment to an
@@ -155,6 +161,21 @@ const MAX_COSIGN_TTL = 30n * 86_400n;
  * rather than let the model be more permissive than the thing it specifies.
  */
 const MAX_AMOUNT = (1n << 96n) - 1n;
+
+/**
+ * Largest reachable spend counter: 2^32 - 1, about 4.29 billion spends.
+ *
+ * NEW IN v2 (F3). Here for the reason MAX_AMOUNT is here, applied to the counter beside
+ * the total rather than to the total: the contract packs `spendCount` as a uint32, and a
+ * BigInt would sail past that width and call a spend allowed that the contract refuses.
+ *
+ * The two ceilings are not equally remote, and the contract's changelist once argued the
+ * reverse. Reaching 2^96 base units in fewer than 2^32 spends needs an average spend near
+ * 2^64, about 18.4 trillion USDC, against a circulating supply near 6.1e10. Any history a real
+ * balance can fund therefore meets this ceiling first, by a factor of roughly 300, which is
+ * what makes it the one worth naming.
+ */
+const MAX_SPEND_COUNT = (1n << 32n) - 1n;
 
 /**
  * Create a rolling-window spec.
@@ -822,6 +843,21 @@ function evaluate(mandate, request, ctx) {
       max: MAX_AMOUNT,
     });
   }
+  // The counter ceiling, in the position the contract checks it and for the same reason the
+  // one above is here. This is the divergence the note above describes, one counter over: v1
+  // panicked here too, so both ceilings were invisible to a model that could not express a
+  // panic, and only one of them was named when v2 fixed it.
+  //
+  // The comparison is `>=` where the contract writes `==`, and the two agree on every state
+  // the contract can hold, because a uint32 cannot exceed its own maximum. The extra reach is
+  // for the state only this model can reach: `applyEvent` copies `spendCount` from an event,
+  // and a value above the ceiling should deny rather than slip through an equality test.
+  if (mandate.spendCount >= MAX_SPEND_COUNT) {
+    return deny(Denial.SPEND_COUNT_CEILING, {
+      spendCount: mandate.spendCount,
+      max: MAX_SPEND_COUNT,
+    });
+  }
 
   // --- rolling windows ---
   const windowEffects = [];
@@ -1161,6 +1197,12 @@ function approveCosignFor(mandate, caller, request, ctx) {
   if (mandate.totalSpent + amount > MAX_AMOUNT) {
     throw refuse(Denial.TOTAL_SPENT_CEILING, 'the lifetime total would exceed 2^96 - 1');
   }
+  // The strongest bound in this block, and the only one that ignores `amount`. A mandate at the
+  // counter ceiling cannot consume a spend of any size ever again, so an approval written
+  // against it is unconsumable for its whole life rather than unconsumable at this amount.
+  if (mandate.spendCount >= MAX_SPEND_COUNT) {
+    throw refuse(Denial.SPEND_COUNT_CEILING, 'the spend counter is at 2^32 - 1');
+  }
 
   // ---- F17: and it must name a spend that NEEDS a co-signature ------------------------------
   // The only refusal here that is not about consumability. `evaluate` consults the approval Map
@@ -1426,6 +1468,7 @@ module.exports = {
   MAX_BUCKETS,
   MAX_COSIGN_TTL,
   MAX_AMOUNT,
+  MAX_SPEND_COUNT,
   Denial,
   // NEW IN v2 (F17). Kept out of Denial on purpose — see its own comment for why.
   ApprovalRefusal,

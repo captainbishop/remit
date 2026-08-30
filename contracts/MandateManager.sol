@@ -469,12 +469,13 @@ contract MandateManager {
 
     /// @notice An approval was taken back.
     ///
-    /// Emitted whenever the co-signer calls `withdrawCosign`, whether or not an approval was
-    /// outstanding — the delete is unconditional, so this can appear for a hash that was
-    /// never approved, or one a `Spend` already consumed. An indexer must not read it as
-    /// proof that an approval existed. That asymmetry with `approveCosignFor` is F11 in
-    /// THREAT-MODEL.md, still open, and its cost is exactly this: event pairs that do not
-    /// reconcile, in a contract whose product is a reconcilable record.
+    /// Emitted when the co-signer's call to `withdrawCosign` actually removed something: an
+    /// outstanding approval under this hash, or a nonce reservation pointing at it. CHANGED IN
+    /// v2 (F11) — the delete used to be unconditional and so was this event, which meant it
+    /// could appear for a hash that was never approved, and an indexer had no way to read it as
+    /// proof that an approval existed. It is proof of that now. What it is still not is proof
+    /// that the approval was live: an expired approval sits in storage until someone clears it.
+    /// This event is what that clearing emits.
     ///
     /// @param mandateId The mandate.
     /// @param spendHash The spend that is not approved after this call.
@@ -485,7 +486,7 @@ contract MandateManager {
     // Errors.
     //
     // The correspondence with reference/policy.js is one-directional, and v1's
-    // comment here claimed it both ways. Every one of the model's 25 `Denial`
+    // comment here claimed it both ways. Every one of the model's 26 `Denial`
     // reasons and all 4 of its `ApprovalRefusal` codes have an error below with the
     // same name — that is the direction that matters, because a denial the contract
     // could not express would be a real divergence. The reverse does not hold:
@@ -494,9 +495,21 @@ contract MandateManager {
     // are MandateExists, Unbounded, BadWindow, NotAuthorised, MixedPayers,
     // DuplicateMandate and TooManyMandates — all caller or grant-time mistakes
     // rather than policy outcomes — plus TransferFailed, which the model cannot have
-    // an opinion about because it has no token. 25 + 4 + 8 = 37, which is the number
-    // of `error` declarations below. Derived from both files on 2026-08-29 by mapping
-    // each code to its PascalCase name, not counted by eye.
+    // an opinion about because it has no token.
+    // 26 + 4 + 8 = 38, which is the number of `error` declarations below. Derived from
+    // both files on 2026-08-30 by mapping each code to its PascalCase name, not counted
+    // by eye.
+    //
+    // SpendCountCeiling is the newest of the 26, and the one whose mirror took an
+    // argument to settle: JavaScript has no uint32, and the condition sits 2^32 spends
+    // away. It is mirrored for the reason `MAX_AMOUNT` gives about the uint96 amount
+    // ceiling, which is that a width the model does not enforce leaves the model MORE
+    // PERMISSIVE than the thing it specifies, and a model that allows what the contract
+    // refuses is not a specification of it. What decides it is that this condition denies
+    // a spend. The eight above sit outside the model because they are grant-time mistakes,
+    // or because they belong to a token the model does not have, and a counter at its
+    // ceiling is neither of those: it is a spend the contract will not perform, so the
+    // specification has to say so too.
     //
     // v1's version of this note said "23 + 10 = 33" and named BadConfig and NotCosigner
     // among the ten with no counterpart. Both are model codes — they are two of the four
@@ -506,9 +519,10 @@ contract MandateManager {
     // about derived numbers applies: a total that comes out right is not evidence that
     // its terms do.
     //
-    // The four v2 additions to the model since then are UnrecoverableRecipient and
-    // NonceReserved, both policy outcomes and therefore `Denial` reasons, plus the
-    // grant-time refusals in `createMandate`, which throw and so add no code.
+    // The model's own v2 additions are the five codes its `Denial` block marks NEW IN v2:
+    // SelfPayment, UnrecoverableRecipient, NonceReserved, CosignExpired and SpendCountCeiling.
+    // The grant-time refusals `createMandate` gained in v2 add no code, because the model
+    // throws for those rather than naming one.
     //
     // When called through Memo, Arc wraps a child revert in MemoFailed(bytes), so
     // clients must unwrap one layer before decoding these.
@@ -549,6 +563,15 @@ contract MandateManager {
     /// The uint96 audit counter would wrap. Only reachable without F_TOTAL, since a
     /// lifetime cap is itself a uint96 and binds first. v1 panicked here instead.
     error TotalSpentCeiling();
+    /// NEW IN v2 (F3). The uint32 spend counter would wrap. `spendCount` rides in no event, so
+    /// widening it was available in a way that widening `totalSpent` was not, and it was still
+    /// declined: the three spare bytes in slot 3 are the ones `CHANGELIST.md` reserves for a
+    /// wider `totalSpent`, and taking them here would foreclose that permanently. A named
+    /// refusal costs one warm compare and leaves the struct, the slot count, every event
+    /// signature and every gas path alone. This is the ceiling a real sequence meets first,
+    /// roughly 300 times sooner than `TotalSpentCeiling`, so before v2 the only ceiling any
+    /// affordable history could reach was the unnamed Panic 0x11.
+    error SpendCountCeiling();
     error NonceAlreadyUsed();
     /// NEW IN v2 (F30). A nonce that already carries a live co-signature is spoken for, and
     /// without this the delegate could spend the same nonce for any OTHER amount — one base
@@ -1058,6 +1081,16 @@ contract MandateManager {
         // a window cap would also have refused the request, because it is tested first.
         // `Bounds.t.sol` pins that ordering deliberately rather than relying on it.
         if (m.totalSpent > type(uint96).max - amount96) revert TotalSpentCeiling();
+        // F3. The counter beside `totalSpent`, given the same treatment for the same reason.
+        // It is tested second while being the ceiling a real sequence actually meets: reaching
+        // 2^96 base units in fewer than 2^32 spends needs an average spend near 2^64, about
+        // 18.4 trillion USDC, against a circulating supply near 6.1e10. The ceiling above is
+        // therefore the astronomical one, this one is merely unreachable, and until v2 it was
+        // the unnamed Panic 0x11 that `CHANGELIST.md` had argued was the more remote of the
+        // two. The comparison is written against the increment rather than against the type:
+        // the `+= 1` below is what makes equality the overflow test, so an increment of any
+        // other step would need this rewritten as `m.spendCount > type(uint32).max - step`.
+        if (m.spendCount == type(uint32).max) revert SpendCountCeiling();
         uint96 newTotal;
         unchecked {
             newTotal = m.totalSpent + amount96; // cannot overflow: guarded above
@@ -1322,8 +1355,20 @@ contract MandateManager {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) revert UnknownMandate();
         if (msg.sender != m.payer && msg.sender != m.spender) revert NotAuthorised();
-        m.revoked = true;
-        emit MandateRevoked(mandateId, msg.sender);
+        // F11. Idempotent and silent on a repeat, rather than idempotent and noisy.
+        // A second call used to rewrite `true` over `true` and emit a second `MandateRevoked`,
+        // so a reconciler counting revocations could see any number of them for one mandate,
+        // and either holder of the authority could add more at will for the price of the gas.
+        // Refusing the repeat with `Revoked()` was the other candidate and was rejected:
+        // revocation is the kill switch, an atomic batch revoking several mandates would then
+        // lose the whole batch to one already-dead entry, and `test_revoke_isIdempotent` had
+        // pinned the non-reverting behaviour on purpose. The postcondition a caller wants
+        // holds either way — on return this mandate is revoked — so it was the event that
+        // needed the condition and not the call.
+        if (!m.revoked) {
+            m.revoked = true;
+            emit MandateRevoked(mandateId, msg.sender);
+        }
     }
 
     /**
@@ -1510,6 +1555,14 @@ contract MandateManager {
             }
         }
         if (m.totalSpent > type(uint96).max - amount96) revert TotalSpentCeiling();
+        // F3's counter ceiling, mirrored here for the reason this whole block exists.
+        // `spendCount` only ever grows, and `spend` refuses the increment once it arrives at
+        // the ceiling, so a mandate sitting there can never consume another spend of any size.
+        // That makes an approval against it unconsumable for its entire life rather than
+        // unconsumable until something changes, which is the strongest form of the property the
+        // checks above test for. It is also the one bound in this block that ignores `amount`:
+        // the shortfall is total, instead of being relative to the sum the co-signer named.
+        if (m.spendCount == type(uint32).max) revert SpendCountCeiling();
 
         // ---- F17: the spend named must also NEED a co-signature -----------------------
         // The only refusal here that is not about consumability. `spend` reads the approval
@@ -1563,9 +1616,18 @@ contract MandateManager {
     /// on every future block) but it is storage no one is obliged to clean, which is the
     /// same shape as F17's unconsumable approvals and is noted there.
     ///
-    /// The delete is unconditional, and so is the event: passing a hash that was never
-    /// approved changes no storage but still emits `CosignWithdrawn`. F11 in THREAT-MODEL.md,
-    /// open, and the reconciliation cost is written up on the event itself.
+    /// CHANGED IN v2 (F11). Three things were missing from this function.
+    /// The two checks the sibling has — an unknown mandate, and a mandate without `F_COSIGN` —
+    /// now answer with `UnknownMandate` and `BadConfig`, where both used to fall through to
+    /// `NotCosigner`. Nothing was exploitable, because `m.cosigner` is `address(0)` in both
+    /// cases and no transaction can come from there, so the call already reverted; it named the
+    /// wrong cause to whoever was reading it. The event is the third: the delete used to fire
+    /// `CosignWithdrawn` for a hash that was never approved, putting a withdrawal in the audit
+    /// trail with no matching approval, so it is now conditional on something having actually
+    /// been removed. The delete itself stays unconditional, and past the three checks this
+    /// function still cannot revert. Removing authority must never be blocked — an atomic batch
+    /// withdrawing several approvals must not lose the live ones to a stale entry beside them.
+    /// A hash matching nothing is therefore answered rather than refused.
     ///
     /// CHANGED IN v2 (F30): takes the nonce as well. F30's reservation is keyed by nonce and a
     /// hash cannot be turned back into one, so without this parameter a withdrawal would clear
@@ -1582,10 +1644,25 @@ contract MandateManager {
     /// right value.
     function withdrawCosign(bytes32 mandateId, bytes32 hash, bytes32 nonce) external {
         Mandate storage m = _mandates[mandateId];
+        if (m.payer == address(0)) revert UnknownMandate();
+        if (m.flags & F_COSIGN == 0) revert BadConfig();
         if (msg.sender != m.cosigner) revert NotCosigner();
+
+        // Both flags are read before either delete, because together they are the question "did
+        // this call remove anything". The `reserved != 0` half is required rather than
+        // defensive: without it a caller passing a `hash` of zero against an unreserved nonce
+        // compares zero to zero, and the event would announce a withdrawal that removed
+        // nothing, which is the exact case this change exists to stop.
+        bytes32 reserved = _cosignReservedNonce[mandateId][nonce];
+        bool freesNonce = reserved != 0 && reserved == hash;
+        bool hadApproval = _cosignApproved[mandateId][hash] != 0;
+
         delete _cosignApproved[mandateId][hash];
-        if (_cosignReservedNonce[mandateId][nonce] == hash) delete _cosignReservedNonce[mandateId][nonce];
-        emit CosignWithdrawn(mandateId, hash, msg.sender);
+        if (freesNonce) delete _cosignReservedNonce[mandateId][nonce];
+        // Either half is enough. A withdrawal that named the right hash and the wrong nonce
+        // clears the approval and leaves the reservation, so the repeat call with the right
+        // nonce removes real authority while `hadApproval` is already false.
+        if (hadApproval || freesNonce) emit CosignWithdrawn(mandateId, hash, msg.sender);
     }
 
     // =====================================================================
@@ -1853,24 +1930,32 @@ contract MandateManager {
     /// permit: the per-transaction cap, the lifetime cap and every window,
     /// intersected, for a mandate `isLive` accepts.
     ///
-    /// Four things can still deny a spend this function calls affordable, and the v1
-    /// comment here named only the first two. The allowlist is a property of the recipient
+    /// Several things can still deny a spend this function calls affordable. They are listed
+    /// here by name and not counted, because a cardinal in a comment goes stale in silence and
+    /// this one did: it read "Four" while naming five, and survived an edit to the line beside
+    /// it (F10). The v1 comment named only the allowlist and the co-signature requirement.
+    /// The allowlist is a property of the recipient
     /// rather than the amount. The co-signature requirement applies to spends ABOVE a
     /// threshold instead of capping them, so a large number here may still need an
-    /// `approveCosignFor` first. BOTH ERC-8004 GATES ARE ALSO INVISIBLE HERE: `isLive`
+    /// `approveCosignFor` first, and an approval that has lapsed is refused as `CosignExpired`
+    /// rather than read as absent. BOTH ERC-8004 GATES ARE ALSO INVISIBLE HERE: `isLive`
     /// covers revocation, `notBefore` and expiry and stops there, making no external
     /// calls, while the identity gate and the credential gate read the registries during
     /// `spend` — so a mandate whose agent has transferred its identity NFT, or whose
     /// attestation has gone stale, reports full headroom here and reverts there. That
     /// omission is deliberate rather than an oversight: this is the pre-flight path, and
     /// it should not cost two external calls or stop working when a registry is
-    /// unreachable. Lastly the spend nonce is per-call, not per-mandate, so replay is not
-    /// knowable from a mandate id alone.
+    /// unreachable. The spend nonce is per-call, not per-mandate, so replay is not
+    /// knowable from a mandate id alone. Last are the two unconditional counter ceilings,
+    /// `TotalSpentCeiling` and `SpendCountCeiling`: a mandate without `F_TOTAL` whose
+    /// `totalSpent` sits near 2^96, or whose `spendCount` sits at 2^32 - 1, is reported here
+    /// with `type(uint256).max` of headroom while its true largest spend is small or zero.
+    /// Both need a history no real balance can fund, which is why they come last.
     ///
     /// Returns type(uint256).max for a live mandate bounded only by expiry — such a mandate
     /// has no amount limit at all, and reporting 0 would tell a pre-flighting agent it cannot
-    /// spend when it can. `spendable` clamps this down to the allowance and balance, which is
-    /// where the real number comes from.
+    /// spend when it can. `spendable` clamps this at `type(uint96).max` and then down to the
+    /// allowance and balance, which is where the real number comes from.
     ///
     /// @param mandateId The mandate.
     /// @return The largest single amount the policy's amount bounds admit, in USDC base
@@ -1909,13 +1994,23 @@ contract MandateManager {
     ///
     /// @param mandateId The mandate.
     /// @return The largest single spend that would actually go through right now, in USDC
-    /// base units — `policyHeadroom` clamped by the payer's allowance to this contract and
-    /// their USDC balance. Still silent on the allowlist, the co-signature threshold, the two
-    /// ERC-8004 gates and nonce reuse, all of which `spend` also applies.
+    /// base units — `policyHeadroom` clamped at `type(uint96).max`, then by the payer's
+    /// allowance to this contract and their USDC balance. Still silent on the allowlist, the
+    /// co-signature threshold, the two ERC-8004 gates and nonce reuse, all of which
+    /// `spend` also applies.
     function spendable(bytes32 mandateId) external view returns (uint256) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) return 0;
         uint256 limit = policyHeadroom(mandateId);
+        // F9. The clamp `spendableAcross` hoists, here for the first of the two reasons given
+        // there: `policyHeadroom` reports `type(uint256).max` for a mandate bounded only by an
+        // expiry, `spend` refuses anything above `type(uint96).max` as `AmountTooLarge`, and so
+        // the unclamped number over-reports the largest single spend. The overflow half of that
+        // argument does not reach this function, which adds nothing. What did reach it was the
+        // disagreement: the two sibling views answered differently about one mandate whenever
+        // the payer's balance and allowance both sat above 2^96 — beyond any real USDC balance,
+        // and one line away in `MockUSDC`, which is what let the suite see it.
+        if (limit > type(uint96).max) limit = type(uint96).max;
         uint256 allowed = usdc.allowance(m.payer, address(this));
         if (allowed < limit) limit = allowed;
         uint256 bal = usdc.balanceOf(m.payer);

@@ -563,6 +563,97 @@ contract CosignTest is Base {
         assertTrue(mm.isCosignApproved(id, hash));
     }
 
+    /// CHANGED IN v2 (F11). Existence is checked first here, as it is in the sibling that grants.
+    /// `m.cosigner` on an absent mandate is the zero address and no transaction can come from
+    /// there, so this call already reverted — with `NotCosigner`, which on an empty struct is true
+    /// and useless. Nothing was exploitable; the fix is entirely about what the caller is told.
+    function test_withdrawCosign_onUnknownMandate_reverts() public {
+        vm.prank(boss);
+        vm.expectRevert(MandateManager.UnknownMandate.selector);
+        mm.withdrawCosign(bytes32("nope"), bytes32("h"), bytes32("n"));
+    }
+
+    /// CHANGED IN v2 (F11). A mandate without `F_COSIGN` has no approvals to withdraw and no
+    /// cosigner either, because `createMandate` enforces the biconditional between the flag and the
+    /// address. `BadConfig` names the missing configuration; `NotCosigner` invited the reader to go
+    /// looking for a cosigner who was never set.
+    function test_withdrawCosign_withoutTheCosignFlag_reverts() public {
+        bytes32 id = grant(simpleParams());
+        vm.prank(boss);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.withdrawCosign(id, bytes32("h"), bytes32("n"));
+    }
+
+    /**
+     * CHANGED IN v2 (F11). A withdrawal that removes nothing has to say nothing.
+     *
+     * The delete stays unconditional, so the call still succeeds on a hash that was never approved.
+     * Refusing it would let one stale entry in an atomic batch take the live withdrawals beside it
+     * down, and removing authority must never be blocked. What was wrong is that it emitted
+     * `CosignWithdrawn` regardless, putting a withdrawal in the audit trail with no approval to
+     * match — the mirror image of the repeated `MandateRevoked` F11 also removed.
+     *
+     * Three shapes have to be silent. Nothing approved and nothing reserved; a hash of zero against
+     * an unreserved nonce, which is the case the `reserved != 0` half of the condition exists for,
+     * since without it the comparison reads zero against zero and calls that a removal; and a nonce
+     * reserved for a different hash, which must also leave the live approval standing.
+     */
+    function test_f11_aWithdrawalThatRemovesNothing_emitsNothing() public {
+        bytes32 id = grant(cosignParams());
+        vm.startPrank(boss);
+
+        vm.recordLogs();
+        mm.withdrawCosign(id, bytes32("never approved"), bytes32("never reserved"));
+        assertEq(vm.getRecordedLogs().length, 0, "nothing was removed, so nothing is announced");
+
+        vm.recordLogs();
+        mm.withdrawCosign(id, bytes32(0), bytes32("still unreserved"));
+        assertEq(vm.getRecordedLogs().length, 0, "zero must not match an empty reservation");
+
+        // A real approval, then a withdrawal naming its nonce and the wrong hash.
+        bytes32 nonce = nextNonce();
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.recordLogs();
+        mm.withdrawCosign(id, bytes32("wrong hash"), nonce);
+        assertEq(vm.getRecordedLogs().length, 0, "a mismatched hash removes nothing");
+        vm.stopPrank();
+
+        assertTrue(mm.isCosignApproved(id, hash), "and the live approval survived the no-op");
+    }
+
+    /**
+     * CHANGED IN v2 (F11). Either half of the removal is enough to announce, which is why the
+     * event's condition is a disjunction rather than the `hadApproval` test alone.
+     *
+     * The right hash under the wrong nonce clears the approval and leaves the reservation, so real
+     * authority is removed twice over two calls: the first with `hadApproval` true, the repeat with
+     * the right nonce while `hadApproval` is already false. A condition testing only the approval
+     * would go quiet on the second call, and freeing a reserved nonce is the one thing a delegate
+     * needs to see in the log — it is what tells them the nonce is spendable again.
+     */
+    function test_f11_eitherHalfOfTheRemovalIsEnoughToAnnounce() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+
+        vm.startPrank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.expectEmit(true, true, true, true, address(mm));
+        emit MandateManager.CosignWithdrawn(id, hash, boss);
+        mm.withdrawCosign(id, hash, bytes32("wrong nonce"));
+
+        vm.expectEmit(true, true, true, true, address(mm));
+        emit MandateManager.CosignWithdrawn(id, hash, boss);
+        mm.withdrawCosign(id, hash, nonce);
+        vm.stopPrank();
+
+        // The nonce is spendable again, which is the authority the second call removed.
+        vm.prank(agent);
+        mm.spend(id, vendor, 1, REF, nonce);
+        assertEq(token.balanceOf(vendor), 1, "the reservation was released by the repeat");
+    }
+
     // ------------------------------------------------- F30: the nonce reservation
 
     /**
@@ -1116,6 +1207,48 @@ contract CosignTest is Base {
         vm.prank(boss);
         bytes32 hash = mm.approveCosignFor(id, vendor, 1, REF, nextNonce(), uint40(block.timestamp + DAY));
         assertTrue(mm.isCosignApproved(id, hash), "the last base unit the counter can hold is approvable");
+    }
+
+    /**
+     * NEW IN v2 (F3). THE COUNTER CEILING REACHES THIS FUNCTION TOO, and it is the strongest case
+     * F17 has.
+     *
+     * Every other bound in the block refuses an approval for the AMOUNT it names: the same mandate
+     * at a smaller amount would be approvable, so the refusal says "not this much, not yet". A
+     * mandate at the spend-count ceiling can consume no spend of any size ever again, because
+     * `spendCount` only grows and `spend` refuses the increment, so an approval written against it
+     * is unconsumable for its whole life. Without the guard the co-signer pays for a transaction
+     * that stores authority nothing can ever exercise, and the delegate is left holding it.
+     *
+     * `cosignThreshold: 0` for the reason its uint96 twin above gives, and the counter is placed
+     * rather than reached for the reason `Base.placeSpendCount` gives.
+     */
+    function test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused() public {
+        MandateManager.MandateParams memory p = windowOnlyParams(DAY, type(uint96).max, 12);
+        p = withCosign(p, boss, 0);
+        bytes32 id = grant(p);
+
+        placeSpendCount(id, type(uint32).max - 1);
+
+        // One short of the ceiling the approval is legal and the spend consumes it. This half pins
+        // the refusal below to the width of the counter rather than to any large value of it: a
+        // guard off by one, or one refusing a heavily used mandate, would refuse this approval too.
+        bytes32 n = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(1), REF, n, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, hash), "the last spend the counter can hold is approvable");
+        payWithNonce(id, vendor, usd(1), n);
+        assertEq(uint256(mm.getMandate(id).spendCount), uint256(type(uint32).max), "the counter is at its ceiling");
+
+        // Past it nothing can be approved, and the amount makes no difference — which is what
+        // separates this refusal from every other one in the block.
+        approveReverts(id, vendor, 1, nextNonce(), MandateManager.SpendCountCeiling.selector);
+        approveReverts(id, vendor, usd(1000), nextNonce(), MandateManager.SpendCountCeiling.selector);
+        payReverts(id, vendor, 1, MandateManager.SpendCountCeiling.selector);
+
+        // The answer comes from the counter and not from its neighbour in the same word: one USDC
+        // has moved, so the lifetime ceiling still has 2^96 - 1e6 - 1 of room.
+        assertEq(uint256(mm.getMandate(id).totalSpent), uint256(usd(1)), "totalSpent is far from its own ceiling");
     }
 
     /// `_usedNonce` is write-once-true, so a consumed nonce can only ever produce

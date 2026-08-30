@@ -31,6 +31,9 @@ const {
   // path; without one, a fix for one denial-of-service would have introduced another.
   withdrawCosign,
   MAX_AMOUNT,
+  // NEW IN v2 (F3). The uint32 counter ceiling, imported beside MAX_AMOUNT because the two
+  // tests that use them are twins and both assert one base unit either side of the boundary.
+  MAX_SPEND_COUNT,
   MAX_COSIGN_TTL,
   Denial,
   // NEW IN v2 (F17). The four refusal codes `approveCosignFor` can raise that `evaluate`
@@ -575,6 +578,44 @@ test('the uint96 audit counter denies by name rather than overflowing, and only 
   });
   assert.equal(spend(capped, req(1n), { now: 1 }).allowed, true);
   assert.equal(evaluate(capped, req(MAX), { now: 2 }).reason, Denial.OVER_TOTAL_CAP);
+});
+
+test('the uint32 spend counter denies by name rather than wrapping, whatever the amount', () => {
+  // NEW IN v2 (F3). The twin of the test above, one counter over, and the ceiling any history a
+  // real balance can fund meets first: reaching 2^96 base units in fewer than 2^32 spends needs
+  // an average spend near 2^64, about 18.4 trillion USDC. The counter is placed rather than
+  // reached, for the reason Bounds.t.sol has to use `vm.store` for its twin — 4.29 billion
+  // spends are not affordable in either language.
+  const m = createMandate({
+    id: 'counter', payer: PAYER, spender: AGENT, windows: [], expiresAt: FAR,
+  });
+
+  // One short of the ceiling, so the last legal spend is asserted rather than assumed. A guard
+  // written with `>` instead of `>=` would let one more through and fail here.
+  m.spendCount = MAX_SPEND_COUNT - 1n;
+  assert.equal(spend(m, req(usdc('1')), { now: 1 }).allowed, true, 'the last spend must fit');
+  assert.equal(m.spendCount, MAX_SPEND_COUNT);
+
+  const d = evaluate(m, req(usdc('1')), { now: 2 });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, Denial.SPEND_COUNT_CEILING);
+  assert.equal(d.detail.max, MAX_SPEND_COUNT);
+  assert.equal(d.detail.spendCount, MAX_SPEND_COUNT);
+
+  // Amount-independent, which nothing else in that block is. One base unit is refused for the
+  // same reason as the largest amount the uint96 ceiling beside it still permits, and a guard
+  // that consulted the amount by mistake would answer differently on one of the two.
+  assert.equal(evaluate(m, req(1n), { now: 2 }).reason, Denial.SPEND_COUNT_CEILING);
+  const largestThatClears = MAX_AMOUNT - usdc('1');
+  assert.equal(
+    evaluate(m, req(largestThatClears), { now: 2 }).reason,
+    Denial.SPEND_COUNT_CEILING,
+    'the counter answers even where the uint96 total still has room',
+  );
+
+  // And the answer comes from the counter rather than from its neighbour: `totalSpent` is one
+  // USDC, so a guard aimed at the wrong field would have allowed all three calls above.
+  assert.equal(m.totalSpent, usdc('1'));
 });
 
 test('recipient allowlist blocks anyone not named at grant time', () => {
@@ -1482,6 +1523,41 @@ test('cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not
   approveCosignFor(uncapped, BOSS, { ...lastUnit, ...at }, { now: 1 });
   assert.equal(spend(uncapped, lastUnit, { now: 1 }).allowed, true);
   assert.equal(uncapped.totalSpent, MAX_AMOUNT);
+});
+
+test('cosign (F3): an approval on a mandate at the spend-count ceiling is refused', () => {
+  // NEW IN v2 (F3). The counter ceiling reaches `approveCosignFor` for F17's reason, and it is
+  // the strongest case F17 has: every other bound there refuses an approval for the amount it
+  // names, while a mandate at this ceiling can consume no spend of any size ever again. The
+  // approval would sit in storage, cost the co-signer a transaction, and be unconsumable for
+  // its whole life.
+  //
+  // `cosignThreshold: 0n` for the reason the uint96 twin above gives: at the inherited 10 USDC
+  // threshold a one-unit approval comes back COSIGN_NOT_REQUIRED, and this test would be
+  // measuring guard order instead of the counter.
+  const at = { validUntil: DAY };
+  const m = cosignMandate({ perTxCap: null, windows: [], cosignThreshold: 0n });
+
+  // One short of the ceiling the approval is legal, and consuming it arrives at the ceiling.
+  // Asserting this side matters as much as the refusal: a guard off by one, or one aimed at a
+  // merely large counter, would refuse this approval too.
+  m.spendCount = MAX_SPEND_COUNT - 1n;
+  const last = req(1n);
+  approveCosignFor(m, BOSS, { ...last, ...at }, { now: 1 });
+  assert.equal(spend(m, last, { now: 1 }).allowed, true);
+  assert.equal(m.spendCount, MAX_SPEND_COUNT);
+
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(1n), ...at }, { now: 1 }),
+    refusedWith(Denial.SPEND_COUNT_CEILING),
+  );
+
+  // Amount-independent here as well, so the refusal is not the per-transaction cap or the
+  // lifetime ceiling answering under another name.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...req(usdc('1000')), ...at }, { now: 1 }),
+    refusedWith(Denial.SPEND_COUNT_CEILING),
+  );
 });
 
 test('cosign (F17): the deadline must outlive notBefore and die by the expiry', () => {

@@ -191,6 +191,51 @@ contract BoundsTest is Base {
         payReverts(id, uint256(type(uint96).max), MandateManager.OverTotalCap.selector);
     }
 
+    /**
+     * THE UINT32 SPEND COUNTER, which is the ceiling a real history arrives at first.
+     *
+     * NEW IN v2 (F3). The counter packed beside `totalSpent` had no guard, so the 2^32-nd spend on
+     * one mandate wrapped it into an unnamed arithmetic panic. `CHANGELIST.md` argued the uint96
+     * total above was the nearer of the two ceilings, and the arithmetic says the reverse: reaching
+     * 2^96 base units in fewer than 2^32 spends needs an average spend near 2^64, about 18.4
+     * trillion USDC, against a circulating supply near 6.1e10. Any history a real balance can fund
+     * meets this ceiling roughly 300 times sooner than the one its twin above tests.
+     *
+     * WHY THIS TEST PLACES THE COUNTER WHERE ITS TWIN SPENDS. The uint96 ceiling is two
+     * transactions away once the payer holds enough, because a single spend can carry 2^96 - 1 base
+     * units. This one is 4.29 billion separate calls away, which is unreachable at any gas price
+     * rather than merely costly, so `Base.placeSpendCount` writes the counter and verifies the
+     * struct's layout on both sides of the write while doing it.
+     *
+     * The mandate is otherwise ordinary and shown to be healthy on both sides of the placement: an
+     * identical one-unit spend settles before it and is refused after it, so the refusal comes from
+     * the counter rather than from a cap, a window, the horizon, or a neighbour the write corrupted.
+     */
+    function test_spendCount_atTheUint32Ceiling_deniesWithANameNotAPanic() public {
+        bytes32 id = grant(simpleParams());
+
+        pay(id, 1);
+        assertEq(uint256(mm.getMandate(id).spendCount), 1, "one spend, one count");
+
+        placeSpendCount(id, type(uint32).max - 1);
+
+        // The last spend the counter can hold settles. This half pins the bound to the width of the
+        // counter rather than to any large value of it: a guard off by one, or one refusing any
+        // heavily used mandate, would refuse this spend too.
+        pay(id, 1);
+        assertEq(uint256(mm.getMandate(id).spendCount), uint256(type(uint32).max), "the counter is at its ceiling");
+
+        // And the next spend is refused by name. Both amounts are refused for the same reason, which
+        // is what shows the guard ignores the amount: `usd(100)` is exactly `simpleParams()`'s
+        // `perTxCap`, so `OverPerTxCap` is not what answers on the second call.
+        payReverts(id, 1, MandateManager.SpendCountCeiling.selector);
+        payReverts(id, usd(100), MandateManager.SpendCountCeiling.selector);
+
+        // The answer comes from the counter and not from its neighbour in the same word: two base
+        // units have moved in total, so `TotalSpentCeiling` has 2^96 - 3 of room left.
+        assertEq(uint256(mm.getMandate(id).totalSpent), 2, "totalSpent is nowhere near its own ceiling");
+    }
+
     /// The uint96 ceiling is enforced explicitly, and BEFORE the caps, so an
     /// absurd amount produces a legible error rather than a cast that truncates
     /// a huge number into a small permitted one with no error at all.
@@ -481,7 +526,21 @@ contract BoundsTest is Base {
         bytes32 id = grant(simpleParams());
         vm.startPrank(payer);
         mm.revoke(id);
+
+        // NEW IN v2 (F11). The repeat has to stay silent as well as succeed, because v1 wrote `true`
+        // over `true` and emitted a second `MandateRevoked`, so a reconciler counting revocations
+        // could see any number of them for one mandate, and either holder of the authority could add
+        // more for the price of the gas. The condition went on the event rather than on the call, so
+        // this test's own assertion below is unchanged and its comment still reads as it did.
+        //
+        // Recording is sound here for the reason `Idempotency.t.sol` gives for its being unsound
+        // there: the recorder captures an event at the moment it is emitted and does not model the
+        // EVM discarding it as the frame reverts. The call below returns rather than reverting, so
+        // an empty recording is a truthful statement about what the chain keeps.
+        vm.recordLogs();
         mm.revoke(id); // must not revert; revocation is a latch, not a toggle
+        assertEq(vm.getRecordedLogs().length, 0, "a repeat revocation must emit nothing");
+
         vm.stopPrank();
         assertTrue(mm.getMandate(id).revoked);
     }

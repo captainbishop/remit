@@ -342,6 +342,47 @@ abstract contract Base is Test {
         payReverts(id, vendor, amount, expectedError);
     }
 
+    // -- storage placement -------------------------------------------------
+
+    /// NEW IN v2 (F3): put `spendCount` where no test can reach it by spending. The uint96 amount
+    /// ceiling beside it is two transactions away, because one spend can carry 2^96 - 1 base units;
+    /// 2^32 - 1 spends are unreachable at any gas price, so the counter is placed.
+    ///
+    /// Read-modify-write, verified on both sides, which is the discipline `Gates.t.sol` records for
+    /// its own `vm.store` uses. A blind write can pin a guard and the struct's layout comment at
+    /// once while proving neither, so the fields whose values are already known are decoded out of
+    /// the word before anything is written, only the counter's four bytes change, and `getMandate`
+    /// confirms afterwards that the counter moved and its six neighbours did not. Any change to the
+    /// struct's declaration order fails here rather than rewriting whichever field moved into these
+    /// bits unnoticed.
+    ///
+    /// `_mandates` is the first mapping declared, so it holds slot 0, and one mandate's struct
+    /// begins at keccak256(abi.encode(id, uint256(0))). Slot 3 of that struct is the packed word —
+    /// uint96 totalSpent, uint40 notBefore, uint40 expiresAt, uint32 spendCount, uint8 flags,
+    /// uint8 windowCount, bool revoked — which puts the counter at bit offset 176.
+    function placeSpendCount(bytes32 id, uint32 value) internal {
+        MandateManager.Mandate memory before = mm.getMandate(id);
+        bytes32 slot = bytes32(uint256(keccak256(abi.encode(id, uint256(0)))) + 3);
+        uint256 packed = uint256(vm.load(address(mm), slot));
+
+        assertEq(uint256(uint96(packed)), uint256(before.totalSpent), "totalSpent is not the low 96 bits");
+        assertEq(uint256(uint40(packed >> 96)), uint256(before.notBefore), "notBefore is not at bit 96");
+        assertEq(uint256(uint40(packed >> 136)), uint256(before.expiresAt), "expiresAt is not at bit 136");
+        assertEq(uint256(uint32(packed >> 176)), uint256(before.spendCount), "spendCount is not at bit 176");
+
+        uint256 mask = uint256(type(uint32).max) << 176;
+        vm.store(address(mm), slot, bytes32((packed & ~mask) | (uint256(value) << 176)));
+
+        MandateManager.Mandate memory placed = mm.getMandate(id);
+        assertEq(uint256(placed.spendCount), uint256(value), "the counter was not placed");
+        assertEq(uint256(placed.totalSpent), uint256(before.totalSpent), "the write disturbed totalSpent");
+        assertEq(uint256(placed.notBefore), uint256(before.notBefore), "the write disturbed notBefore");
+        assertEq(uint256(placed.expiresAt), uint256(before.expiresAt), "the write disturbed expiresAt");
+        assertEq(uint256(placed.flags), uint256(before.flags), "the write disturbed flags");
+        assertEq(uint256(placed.windowCount), uint256(before.windowCount), "the write disturbed windowCount");
+        assertEq(placed.revoked, before.revoked, "the write disturbed revoked");
+    }
+
     function overWindowCap(uint32 lengthSeconds, uint96 cap, uint256 used) internal pure returns (bytes memory) {
         return abi.encodeWithSelector(MandateManager.OverWindowCap.selector, lengthSeconds, cap, used);
     }
