@@ -603,10 +603,44 @@ contract CreationTest is Base {
         grantReverts(p, MandateManager.BadConfig.selector);
     }
 
-    /// The credential half of the same mistake.
+    /// The credential half of the same mistake, and it is refused one guard earlier than the
+    /// identity half is: the `F_CREDENTIAL` biconditional further up sees the validator that
+    /// `withCredential` sets. The test below reaches the F32 credential block itself.
     function test_createMandate_credentialDataWithoutTheFlag_reverts() public {
         MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
         p.flags &= ~F_CREDENTIAL;
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// The credential half again, with the biconditional avoided. That line reads
+    /// `(flags & F_CREDENTIAL != 0) != (p.credential.validator != address(0))`, and
+    /// `withCredential` always sets a validator, so the test above is refused there rather than
+    /// by the F32 block. Both lines revert `BadConfig`, so the assertion held while the F32
+    /// credential guard had nothing behind it: the mutation gate deleted that guard and all 207
+    /// tests still passed.
+    ///
+    /// The four fields below are the ones only F32 can refuse. Each is set on its own, with the
+    /// validator left at zero, so the F32 block is the only line in `createMandate` that can
+    /// answer. One field at a time also means a condition that dropped any single disjunct would
+    /// leave one of these four cases passing.
+    ///
+    /// `test_createMandate_noGateDataAndNoGateFlags_isAccepted` below is the control: without it
+    /// these four refusals would also pass against a `createMandate` that refused every grant.
+    function test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.credential.requestHash = KYC_HASH;
+        grantReverts(p, MandateManager.BadConfig.selector);
+
+        p = simpleParams();
+        p.credential.agentId = AGENT_ID;
+        grantReverts(p, MandateManager.BadConfig.selector);
+
+        p = simpleParams();
+        p.credential.maxStaleness = 1 days;
+        grantReverts(p, MandateManager.BadConfig.selector);
+
+        p = simpleParams();
+        p.credential.minResponse = 100;
         grantReverts(p, MandateManager.BadConfig.selector);
     }
 

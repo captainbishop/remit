@@ -346,6 +346,15 @@ abstract contract Base is Test {
         return abi.encodeWithSelector(MandateManager.OverWindowCap.selector, lengthSeconds, cap, used);
     }
 
+    /// `UnrecoverableRecipient` carries the address it refused, so an expectation of it needs the
+    /// argument encoded rather than the bare selector. Built here for the same reason as
+    /// `overWindowCap` above: the encoded form is too long to sit inside a call argument list, and
+    /// wrapping it at every call site puts the expected address on a line of its own, away from
+    /// the address being paid.
+    function unrecoverable(address recipient) internal pure returns (bytes memory) {
+        return abi.encodeWithSelector(MandateManager.UnrecoverableRecipient.selector, recipient);
+    }
+
     // -- assertions --------------------------------------------------------
 
     /// First four bytes of revert data. `bytes memory` cannot be cast to bytes4

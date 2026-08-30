@@ -281,6 +281,37 @@ what it does not, and which areas remain unexamined.
 > The ladder is how to cross from one blob to the other. **`reference/policy.test.js` is cited by
 > no line number anywhere in the repository**, which was checked by grep over every tracked
 > `.md`, `.sol`, `.js` and `.py` file rather than assumed, so its five new lines cost nothing.
+>
+> **2026-08-30, the Solidity mutation gate finished: eleven of eleven targets, 89 of 89 mutants.**
+> The green figure is now **209 Solidity cases and 92 model tests**, so the 207 five paragraphs
+> above is history, as 182/182, 178/178 and 177/177 were before it. Derived the same two ways as
+> every figure in this banner: the tree declares **206 functions named `test*` plus 3 named
+> `invariant_`**, and both of the day's gate logs open with `baseline: 209 passed, 0 failed`. The
+> per-file distribution sums to the same — `Cosign` 47, `Creation` 44, `Bounds` 29, `Views` 25,
+> `Gates` 24, `Windows` 14, `Idempotency` 13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4,
+> `Base` 0 — and the two files that moved are the two that gained a test, `Cosign` 46 → 47 for
+> `test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused` and `Creation` 43 → 44 for
+> `test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused`.
+> Eleven files and thirteen suites both still hold, for the reasons
+> `reference/vacuity-check.py:58-67` gives.
+>
+> **Eight targets and 84 mutants ran, all at that same baseline.** Six came back clean —
+> `approveCosignFor` 24/24, `createMandate` 27/27, `spend` 19/19, `_checkAndCommitWindows` 1/1,
+> `spendHash` 1/1, `constructor` 1/1 — and two returned one survivor each, `_checkCredential:1261` and
+> `spendableAcross:2010`. Both are **equivalent mutants**, a fourth class this document had not met:
+> the successor guard refuses the same input under the same error name, so no test can ever kill them.
+> §5 carries the reasoning and the mechanism that holds them, and two `--only` runs closed the two
+> survivors from the day before. **`constructor` ran for the first time in the gate's existence**,
+> which moves the contract's one defence against a permanently mis-wired deployment inside a clean
+> claim instead of outside every one.
+>
+> **The contract is 2,043 lines before and after, and every line pointer in this repository still
+> resolves.** The day's only change to `contracts/MandateManager.sol` was a corrected comment above
+> `:2010` — the mutation run contradicted a sentence claiming that guard is what makes "the payer of
+> nothing" unreachable, which the loop's own check does anyway. Six lines were rewritten as six, and
+> `python3 reference/code-unchanged.py HEAD` reports `540 code lines, all identical, none moved`.
+> **A survivor is also a claim-checker**: the sentence explaining why a guard matters is exactly the
+> sentence a mutation run is able to contradict.
 
 ## Why this document exists
 
@@ -527,7 +558,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F35 `isCosignApproved` ignored the mandate's own death | **DONE in `af9df40`, 2026-08-29.** 1 conjunct + a factored `_isPermanentlyDead`, 2 Solidity tests. **Wrong on its first attempt** — it used `isLive`, which folded in `notBefore` and reported a live scheduled approval as dead; two tests caught it. No model surface, since the model has no pre-flight views | — |
 | ✅ F36 `isAllowedRecipient` disagreed with `spend` | **DONE in `af9df40`, 2026-08-29.** 3 guards, 2 Solidity tests, one of them shared with F29 so the two claims check each other. No model surface | — |
 | ✅ F37 the model minted mandates with a zero payer or spender | **DONE in `af9df40`, 2026-08-29.** 2 throws in `reference/policy.js`, asserted by the grant-time construction test. **Not named in that commit's message** — it was folded into the gate work; this document is where it gets named. Found by the JS mutation gate, which reported a survivor and turned out to be reporting a divergence | — |
-| §5 coverage gaps | **6 tests, 4 testnet transactions as of 2026-08-29**, and this is the first time the tally has gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. The layer it replaces read **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. Two further owed items are deliberately *not* counted here because neither is a test: the view-reaching mutation operator, and the 73-mutant run across five targets | fold into #14, which needs the gas number anyway |
+| §5 coverage gaps | **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece | fold into #14, which needs the gas number anyway |
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list risks funds in
 the sense of letting a spend exceed a granted cap; the window search found no such case in 3.0M
@@ -1761,7 +1792,7 @@ other four do not, and that folds into F18's documentation pass.
 **Severity: low · Status: open, and one of its two possible answers is not something this pass can settle · Confidence: certain about the guard, explicitly unresolved about the consequence.**
 
 `createMandate` refuses a flag whose registry is missing — `v2:447` for `F_CREDENTIAL`,
-`v2:448` for `F_IDENTITY`, both `BadConfig` — and `Creation.t.sol:623`
+`v2:448` for `F_IDENTITY`, both `BadConfig` — and `Creation.t.sol:657`
 (`test_createMandate_gateWithoutRegistry_reverts`) pins both halves against a manager
 constructed with `address(0), address(0)`. That is the right guard and it is tested.
 
@@ -1779,7 +1810,7 @@ decode failure into the `catch` clause or reverts the calling frame uncaught dec
 error the payer sees. Both outcomes are denials, so no funds are at risk either way; the
 difference is `CredentialMissing()` and `IdentityNotHeld()` versus an opaque revert with no
 selector. **No test covers it**, because `Base.t.sol:113` constructs the manager with two live
-mocks and `Creation.t.sol:624` is the only other construction, using zero.
+mocks and `Creation.t.sol:658` is the only other construction, using zero.
 
 The test that settles it is four lines and belongs in #23:
 `new MandateManager(address(token), address(0xdead), address(0xdead))`, grant a mandate with a
@@ -1994,7 +2025,7 @@ defects gives no way to tell a verified assumption from an unexamined one:
   either way. Finite allowances *are* exercised — nine explicit `approve` sites across
   `ArcParity`, `Idempotency` and `Views`, including two at `0`.
 - **The constructor's zero-address asymmetry is deliberate and right.** `_usdc` is refused at
-  zero (`v2:359`, pinned by `Creation.t.sol:639`); the registries are accepted at zero and
+  zero (`v2:359`, pinned by `Creation.t.sol:673`); the registries are accepted at zero and
   refused only when a flag needs one (`v2:447-448`). A manager with no registries is a
   perfectly good manager for mandates that set neither flag, and forcing two addresses on a
   deployment that will never consult a registry would be worse. Likewise `MockUSDC.burnFrom`
@@ -2069,7 +2100,7 @@ to it teaches the reader the opposite of F27. It belongs on #25's list.
 
 ### F28 — The model reads `expectedOwner = address(0)` as a pin where the contract reads it as "do not pin", and the model is the wrong one
 
-**Severity: informational for the chain, medium for anyone trusting the model — the divergence makes the reference implementation *stricter* than production, so it reports a live mandate as permanently dead · Status: open, pinned by a test, one-line fix deferred to #23 · Confidence: certain; both behaviours executed.**
+**Severity: informational for the chain, medium for anyone trusting the model — the divergence makes the reference implementation *stricter* than production, so it reports a live mandate as permanently dead · Status: FIXED in `af9df40`, 2026-08-29 — `reference/policy.js:699-702` now resolves the pin against `ZERO_ADDRESS` explicitly, and `reference/policy.test.js:2218` was rewritten to assert the agreement rather than deleted, which keeps the alarm and costs nothing. The status line below read "open, pinned by a test, one-line fix deferred to #23" until 2026-08-30, when this section was reconciled against the summary row that had recorded the fix a day earlier · Confidence: certain; both behaviours executed.**
 
 `contracts/MandateManager.sol:942` tests `g.expectedOwner != address(0)` explicitly, implementing
 the semantics its own `:276` documents. `reference/policy.js:578` tests bare truthiness:
@@ -2688,27 +2719,104 @@ still be hiding there.
   asserts only that a `minResponse` of 60 *constructs*, so the range F34's bound exists to permit
   is the range nothing executes, which is also why tightening the bound to `!= 100` would break
   no Solidity test — see F34's open decision.
-- **The `UnrecoverableRecipient` mirror in `approveCosignFor` is asserted by nothing.** New on
-  2026-08-29. All four occurrences of the error in `test/` are in `Views.t.sol`, on the spend
-  path, and none of the 52 `approveCosignFor(` call sites in the suite names this contract or the
-  token. The model does cover its approval leg, so the model is ahead of the contract on this one
-  point. The consequence is a prediction rather than a worry: the owed `approveCosignFor`
-  mutation-gate run should report exactly one survivor, at `:1479`, and the repair is a test.
-- **The Solidity mutation gate cannot reach a view, and both view findings came from reading.**
-  New on 2026-08-29, and the largest known hole in this project's verification.
-  `reference/mutation-gate-sol.py` works by rewriting `revert …;` statements, so a function whose
-  logic is a returned boolean has nothing for it to mutate. F35 lived in that blind spot for as
-  long as the gate has existed and no amount of re-running would have surfaced it; F36 the same.
-  Every "the gate is clean" claim in this repository is therefore a claim about refusals only.
-  `isLive`, `isCosignApproved`, `isAllowedRecipient`, `spendable`, `cosignApprovalDeadline`,
-  `windowRemaining` and `spendHash` are all outside it. Closing this needs a different mutation
-  operator — negating a returned boolean, or dropping a conjunct — not another run.
-- **Five mutation-gate targets are owed a run, three of them because this pass invalidated
-  them.** New on 2026-08-29. A gate run is only as current as the function it targets, and the
-  guards in `af9df40` grew three cleared targets: `approveCosignFor` 22 mutants → 24, `spend`
-  17 → 19, `createMandate` 21 → 27, all counted from the file. `withdrawCosign` (1 mutant) and
-  `revoke` (2) have never been run at all. That is 73 mutants across five targets. `_checkIdentity`
-  is the only contract target currently clean against this tree, at 2/2 with baseline 207.
+- **The `UnrecoverableRecipient` mirror in `approveCosignFor` was asserted by nothing. CLOSED
+  2026-08-30.** New on 2026-08-29. All four occurrences of the error in `test/` were in
+  `Views.t.sol`, on the spend path, and none of the 52 `approveCosignFor(` call sites in the suite
+  named this contract or the token, while the model did cover its approval leg. The prediction
+  recorded before the run said exactly that, and the run bore it out: the `approveCosignFor`
+  mutation gate reported one survivor, at `contracts/MandateManager.sol:1479`.
+  `test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused` in `test/Cosign.t.sol` answers it, and
+  `mutgate-only-approveCosignFor.log` shows the answer bites at baseline 209 green. **The full
+  24-mutant sweep the same day reported 24/24 and shows none of this**, because the test was already
+  in the tree when it ran. A survivor's repair is visible only in a run that predates the repair, or
+  in the `--only` run written afterwards to recover the evidence.
+- **The F32 credential guard at `createMandate:873` was shadowed rather than unasserted. CLOSED
+  2026-08-30.** New on 2026-08-30. The guard refuses a credential field set without `F_CREDENTIAL`,
+  and the test that appeared to cover it was refused one block earlier instead: the biconditional
+  reads `(flags & F_CREDENTIAL != 0) != (p.credential.validator != address(0))`, `withCredential`
+  always sets a validator, and both lines revert `BadConfig`, so the assertion held while F32 had
+  nothing behind it. The gate deleted the guard and all 207 tests still passed.
+  `test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused` sets each of the four fields on
+  its own with the validator left at zero, which leaves F32 the only line that can answer, and
+  `test_createMandate_noGateDataAndNoGateFlags_isAccepted` is its control — without it the four
+  refusals would also pass against a `createMandate` that refused every grant, and
+  `mutgate-only-createMandate.log` shows the mutant caught.
+  **Same mechanism as `BadConfig 486` on 2026-08-28 and the JS sibling's very first finding: two
+  guards that refuse the same input under the same selector hide each other, and the shadowed one
+  looks tested from every angle.**
+- **The Solidity mutation gate reaches a view's refusals but not the value it returns, and both
+  view findings came from reading.** New on 2026-08-29, and the largest known hole in this
+  project's verification. `reference/mutation-gate-sol.py` rewrites `revert …;` statements one at a
+  time, so logic that resolves to a returned value gives it nothing to mutate. F35 lived in that
+  blind spot for as long as the gate has existed and no amount of re-running would have surfaced
+  it; F36 the same. Every "the gate is clean" claim in this repository is therefore a claim about
+  refusals only. Of the contract's 22 definitions, eleven carry no `revert` and sit wholly outside
+  the gate: `getMandate`, `getWindow`, `isNonceUsed`, `isCosignApproved`, `cosignApprovalDeadline`,
+  `isAllowedRecipient`, `_isPermanentlyDead`, `isLive`, `windowRemaining`, `policyHeadroom` and
+  `spendable`. Two more are views reachable in their refusals alone, `spendHash` (1) and
+  `spendableAcross` (5). Closing this needs a different operator — negate a returned boolean, or
+  drop a conjunct — not another run.
+- **Six mutation-gate targets are owed a run, and this bullet's own count was wrong. CLOSED
+  2026-08-30 — all eleven targets have now run.** New on 2026-08-29, revised the same day, closed
+  the next. A gate run is only as current as the function it targets, and `af9df40` grew three of
+  them: `approveCosignFor` 22 mutants → 24, `spend` 17 → 19, `createMandate` 21 → 27, all counted
+  from the file. The contract offers eleven reachable targets and 89 mutants, 85 removals plus four
+  injections. At the time this bullet was written three had run clean (`_checkIdentity` 2, `revoke`
+  2, `withdrawCosign` 1) and two ran with one survivor apiece (`approveCosignFor` 24,
+  `createMandate` 27), leaving `spend` 19, `_checkCredential` 6, `spendableAcross` 5,
+  `_checkAndCommitWindows` 1, `spendHash` 1 and `constructor` 1: 33 mutants, not the 73 across
+  five targets this bullet first claimed. That figure counted two targets that had already run,
+  and it folded two internal helpers into `spend`, which calls both and covers neither. A run
+  names one function, so a refusal inside `_checkCredential` is `_checkCredential`'s to answer for.
+  **The 84 outstanding mutants across eight targets all ran on 2026-08-30, every one at baseline
+  209 passed, 0 failed.** Six came back fully clean — `approveCosignFor` 24/24, `createMandate`
+  27/27, `spend` 19/19, `_checkAndCommitWindows` 1/1, `spendHash` 1/1, `constructor` 1/1 — and two
+  returned one survivor each, both of them equivalent mutants no test can kill, covered in the next
+  bullet. With `_checkIdentity`, `revoke` and `withdrawCosign` from 2026-08-29 that is 89 of 89
+  mutants attempted and eleven of eleven targets run, so no clean claim in this document now rests
+  on a function the gate has never addressed. The logs are `mutgate-sol-<target>.log`, plus
+  `mutgate-only-approveCosignFor.log` and `mutgate-only-createMandate.log` for the two `--only`
+  confirmations; they are on disk and they outrank this table.
+- **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
+  coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
+  `_checkCredential:1261` is the `catch` arm's
+  `revert CredentialMissing();` and `spendableAcross:2010` is the hoisted
+  `if (payer == address(0)) revert UnknownMandate();`. In each case the successor guard refuses the
+  same input under the **same error name** one to twelve lines lower — `:1264` and `:2022` — so no
+  input exists that reaches the mutated line and not its shadow, nothing outside the contract can
+  observe the removal, and **no test can be written to kill either.** The three classes this
+  document already describes all end in a test: unasserted wants one, shadowed wants one that
+  isolates the guard, and unreachable-by-construction wants the state forced with `vm.store`. This
+  one ends in no test. The diagnostic question that separates it from the merely shadowed is
+  whether an input exists that reaches the mutated guard but not its shadow — for `BadConfig 486` on
+  2026-08-28 the answer was yes and a test settled it, and here it is no for both.
+  **Each shadow is itself a caught mutant in the same run** (`:1264` by four tests, `:2022` by
+  `test_spendableAcross_unknownId_reverts`), so the behaviour is asserted; only the duplicate line
+  is unobservable. **Neither wanted a contract change.** `_checkCredential`'s shared selector is
+  deliberate and splitting it would be wrong: Arc Testnet's live ValidationRegistry was observed on
+  2026-08-24 to revert `Error("unknown")` for an unset hash, so the catch arm carries the ordinary
+  not-yet-filed case, and a separate error there would report that chain's commonest credential
+  state as a registry failure. `spendableAcross`'s duplicate is the price of a uniform loop body, a
+  warm SLOAD at 100 gas instead of branching on the first iteration. **Doing nothing was the worst
+  option**, because two of eleven targets exiting 1 forever teaches a reader to skip survivors, and
+  a real regression at those lines would then be indistinguishable from the known ones. So
+  `reference/mutation-gate-sol.py` carries an `EQUIVALENT` table that earns each exemption: an entry
+  names its shadow's exact source text, the gate honours the entry only while that text appears
+  exactly once inside the same target, deleting the shadow makes the claim lapse and the mutant
+  report SURVIVED at exit 1, and rewording the keyed line prints STALE ENTRY. It is keyed by source
+  text rather than line number because mutants move — `_checkIdentity`'s pair shifted 1228/1229 to
+  1234/1235 on a docstring edit alone. **Writing this up also caught a false claim in the
+  contract**: the comment above `:2010` said the hoisted check is what makes "the payer of nothing"
+  unreachable below, which the loop's own check does anyway. Corrected in place, comment-only and
+  line-neutral.
+- **The gate could not address the constructor at all, for as long as it has existed.** New on
+  2026-08-29. `function_bounds` looked for `    function NAME(`, and a constructor carries no
+  `function` keyword, so `constructor` as a target died on "no function constructor(" instead of
+  running. Behind that gap sits the contract's whole defence against a permanently mis-wired
+  deployment, `if (_usdc == address(0)) revert BadConfig();`, and it is the one refusal in the
+  file that no "the gate is clean" claim has ever covered. `Creation.t.sol:673` does assert it, so
+  this was a hole in the verification rather than in the contract. The opener now accepts both
+  spellings and the target runs, which is how the census above reaches 89 and not 88.
 - **The ValidationRegistry's pending state.** Arc documents a two-step flow, so a `requestHash`
   can be requested and unanswered — a state `MockValidationRegistry`'s binary `set` flag cannot
   express, and one the 2026-08-24 live probe did not reach, since those three hashes had never

@@ -56,13 +56,13 @@
 // the suite knows what the right answer was. Only the second is what this script exists to
 // establish, so crash kills are counted and named instead of being folded into the total.
 //
-// `evaluate` has exactly two of them, decided on 2026-08-29 and not to be re-probed: line 602's
-// `if (!mandate)` and line 728's `if (!att)`. Both guard against an ABSENT object rather than a
-// wrong value, so a fall-through immediately dereferences null — `mandate.revoked`, `att.validator`
-// — and no test can ever observe a returned denial to assert on. Neither is a gap in the suite and
-// neither can be converted into an assertion-kill without inventing state the guard exists to
-// refuse. Any THIRD crash-kill appearing in `evaluate` is new and should be read rather than
-// assumed to belong to this pair.
+// `evaluate` has exactly two of them, decided on 2026-08-29 and not to be re-probed:
+// `reference/policy.js:605`'s `if (!mandate)` and `:731`'s `if (!att)`, both of which guard
+// against an ABSENT object rather than a wrong value, so a fall-through immediately dereferences
+// null — `mandate.revoked`, `att.validator` — and no test can ever observe a returned denial to
+// assert on. Neither is a gap in the suite and neither can be converted into an assertion-kill
+// without inventing state the guard exists to refuse. Any THIRD crash-kill appearing in
+// `evaluate` is new and should be read rather than assumed to belong to this pair.
 //
 // A survivor is not automatically a gap in the suite. It may be a broken mutant: the first
 // version of the window injection compared `windowUsage(...)` — which returns an object — to a

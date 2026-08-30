@@ -2002,10 +2002,10 @@ contract MandateManager {
 
         // The payer is read from the first id rather than taken as a parameter — it is
         // derivable, and a parameter would let a caller assert a payer the ids do not
-        // have. Checking it for existence here is what makes "the payer of nothing"
-        // unreachable below. The loop reads slot 0 of this same mandate again at i == 0;
-        // that is a warm SLOAD at 100 gas, bought deliberately to keep the loop body
-        // uniform rather than branching on the first iteration.
+        // have. The loop reads slot 0 of this same mandate again at i == 0, a warm SLOAD
+        // at 100 gas bought deliberately to keep the loop body uniform, which leaves this
+        // existence check a duplicate of the loop's own for the first id alone. Removing
+        // it is therefore unobservable, and `reference/mutation-gate-sol.py` records why.
         address payer = _mandates[mandateIds[0]].payer;
         if (payer == address(0)) revert UnknownMandate();
 

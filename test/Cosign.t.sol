@@ -967,6 +967,31 @@ contract CosignTest is Base {
         payReverts(id, payer, usd(50), MandateManager.SelfPayment.selector);
     }
 
+    /// F29's mirror on the approval path, and the guard the mutation gate found nothing asserting.
+    /// `test/Views.t.sol:439-465` pins both selectors, and it pins them through `spend`, so
+    /// deleting this line from `approveCosignFor` left all 207 tests passing.
+    ///
+    /// Both addresses belong in the same partition as the payer: an address cannot stop being
+    /// itself, so `spend` refuses an approval naming either one for as long as the mandate
+    /// exists. A co-signer able to authorise one would be paying gas for the false assurance
+    /// F17 exists to prevent.
+    function test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused() public {
+        bytes32 id = grant(cosignParams()); // threshold 10, and no allowlist
+
+        approveReverts(id, address(mm), usd(50), nextNonce(), unrecoverable(address(mm)));
+        approveReverts(id, address(token), usd(50), nextNonce(), unrecoverable(address(token)));
+
+        // One unit is at or below the threshold, so this case also pins the ordering against
+        // `CosignNotRequired`: a contract that consulted the threshold first would answer "no
+        // signature needed" about a payment that can never happen.
+        approveReverts(id, address(mm), 1, nextNonce(), unrecoverable(address(mm)));
+
+        // The spend path refuses the same two addresses with the same two errors, which is what
+        // makes this a mirror of `spend` rather than a rule the approval path invented.
+        payReverts(id, address(mm), usd(50), unrecoverable(address(mm)));
+        payReverts(id, address(token), usd(50), unrecoverable(address(token)));
+    }
+
     /// `perTxCap` is fixed at creation and `totalSpent` only grows, so both refusals are
     /// permanent. The second case is the interesting one: the amount fits the lifetime cap in
     /// the abstract and does not fit what is LEFT of it, and since headroom never widens, no
@@ -1012,9 +1037,9 @@ contract CosignTest is Base {
      * `TotalSpentCeiling`. It was the single survivor out of 21 mutants, and it survived not
      * because the guard is shadowed by a neighbour — the way `BadConfig` hides behind
      * `NotCosigner` in the model — but for the plainer reason that nothing asserted it at all.
-     * `Bounds.t.sol` covers the identical guard on the spend path at line 763 and that coverage
-     * reads, from a distance, like coverage of both while covering only one: the twelve tests
-     * above assert eleven guards.
+     * `Bounds.t.sol` covers the identical guard on the spend path,
+     * `contracts/MandateManager.sol:1060`, and that coverage reads, from a distance, like
+     * coverage of both while covering only one: the twelve tests above assert eleven guards.
      *
      * Reaching it takes the same two conditions `Bounds.t.sol` documents at length, and the
      * first is a real constraint rather than a fixture convenience: the mandate must have NO

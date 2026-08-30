@@ -3,7 +3,8 @@
 #
 # Mutation gate for the CONTRACT, run from the project root:
 #
-#     python3 reference/mutation-gate-sol.py [functionName]     # default: approveCosignFor
+#     python3 reference/mutation-gate-sol.py [functionName]              # default: approveCosignFor
+#     python3 reference/mutation-gate-sol.py createMandate --only 873    # one guard, named by line
 #
 # WHY THIS EXISTS, and why it is a second file rather than a flag on the first.
 #
@@ -42,13 +43,23 @@
 # proving nothing. Probe a survivor (an `emit log_uint` or a `console.log` in the injected
 # line is enough) before believing it.
 #
+# Some survivors turn out to be unkillable rather than untested, because the guard below them
+# refuses the same input under the same error name. `EQUIVALENT` records those, and it earns the
+# right to exist by naming the shadow and refusing to apply when that shadow is gone. Read the
+# comment on the table before adding to it; an entry written without probing the fall-through path
+# is an exemption with a paragraph attached, which is worse than an unexplained survivor.
+#
 # SAFETY. Every mutation is written into a throwaway copy of the project under the OS temp
 # directory; the working tree is never modified. That is a claim, so the script also hashes
 # `contracts/MandateManager.sol` before and after and refuses to exit 0 if the two differ.
 #
-# COST. A full recompile of this tree is ~4s and the suite ~10s wall, so budget ~20 minutes
-# for the default 21 mutants. The whole suite runs against every mutant — no --match-path
-# shortcut — so "caught" means some named test in the repo noticed, not just a chosen one.
+# COST. Ten runs on 2026-08-30 put this at 18-21s per mutant including its recompile, plus one
+# baseline of about the same per target, so the contract's whole census of 89 mutants is roughly
+# half an hour. An earlier note here guessed ~57s each from the compile and suite times measured
+# separately, which overstated it threefold — forge caches almost all of that between mutants. The
+# whole suite runs against every mutant, with no --match-path shortcut, so "caught" means some
+# named test in the repo noticed rather than a chosen one.
+
 
 import hashlib
 import os
@@ -57,12 +68,66 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from pathlib import Path
 
+# Line-buffered, because this script is always run under `tee` and writes to both streams. Block
+# buffered stdout against unbuffered stderr puts a `die` message above the header that should
+# precede it, which in a log reads as though the tool failed before it started.
+sys.stdout.reconfigure(line_buffering=True)
+
+
+def die(msg, code=2):
+    print(f"mutation-gate-sol: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
 ROOT = Path(__file__).resolve().parent.parent
 REL_SRC = Path("contracts") / "MandateManager.sol"
-TARGET = sys.argv[1] if len(sys.argv) > 1 else "approveCosignFor"
+
+
+# `--only` narrows a run to guards named by contract line. It exists because the gate's cost is
+# per TARGET while the work it provokes is per MUTANT: a survivor is answered by writing one
+# test, and confirming that the test bites meant re-running all 24 or 27 mutants of its
+# function, eight minutes to settle one question. Both survivors of 2026-08-29 were repaired by
+# a single new test each, and what you want next is that one mutant, not its two dozen siblings.
+#
+# It narrows the run and changes nothing else. The baseline still has to be green, the whole
+# suite still runs against the mutant, and a line carrying no mutable `revert` is an error
+# rather than a run of zero mutants reporting success. Injections have no line number to name,
+# so `--only` skips them and reports that it did; run the target bare to reach those.
+def parse_args(argv):
+    target, only = None, None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--only":
+            i += 1
+            if i >= len(argv):
+                die("--only needs one or more contract line numbers, comma- or space-separated")
+            only = argv[i]
+        elif a.startswith("--only="):
+            only = a.split("=", 1)[1]
+        elif a.startswith("-"):
+            die(f"unknown option {a!r}. The only option is --only LINE[,LINE...]")
+        elif target is None:
+            target = a
+        else:
+            die(f"unexpected argument {a!r}. One target function per run.")
+        i += 1
+    if only is None:
+        return target or "approveCosignFor", None
+    try:
+        wanted = {int(x) for x in only.replace(",", " ").split()}
+    except ValueError:
+        die(f"--only {only!r} is not a list of line numbers")
+    if not wanted:
+        die("--only was given no line numbers")
+    return target or "approveCosignFor", wanted
+
+
+TARGET, ONLY = parse_args(sys.argv[1:])
 
 # The project's established seed. Pinned for the baseline AND every mutant, so a failure is
 # attributable to the mutation rather than to a fresh fuzz corpus. See foundry.toml on what
@@ -107,6 +172,52 @@ INJECTIONS = {
     },
 }
 
+# ---------------------------------------------------------------- proven equivalences
+#
+# A mutant that NO test can ever kill, because the guard it neuters refuses the same input under
+# the same error name one or two lines lower. Removing it is then unobservable from outside the
+# contract, which makes it a permanent property of the code rather than a hole in the suite. The
+# two crash-kills recorded in the JS sibling's header are standing findings of the same shape.
+#
+# Both entries below came out of the 2026-08-30 sweep, and each was probed by reading the fall-
+# through path before it was written here. That probe is the entire licence for an entry existing.
+#
+# THIS IS NOT A SUPPRESSION LIST, and the difference is mechanical rather than a promise. Every
+# entry has to name the shadow that makes its mutant unobservable, and the gate declines the entry
+# unless that shadow is still present, exactly once, inside the same target. Delete the shadow and
+# the exemption lapses on the very next run, which is the regression a plain exemption list hides.
+# An entry matching no mutant is reported too, so a claim cannot rot here unread.
+#
+# Keyed by the mutated line's own source text rather than by its line number, because mutants move:
+# `_checkIdentity`'s pair shifted from 1228/1229 to 1234/1235 on a docstring edit that touched no
+# code at all.
+EQUIVALENT = {
+    ("_checkCredential", "revert CredentialMissing();"): {
+        "shadow": "if (gotValidator == address(0)) revert CredentialMissing();",
+        "why": (
+            "A reverting registry leaves all four locals at their zero defaults, so the "
+            "zero-validator check refuses the identical call under the identical selector one "
+            "line lower. Splitting the two apart would be actively WRONG rather than merely "
+            "unnecessary: Arc's live registry was observed on 2026-08-24 to revert with "
+            'Error("unknown") for an unset hash, so this catch arm carries the ordinary '
+            "not-yet-filed case, and a separate error here would report Arc's commonest "
+            "credential state as a registry failure. The header of test/mocks/MockRegistries.sol "
+            "records that probe and its three transaction hashes."
+        ),
+    },
+    ("spendableAcross", "if (payer == address(0)) revert UnknownMandate();"): {
+        "shadow": "if (p == address(0)) revert UnknownMandate();",
+        "why": (
+            "The loop's first iteration reads the same storage slot as this hoisted payer read, "
+            "and nothing between them can write it, because a view with no external call ahead "
+            "of the loop cannot. An empty list returned earlier, so that iteration always runs. "
+            "The contract says as much where the guard sits: the re-read at i == 0 is a "
+            "deliberate warm SLOAD, bought to keep the loop body uniform, and this redundancy is "
+            "what the purchase buys."
+        ),
+    },
+}
+
 # ---------------------------------------------------------------- harness
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -124,11 +235,6 @@ REVERT = re.compile(r"revert\s+\w+\s*\([^;]*\);")
 KILLER = re.compile(r"\]\s+([A-Za-z_]\w*)\s*\(")
 
 
-def die(msg, code=2):
-    print(f"mutation-gate-sol: {msg}", file=sys.stderr)
-    sys.exit(code)
-
-
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -143,16 +249,37 @@ def is_code(line):
 
 
 def function_bounds(lines, name):
-    """First line of `    function NAME(` through the next line that is exactly `    }`."""
+    """First line of `    function NAME(` through the next line that is exactly `    }`.
+
+    `constructor` carries no `function` keyword, so it needs its own opener. Without this it
+    matched nothing and the gate refused the target outright, which left the contract's only
+    defence against a permanently mis-wired deployment — the `if (_usdc == address(0)) revert
+    BadConfig();` in the constructor — as the one refusal in the file that the gate could not
+    address, and `Creation.t.sol:673` already asserts it. So the omission was in the tooling and
+    not in the contract, and this opener is what lets the gate confirm the assertion bites.
+    """
+    openers = ("    constructor(",) if name == "constructor" else (f"    function {name}(",)
     try:
-        start = next(i for i, l in enumerate(lines) if l.startswith(f"    function {name}("))
+        start = next(i for i, l in enumerate(lines) if l.startswith(openers))
     except StopIteration:
-        die(f"no function {name}( at contract indentation in {REL_SRC}")
+        die(f"no {name} at contract indentation in {REL_SRC}")
     try:
         end = next(i for i, l in enumerate(lines) if i > start and l == "    }")
     except StopIteration:
         die(f"unterminated {name}")
     return start, end
+
+
+def shadow_line(name, text):
+    """The one code line inside `name` whose stripped source is exactly `text`, or None.
+
+    None is returned both when the shadow has vanished and when it appears more than once, since
+    an ambiguous match cannot support a claim about which line does the shadowing. Either answer
+    withdraws the equivalence and lets the mutant report as a survivor again, which is the whole
+    mechanism that separates `EQUIVALENT` from an exemption list."""
+    s, e = function_bounds(original, name)
+    hits = [i + 1 for i in range(s, e + 1) if is_code(original[i]) and original[i].strip() == text]
+    return hits[0] if len(hits) == 1 else None
 
 
 def run_forge(work, lines):
@@ -193,17 +320,69 @@ if not src.is_file():
 before = sha(src)
 original = src.read_text(encoding="utf-8").split("\n")
 
-work = Path(tempfile.mkdtemp(prefix="remit-solmut-"))
-for item in ("contracts", "test", "lib", "foundry.toml"):
-    s = ROOT / item
-    if not s.exists():
+print(f"mutation gate (solidity): {TARGET}")
+
+# ---------------------------------------------------------------- build the mutant list
+#
+# Ahead of both the copy and the baseline, because neither can rescue a target name that does
+# not exist or an `--only` line that names no guard, and the baseline alone costs 18 seconds. It
+# also means no `die` between here and the copy can leak a throwaway tree, because there is not
+# one yet.
+
+start, end = function_bounds(original, TARGET)
+mutants = []  # (kind, label, lines, key) — key is the mutated line's source text, or None
+mutable = []  # every line this target offers, so an --only miss can say what was available
+
+for i in range(start, end + 1):
+    line = original[i]
+    if "revert " not in line or not is_code(line) or not REVERT.search(line):
+        continue
+    mutable.append(i + 1)
+    if ONLY is not None and i + 1 not in ONLY:
+        continue
+    err = re.search(r"revert\s+(\w+)", line).group(1)
+    mutated = list(original)
+    mutated[i] = REVERT.sub("{}", line, count=1)
+    mutants.append(("removed", f"{err} (line {i + 1})", mutated, line.strip()))
+
+if ONLY is not None:
+    unmatched = sorted(ONLY - set(mutable))
+    if unmatched:
+        die(
+            f"--only named {unmatched}, which carry no mutable `revert` in {TARGET} "
+            f"(lines {start + 1}-{end + 1}). That target offers: {mutable}"
+        )
+
+inj = INJECTIONS.get(TARGET)
+if inj and ONLY is not None:
+    print(f"  --only is set, so the {len(inj['cases'])} injection(s) for {TARGET} are skipped")
+elif inj:
+    anchor = [i for i in range(start, end + 1) if inj["anchor"] in original[i] and is_code(original[i])]
+    if len(anchor) != 1:
+        die(f"anchor {inj['anchor']!r} matched {len(anchor)} code lines in {TARGET}; need exactly 1")
+    at = anchor[0]
+    for label, code in inj["cases"]:
+        mutants.append(("injected", label, original[: at + 1] + code.split("\n") + original[at + 1 :], None))
+
+if not mutants:
+    die(f"{TARGET} contains no `revert` guards to mutate")
+
+# ---------------------------------------------------------------- the throwaway copy
+
+COPY = ("contracts", "test", "lib", "foundry.toml")
+for item in COPY:
+    if not (ROOT / item).exists():
         die(f"missing {item} — cannot build a standalone copy of the project")
+
+work = Path(tempfile.mkdtemp(prefix="remit-solmut-"))
+for item in COPY:
+    s = ROOT / item
     if s.is_dir():
         shutil.copytree(s, work / item, symlinks=True)
     else:
         shutil.copy2(s, work / item)
-print(f"mutation gate (solidity): {TARGET}")
 print(f"  working copy: {work}   (the tree at {ROOT} is never written to)")
+print(f"  {len(mutants)} mutant(s) queued")
 
 # A green baseline is a PRECONDITION, not a result. If the unmutated suite is red, every
 # "caught" below is meaningless because the failure was already there.
@@ -220,44 +399,38 @@ if baseline["failed"] != 0:
     sys.exit(2)
 print(f"  baseline: {baseline['passed']} passed, 0 failed  ({time.time() - t0:.0f}s)\n")
 
-# ---------------------------------------------------------------- build the mutant list
-
-start, end = function_bounds(original, TARGET)
-mutants = []  # (kind, label, lines)
-
-for i in range(start, end + 1):
-    line = original[i]
-    if "revert " not in line or not is_code(line) or not REVERT.search(line):
-        continue
-    err = re.search(r"revert\s+(\w+)", line).group(1)
-    mutated = list(original)
-    mutated[i] = REVERT.sub("{}", line, count=1)
-    mutants.append(("removed", f"{err} (line {i + 1})", mutated))
-
-if not mutants:
-    shutil.rmtree(work, ignore_errors=True)
-    die(f"{TARGET} contains no `revert` guards to mutate")
-
-inj = INJECTIONS.get(TARGET)
-if inj:
-    anchor = [i for i in range(start, end + 1) if inj["anchor"] in original[i] and is_code(original[i])]
-    if len(anchor) != 1:
-        shutil.rmtree(work, ignore_errors=True)
-        die(f"anchor {inj['anchor']!r} matched {len(anchor)} code lines in {TARGET}; need exactly 1")
-    at = anchor[0]
-    for label, code in inj["cases"]:
-        mutants.append(("injected", label, original[: at + 1] + code.split("\n") + original[at + 1 :]))
-
 # ---------------------------------------------------------------- run
 
 results = []
-for n, (kind, label, lines) in enumerate(mutants, 1):
+claimed = set()  # EQUIVALENT keys this run actually reached, so an unmatched one can be reported
+for n, (kind, label, lines, key) in enumerate(mutants, 1):
     t = time.time()
     print(f"  [{n:2d}/{len(mutants)}] {kind:8s} {label} ... ", end="", flush=True)
     r = run_forge(work, lines)
     verdict = "INCONCLUSIVE" if r["failed"] is None else ("caught" if r["failed"] > 0 else "SURVIVED")
+    eq = EQUIVALENT.get((TARGET, key)) if key else None
+    note = None
+    at = None
+    if eq:
+        claimed.add((TARGET, key))
+        at = shadow_line(TARGET, eq["shadow"])
+        if verdict == "SURVIVED" and at:
+            verdict = "EQUIVALENT"
+        elif verdict == "SURVIVED":
+            note = (
+                f"an EQUIVALENT entry claims the shadow {eq['shadow']!r} makes this mutant "
+                "unobservable, and that line is no longer present exactly once in "
+                f"{TARGET}. The claim has LAPSED, so this counts as a survivor. Either restore "
+                "the shadow or write the test the guard now needs."
+            )
+        elif verdict == "caught":
+            note = (
+                "an EQUIVALENT entry expected this to survive and a test killed it, so the "
+                "entry is stale and should come out. Being caught is the better outcome; the "
+                "reason recorded in the entry is what has stopped being true."
+            )
     print(f"{verdict}  ({time.time() - t:.0f}s)")
-    results.append((kind, label, verdict, r))
+    results.append((kind, label, verdict, r, eq, at, note))
 
 shutil.rmtree(work, ignore_errors=True)
 
@@ -265,16 +438,32 @@ shutil.rmtree(work, ignore_errors=True)
 
 print(f"\nmutation gate: {TARGET} — {len(mutants)} mutants, baseline {baseline['passed']} green\n")
 bad = []
-for kind, label, verdict, r in results:
+for kind, label, verdict, r, eq, at, note in results:
     print(f"  {verdict:12s} {kind:8s} {label}")
     if verdict == "caught":
         killed = ", ".join(r["killers"][:3]) or "(unnamed)"
         more = f" (+{len(r['killers']) - 3} more)" if len(r["killers"]) > 3 else ""
         print(f"               by: {killed}{more}   [{r['failed']} failing]")
+    elif verdict == "EQUIVALENT":
+        print(f"               shadowed by line {at}: {eq['shadow']}")
+        for para in textwrap.wrap(eq["why"], 84):
+            print(f"               {para}")
     else:
         bad.append((kind, label, verdict))
         for l in r["tail"]:
             print(f"               {l}")
+    if note:
+        for para in textwrap.wrap(note, 84):
+            print(f"               NOTE: {para}")
+
+stale = []
+for k in sorted(set(EQUIVALENT) - claimed):
+    if k[0] != TARGET or ONLY is not None:
+        continue
+    stale.append(k)
+    print(f"\n  STALE ENTRY  EQUIVALENT names {k[1]!r} in {TARGET}, and no mutant this run carried")
+    print("               that text. The line has been edited or removed, so the entry is now")
+    print("               describing code that is not there. Delete it or update its key.")
 
 after = sha(src)
 if after != before:
@@ -284,8 +473,28 @@ if after != before:
     sys.exit(3)
 
 print()
+eqs = [label for _kind, label, verdict, _r, _eq, _at, _note in results if verdict == "EQUIVALENT"]
 if not bad:
-    print(f"OK — every one of the {len(mutants)} mutants was caught by a named test.")
+    # Two different claims, never merged into one sentence. A mutant a test killed and a mutant no
+    # test could kill are both acceptable outcomes, and reporting the second as the first is how
+    # the gate would start overstating what it knows.
+    if not eqs:
+        subject = "the one mutant was" if len(mutants) == 1 else f"all {len(mutants)} mutants were"
+        print(f"OK — {subject} caught by a named test.")
+    else:
+        caught_n = len(mutants) - len(eqs)
+        print(f"OK — {caught_n} of {len(mutants)} mutants were caught by a named test, and {len(eqs)}")
+        print("     could not be by any test that could be written:")
+        for label in eqs:
+            print(f"       EQUIVALENT  {label}")
+        print("     Each neuters a guard whose successor refuses the same input under the same error")
+        print("     name, so nothing outside the contract can observe the removal. The shadow each")
+        print("     one leans on was checked for above, and the exemption lapses if it disappears.")
+    if stale:
+        # Said again down here because the warning is easy to scroll past, and a reader who stops
+        # at the last line would otherwise take a bookkeeping problem for a clean run.
+        print(f"     {len(stale)} EQUIVALENT entr(y/ies) above no longer match any mutant. Verification")
+        print("     is unaffected and the table needs an edit.")
     sys.exit(0)
 print(f"{len(bad)} mutant(s) not caught. Each is a HYPOTHESIS: probe it before believing it,")
 print("then either fix the mutant or add the test it is missing.")
