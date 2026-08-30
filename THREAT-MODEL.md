@@ -3005,9 +3005,28 @@ still be hiding there.
   interfaces and one for the contract; three `screaming-snake-case-immutable` there, on
   `usdc`, `identityRegistry` and `validationRegistry`; three `screaming-snake-case-const` in
   `MockUSDC.sol`, on `name`, `symbol` and `decimals`; and two `multi-contract-file` in
-  `MockRegistries.sol`. Every one is a naming or file-layout convention, and renaming any
-  of the three immutables would change a getter in the ABI of a contract that moves
-  money, so it is an open decision about the public surface rather than a lint fix.
+  `MockRegistries.sol`. Every one is a naming or file-layout convention rather than a defect,
+  each judged in `FORGE.md`'s lint section.
+
+  **The immutable rename was then measured, and it is declined.** Two costs expected of it
+  turn out to be absent. No interface in the repo declares `usdc()`, `identityRegistry()` or
+  `validationRegistry()`, and each getter has exactly one call site, all three in
+  `script/Deploy.s.sol:148-150`. The rename is width-neutral too, since `USDC` matches `usdc`
+  exactly and the two registry names grow one column each on two guard lines that sit well
+  inside any formatter limit. Line citations are the one small cost that is real: three live
+  pointers land on the immutable declarations, all three from `FORGE.md`'s own note table, and
+  the rename rewrites the text they point at, so the table needs re-reading afterwards. The
+  ABI reason this bullet carried until now does not survive measurement either, since v1 is
+  testnet-only with no third-party integrator and carries no upgrade path, so a v2 deploy
+  reaches a fresh address that a caller has to point at deliberately before reading its ABI.
+  What decides the question is a token collision, in a repo whose
+  verification is largely textual: the contract's own prose uses `USDC` for the asset 40
+  times, `usdc` appears 12 times and always means the identifier, and `USDC` as a word
+  appears 125 times across the seven published documents, so the rename would merge two
+  referents into one token. The `immutable` keyword and the absence of any setter already
+  carry what the capitals would add, and renaming two of the three is worse than either
+  alternative, since one declaration block would then hold two naming schemes while the note
+  still fired on `usdc`.
 
   Correcting the record on the way through: the contract carries **six** in-place
   suppressions, three `unsafe-typecast` and three `block-timestamp`, where both

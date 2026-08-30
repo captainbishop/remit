@@ -535,10 +535,39 @@ single-file design chosen on purpose and described under Layout; splitting the t
 interfaces into their own files would add the imports that design exists to avoid. The three
 `MockUSDC` constants are `name`, `symbol` and `decimals`, whose names ERC-20 fixes, so
 renaming them to satisfy a style note would break the standard the mock exists to imitate.
-The three immutables are `usdc`, `identityRegistry` and `validationRegistry`, and each is
-`public`, so renaming one changes a getter in the ABI — a decision about the contract's
-public surface rather than a lint fix, and it is recorded as an open decision instead of
-being settled inside this section.
+The three immutables are `usdc`, `identityRegistry` and `validationRegistry`, each `public`.
+The rename was measured against the repo rather than argued, and it is declined. The
+measurement is recorded here so the reasoning can be checked instead of taken on trust.
+
+Two of the costs expected of it turned out to be absent. Nothing breaks structurally: no
+interface in the repo declares any of the three getters, and each getter has exactly one
+call site, all three inside `script/Deploy.s.sol:148-150`. The rename also leaves every line
+number where it stands, because `usdc` and `USDC` are the same width, so the two longest
+reference lines at 111 columns do not move, and `identityRegistry` and `validationRegistry`
+grow by one column each on the two `BadConfig` guards at 99 and 103. Line citations keep
+resolving, since the lines hold still, though three need re-reading: the note table above
+cites the three declarations by number, and the rename rewrites the text at each, so
+`line-citations.py` would report three drifted rows until the table is read again. The ABI
+argument an earlier draft of this section gave does not survive the same treatment: v1 is
+testnet-only with no third-party integrator, and IMMUTABILITY.md records that there is no
+upgrade path, so a v2 deploy reaches a fresh address that a caller has to point at
+deliberately, reading the new ABI when it does.
+
+The cost that decides the question is a token collision. The contract's comments and NatSpec
+use `USDC` for the asset 40 times; `usdc` appears 12 times and always means the identifier;
+and `USDC` as a word appears 125 times across the seven published documents. One `grep`
+separates the two referents today, and the rename merges them, in a repo whose verification
+is substantially textual — `line-citations.py`, `fact-diff.py`, `prose-check.py`,
+`vacuity-check.py` and every published count read the source as text.
+
+Two smaller findings finish the case against it. The convention's payload is already carried
+by the `immutable` keyword on the declaration and by the absence of any setter, so capitals
+would add emphasis rather than information. Renaming only the two registries, which carry no
+collision, is worse than either alternative, since three sibling immutables in one
+declaration block would then follow two naming schemes while
+`screaming-snake-case-immutable` still fired on `usdc`. What remains is 21 contract lines and
+3 call sites edited in a contract that moves money, for an `info`-severity style note with no
+security effect, so the rename is declined as of 2026-08-30.
 
 ## What the first compile was predicted to find
 
