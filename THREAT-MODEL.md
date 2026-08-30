@@ -2541,6 +2541,19 @@ before comparing and treats `ZERO_ADDRESS` as "do not pin", and the pinning test
 `policy.test.js:2269` records the consequence for the suite: with a pin at anyone but the spender
 refused at grant time, `IDENTITY_TRANSFERRED` is now unreachable through the ordinary path.
 
+**The "second instance" reading was wrong, corrected 2026-08-30.** The paragraph above rests on
+`test/Gates.t.sol`'s docstring, and that docstring was already stale when it was quoted.
+`reference/policy.js` has read `staleAfter > 0n` since the root commit `2bb637a`, so the model
+treated `maxStaleness == 0` as "no freshness requirement" from the first line of this
+repository's history, and the suite in that same commit asserted exactly that. The zero-as-unset
+hazard is therefore real once rather than twice: `expectedOwner` is the only field where the model
+ever read a zero as a value, and F28's own evidence, both behaviours executed, is untouched by
+this. The citation `test/Gates.t.sol:143-162` was correct at `d4f15ac`, where this row was
+written, and the two lines carrying the claim now sit at `test/Gates.t.sol:262-263`, where the
+model is recorded as agreeing. `CHANGELIST.md:954` keeps the "second instance" phrasing, because
+it describes a shared hazard class rather than a live divergence, and this layer is where its
+correction lives.
+
 ---
 
 ### F29 — A spend to this contract or to the USDC token is money no one can move again, and every recipient rule allowed it

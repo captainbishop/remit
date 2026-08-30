@@ -259,8 +259,8 @@ contract GatesTest is Base {
      * field gets a check that never expires. The README says so, and this test makes
      * the choice explicit so no maintainer "fixes" it by accident.
      *
-     * reference/policy.js currently encodes zero the other way. The model is wrong;
-     * the contract is right.
+     * reference/policy.js reads zero the same way, at `staleAfter > 0n`, and has since
+     * the root commit. An earlier version of this line said the model was wrong.
      */
     function test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0));
@@ -268,6 +268,19 @@ contract GatesTest is Base {
 
         vm.warp(block.timestamp + 3650 days);
         pay(id, usd(10)); // a decade-old attestation still passes
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// The zero case and F31's refusal meet here, in a cell neither side of the repo covered:
+    /// `maxStaleness == 0` with a stamp dated in the future spends, because both legs of the
+    /// staleness guard sit under `maxStaleness != 0`. A payer who declined an age bound gets no
+    /// age check at all, including the fail-closed one. The model asserts the same thing in the
+    /// closing lines of `credential gate (F31)` in reference/policy.test.js.
+    function test_credentialGate_zeroMaxStaleness_acceptsAFutureDatedStamp() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0));
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp + 365 days);
+
+        pay(id, usd(10));
         assertEq(token.balanceOf(vendor), usd(10));
     }
 

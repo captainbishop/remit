@@ -1335,18 +1335,18 @@ contract MandateManager {
         if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();
 
         if (response < c.minResponse) revert CredentialMissing();
-        // F31. The `nowTs > lastUpdate` conjunct this replaces was there to stop an unsigned
-        // subtraction underflowing, and it did — by treating a future-dated attestation as
-        // fresh forever. `maxStaleness` then applied to every attestation except the one class
-        // that cannot be honest about its own age. A validator that sets `lastUpdate` ahead of
-        // the chain clock, once, buys an attestation that never expires; on Arc the same thing
-        // happens by accident whenever a registry stamps a value from a clock running fast.
-        // Refusing is the fail-closed reading: an attestation dated in the future has no
-        // knowable age, and a freshness rule that cannot measure age should not pass.
+        // F31. The `nowTs > lastUpdate` conjunct this replaces stopped an unsigned subtraction
+        // underflowing by treating a future-dated attestation as fresh forever. A validator
+        // that sets `lastUpdate` ahead of the chain clock buys an attestation that never
+        // expires; on Arc the same thing happens by accident whenever a registry stamps a value
+        // from a clock running fast. Refusing is the fail-closed reading: a future-dated
+        // attestation has no knowable age, and a rule that cannot measure age should not pass.
         //
-        // The underflow is still impossible. The first leg returns true for every case where
-        // `lastUpdate > nowTs`, so the subtraction in the second leg only ever runs when
-        // `nowTs >= lastUpdate`, which is exactly the guarantee the old conjunct provided.
+        // Both legs sit under `maxStaleness != 0`, so both speak only to a payer who asked for
+        // a freshness rule. Zero declines one, and a future stamp passes there deliberately,
+        // pinned by test_credentialGate_zeroMaxStaleness_meansNoFreshnessRequirement.
+        // The underflow stays impossible: leg one is true whenever `lastUpdate > nowTs`, so
+        // leg two subtracts only when `nowTs >= lastUpdate`.
         if (c.maxStaleness != 0 && (lastUpdate > nowTs || nowTs - lastUpdate > c.maxStaleness)) {
             revert CredentialStale();
         }

@@ -851,8 +851,8 @@ function evaluate(mandate, request, ctx) {
     // its own age. One future-dated stamp bought a credential that never went stale.
     //
     // A registry with a fast clock produces that by accident, so it is not a story about a
-    // malicious validator. An attestation dated in the future has an age that cannot be
-    // computed, and refusing it is the only answer that does not amount to trusting it.
+    // malicious validator. Both legs live under `staleAfter > 0n`: where a payer asked for an
+    // age bound, a stamp whose age cannot be computed is refused rather than trusted.
     const staleAfter = maxStaleness === null ? 0n : BigInt(maxStaleness);
     if (
       staleAfter > 0n &&
