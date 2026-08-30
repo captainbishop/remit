@@ -486,6 +486,15 @@ contract ViewsTest is Base {
     /// out. Accurate, and still the wrong job: callers use it as a pre-flight check, so a `true`
     /// that `spend` then refuses is display and enforcement disagreeing. It now applies every
     /// recipient rule `spend` applies, which is the list below.
+    ///
+    /// F38 lengthened that list from four rules to six. `UnrecoverableRecipient` named this
+    /// contract and the token and stopped there, but the constructor takes two more addresses —
+    /// the ERC-8004 identity and validation registries — and neither of them has any way to send
+    /// USDC back out. Both were legal recipients on all three sites that ask this question, so a
+    /// delegate could pay one and the money would be gone while the mandate recorded an ordinary
+    /// successful spend. Each address is asserted on its own, on the view and on the payment,
+    /// because the four come from four separate comparisons inside one helper: a list that loses
+    /// an entry has to fail here, by name, rather than shift the blame to a neighbour.
     function test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies() public {
         bytes32 id = grant(simpleParams()); // no allowlist: the widest mandate there is
         assertTrue(mm.isAllowedRecipient(id, vendor), "an ordinary third party is still payable");
@@ -494,24 +503,18 @@ contract ViewsTest is Base {
         assertFalse(mm.isAllowedRecipient(id, payer), "SelfPayment");
         assertFalse(mm.isAllowedRecipient(id, address(mm)), "UnrecoverableRecipient: this contract");
         assertFalse(mm.isAllowedRecipient(id, address(token)), "UnrecoverableRecipient: the token");
+        assertFalse(mm.isAllowedRecipient(id, address(identity)), "F38: the identity registry");
+        assertFalse(mm.isAllowedRecipient(id, address(validation)), "F38: the validation registry");
 
-        // Each of the four is refused by `spend` too, so the view and the payment agree on all
+        // Each of the six is refused by `spend` too, so the view and the payment agree on all
         // of them. Without this half the assertions above would also pass against a view that
         // simply returned false more often than it should.
         payReverts(id, address(0), usd(10), MandateManager.ZeroRecipient.selector);
         payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
-        payReverts(
-            id,
-            address(mm),
-            usd(10),
-            abi.encodeWithSelector(MandateManager.UnrecoverableRecipient.selector, address(mm))
-        );
-        payReverts(
-            id,
-            address(token),
-            usd(10),
-            abi.encodeWithSelector(MandateManager.UnrecoverableRecipient.selector, address(token))
-        );
+        payReverts(id, address(mm), usd(10), unrecoverable(address(mm)));
+        payReverts(id, address(token), usd(10), unrecoverable(address(token)));
+        payReverts(id, address(identity), usd(10), unrecoverable(address(identity)));
+        payReverts(id, address(validation), usd(10), unrecoverable(address(validation)));
     }
 
     /// F36. An unknown mandate has no payer, so no spend against it can succeed and every

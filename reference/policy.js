@@ -65,11 +65,15 @@ const Denial = {
   // class of spend a reconciler could not see. Refused on both the spend path and the cosign
   // approval, since `payer` is fixed at creation and the equality can never stop holding.
   SELF_PAYMENT: 'SELF_PAYMENT',
-  // NEW IN v2 (F29). Two addresses can receive a payment and can never send it on: the manager
-  // itself, which holds no USDC by design and has no sweep function, and the token contract,
-  // which has no recovery path either. Neither is a plausible payee, so refusing both costs
-  // nothing legitimate — and unlike every other denial here, the mistake it prevents cannot be
-  // undone by anyone once the transfer has settled.
+  // NEW IN v2 (F29), widened by F38. Four addresses can receive a payment and can never send it
+  // on: the manager itself, which holds no USDC by design and has no sweep function; the token
+  // contract, which has no recovery path either; and both ERC-8004 registries, which this
+  // system only reads and whose interfaces carry no transfer at all. None is a plausible payee,
+  // so refusing all four costs nothing legitimate — and unlike every other denial here, the
+  // mistake it prevents cannot be undone by anyone once the transfer has settled.
+  //
+  // F29 named only the first two, in three hand-written copies. F38 replaced the copies with
+  // `undebitableAddrs`, which is where the full list now lives.
   UNRECOVERABLE_RECIPIENT: 'UNRECOVERABLE_RECIPIENT',
   AMOUNT_TOO_LARGE: 'AMOUNT_TOO_LARGE',
   OVER_PER_TX_CAP: 'OVER_PER_TX_CAP',
@@ -543,12 +547,57 @@ function createMandate(spec) {
     // `withdrawCosign`. Keyed on the nonce rather than on the hash because the question being
     // asked is "what is this nonce spoken for", and a hash cannot be turned back into the
     // nonce inside it.
+    //
+    // F39: an entry here carries no deadline of its own, so both readers pair it with
+    // `cosignIsLive` against `cosignApprovals`. An entry whose approval has lapsed is inert
+    // rather than binding, which is what stops it outliving the decision it records.
     cosignReservedNonces: new Map(),
   };
 }
 
 function normalizeAddr(a) {
   return String(a).toLowerCase();
+}
+
+/**
+ * The deployment addresses that can receive USDC and can never send it on.
+ *
+ * F38 widened F29's original pair to four. The contract has no token-moving function other
+ * than the `transferFrom` in `spend`, which always pays a third party; Circle's token holds no
+ * recovery path for a balance credited to itself; and both ERC-8004 registries are contracts
+ * this one only reads, whose interfaces carry no transfer of any kind. All four are permanent
+ * properties of deployed code, so none of them can stop holding.
+ *
+ * Factored for the same reason the contract factored `_isUndebitable`: the spend path and the
+ * approval path both ask this question, and F29 wrote the answer out by hand in three
+ * places, which is how the registries came to be missing from all three.
+ *
+ * `filter(Boolean)` keeps a caller that supplies only some of the four honest rather than
+ * broken — the model cannot learn a deployment's addresses on its own. Anything comparing this
+ * model against a live deployment has to pass all four in `ctx` or it is comparing a weaker
+ * rule than the contract enforces.
+ */
+function undebitableAddrs(ctx) {
+  return [ctx.manager, ctx.token, ctx.identityRegistry, ctx.validationRegistry]
+    .filter(Boolean)
+    .map(normalizeAddr);
+}
+
+/**
+ * Whether a stored co-sign approval is still live at `now`.
+ *
+ * F39. The boundary is the one `evaluate` enforces on the same Map: live while `now` is below
+ * the deadline, exclusive, because Arc's sub-second blocks can share a timestamp and an
+ * inclusive bound would leave an ambiguous final second.
+ *
+ * Factored so the two reservation checks that consult it — one on the spend path, one on the
+ * approval path — cannot answer this question differently from the deadline test a few lines
+ * below the first of them. It takes `now` as an argument rather than reading `ctx`, so a caller
+ * cannot compare against a different instant than the one it judged the mandate against.
+ */
+function cosignIsLive(mandate, hash, now) {
+  const validUntil = mandate.cosignApprovals.get(hash);
+  return validUntil !== undefined && now < BigInt(validUntil);
 }
 
 /**
@@ -656,15 +705,15 @@ function evaluate(mandate, request, ctx) {
     return deny(Denial.SELF_PAYMENT, { payer: mandate.payer });
   }
   // F29, and ahead of the allowlist for F19's reason: the request is the mistake, not the
-  // config. `ctx.manager` is the contract's own address and `ctx.token` the USDC contract's,
-  // the two destinations from which the money cannot be moved on again.
+  // config. `undebitableAddrs` holds the destinations from which the money cannot be moved on
+  // again — the contract's own address, USDC's, and both ERC-8004 registries after F38 widened
+  // the list from the first two.
   //
-  // A caller that names neither cannot have this checked, because the model has no other way
-  // to learn a deployment's addresses — a limitation of the model rather than of the
-  // contract, which always knows both. Anything comparing this model against a live
+  // A caller that names none of them cannot have this checked, because the model has no other
+  // way to learn a deployment's addresses — a limitation of the model rather than of the
+  // contract, which always knows all four. Anything comparing this model against a live
   // deployment has to supply them or it is comparing a weaker rule.
-  const unrecoverable = [ctx.manager, ctx.token].filter(Boolean).map(normalizeAddr);
-  if (unrecoverable.includes(normalizeAddr(recipient))) {
+  if (undebitableAddrs(ctx).includes(normalizeAddr(recipient))) {
     return deny(Denial.UNRECOVERABLE_RECIPIENT, { recipient });
   }
   if (mandate.allowlist !== null && !mandate.allowlist.has(normalizeAddr(recipient))) {
@@ -894,8 +943,15 @@ function evaluate(mandate, request, ctx) {
   //
   // The reservation is satisfied by the request that owns it, so the comparison is against
   // this request's hash rather than merely against presence.
+  //
+  // F39: and only a LIVE approval is a decision worth protecting. The approvals Map carries a
+  // deadline and this one does not, so a reservation could outlive the approval that created
+  // it and then refuse every spend on that nonce for good — including the sub-threshold spends
+  // this check deliberately covers, which the lapsed signature has no authority over. A dead
+  // reservation is now ignored here and `commit` clears it as it clears any other, so the
+  // payment continues. The live case is untouched and F30 holds exactly as written.
   const reservedHash = mandate.cosignReservedNonces.get(nonce);
-  if (reservedHash !== undefined && reservedHash !== hash) {
+  if (reservedHash !== undefined && reservedHash !== hash && cosignIsLive(mandate, reservedHash, now)) {
     return deny(Denial.NONCE_RESERVED, { nonce, reservedHash });
   }
   if (mandate.cosignThreshold !== null && amount > mandate.cosignThreshold) {
@@ -1074,7 +1130,10 @@ function revoke(mandate, caller) {
  * @param {object} mandate  the mandate, mutated on success
  * @param {string} caller   must be the cosigner
  * @param {object} request  { recipient, amount, ref, nonce, validUntil }
- * @param {object} ctx      { now } — required, because the deadline is checked against it
+ * @param {object} ctx      { now, manager, token, identityRegistry, validationRegistry } — `now`
+ * is required, because the deadline is checked against it. The four addresses are optional and
+ * feed F38's unrecoverable-recipient mirror; omitting any of them makes this function accept an
+ * approval the contract would refuse.
  * @returns {string} the spend hash that was approved
  */
 function approveCosignFor(mandate, caller, request, ctx) {
@@ -1149,10 +1208,10 @@ function approveCosignFor(mandate, caller, request, ctx) {
     throw refuse(Denial.SELF_PAYMENT, 'the recipient is the payer, so no spend can ever consume this');
   }
   // F29's mirror, in the same position relative to the allowlist as on the spend path. It
-  // belongs to F17's rule as squarely as F19 does: neither address can stop being unrecoverable,
-  // so an approval naming one is authority over a payment `evaluate` will refuse forever.
-  const unrecoverable = [ctx.manager, ctx.token].filter(Boolean).map(normalizeAddr);
-  if (unrecoverable.includes(normalizeAddr(recipient))) {
+  // belongs to F17's rule as squarely as F19 does: none of these addresses can stop being
+  // unrecoverable, so an approval naming one is authority over a payment `evaluate` will refuse
+  // forever. F38 took the list from two addresses to four here as well.
+  if (undebitableAddrs(ctx).includes(normalizeAddr(recipient))) {
     throw refuse(
       Denial.UNRECOVERABLE_RECIPIENT,
       `${recipient} has no path to send the funds on, so no spend can ever consume this`,
@@ -1202,6 +1261,25 @@ function approveCosignFor(mandate, caller, request, ctx) {
   // against it is unconsumable for its whole life rather than unconsumable at this amount.
   if (mandate.spendCount >= MAX_SPEND_COUNT) {
     throw refuse(Denial.SPEND_COUNT_CEILING, 'the spend counter is at 2^32 - 1');
+  }
+
+  // F40, and it sits where `evaluate` checks the windows so the two orders stay identical. The
+  // note further up this block excluded the rolling windows as recoverable, which is true of
+  // `used + amount > cap` and false of `amount > cap` on its own: usage only ever falls back
+  // toward zero, and `cap` is fixed at creation, so an amount above a window's cap is refused
+  // for the life of the mandate. Only that term is mirrored. An amount that fits the cap but
+  // not today's remaining headroom stays approvable, because buckets age out.
+  //
+  // `effective` is reported as 0 rather than measured, since the refusal does not depend on
+  // current usage — the same value the contract puts in `OverWindowCap`'s third field here.
+  for (const win of mandate.windows) {
+    if (amount > win.cap) {
+      throw refuse(
+        Denial.OVER_WINDOW_CAP,
+        `${amount} exceeds the ${win.lengthSeconds}s window cap of ${win.cap}, which never ` +
+          `rises, so no spend can ever consume this`,
+      );
+    }
   }
 
   // ---- F17: and it must name a spend that NEEDS a co-signature ------------------------------
@@ -1266,8 +1344,17 @@ function approveCosignFor(mandate, caller, request, ctx) {
   //
   // Re-approving the SAME request is allowed and lands on the write below, so extending a
   // deadline needs no withdrawal.
+  //
+  // F39's liveness term, for the reason it carries on the spend path. A reservation whose
+  // approval has already lapsed protects nothing, and refusing on it would leave the cosigner
+  // unable to approve a replacement on that nonce without first withdrawing an approval that
+  // has expired. The write below overwrites the dead entry, so there is nothing to clear.
   const reservedHash = mandate.cosignReservedNonces.get(request.nonce);
-  if (reservedHash !== undefined && reservedHash !== hash) {
+  if (
+    reservedHash !== undefined &&
+    reservedHash !== hash &&
+    cosignIsLive(mandate, reservedHash, now)
+  ) {
     throw refuse(
       Denial.NONCE_RESERVED,
       `nonce ${request.nonce} is already held for a different approved spend — withdraw that ` +

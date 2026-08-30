@@ -2,7 +2,8 @@
 //
 // Mutation gate for the policy model. Run: node reference/mutation-gate.js
 //
-// WHY THIS EXISTS. `node --test reference/policy.test.js` printing 69/69 says the suite agrees
+// WHY THIS EXISTS. `node --test reference/policy.test.js` printing 69/69, as it did the day this
+// was written, says the suite agrees
 // with the model. It does not say the suite would NOTICE if the model stopped guarding
 // something — and on 2026-08-28, while finishing F17, it did not: sixteen refusals in
 // `approveCosignFor` were covered by new tests and one of them, `BAD_CONFIG` on a mandate with
@@ -32,11 +33,12 @@
 //               legitimate payment that can never be approved. Each injection must be caught.
 //
 // THE SPELLINGS ARE NOT COSMETIC, AND EACH ONE ADDED HAS REACHED A FUNCTION THE GATE HAD NEVER
-// TOUCHED. Counted from policy.js on 2026-08-30 rather than remembered: all 21 `throw refuse(`
+// TOUCHED. Counted from policy.js on 2026-08-30 rather than remembered: all 22 `throw refuse(`
 // lines sit inside `approveCosignFor`, all 27 `return deny(` lines inside `evaluate`, and the 35
 // `throw new Error(` lines are spread over nine functions with 20 of them inside `createMandate`.
-// The two counts F3 moved are the first and the second, which each gained the spend-count ceiling.
-// The last pair was stale before that: the figures here read 33 and 18 while the file held 35 and
+// The two counts F3 moved are the first and the second, which each gained the spend-count ceiling,
+// and F40 moved the first again with the window cap the approval path had been missing. The last
+// pair was stale before that: the figures here read 33 and 18 while the file held 35 and
 // 20, which is what a count restated from a previous run looks like once the file has moved on.
 // The first version of this script knew only `throw refuse(`, so it reported a clean sweep while
 // the spend path — the function that decides whether real money moves — had never had a single
@@ -60,7 +62,7 @@
 // establish, so crash kills are counted and named instead of being folded into the total.
 //
 // `evaluate` has exactly two of them, decided on 2026-08-29 and not to be re-probed:
-// `reference/policy.js:626`'s `if (!mandate)` and `:752`'s `if (!att)`, both of which guard
+// `reference/policy.js:675`'s `if (!mandate)` and `:801`'s `if (!att)`, both of which guard
 // against an ABSENT object rather than a wrong value, so a fall-through immediately dereferences
 // null — `mandate.revoked`, `att.validator` — and no test can ever observe a returned denial to
 // assert on. Neither is a gap in the suite and neither can be converted into an assertion-kill

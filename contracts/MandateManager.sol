@@ -1004,15 +1004,20 @@ contract MandateManager {
         // asked a design one. `m.payer` is written once (`payer: msg.sender`) and this
         // contract has no mutator for it, so the equality can never stop holding.
         if (recipient == m.payer) revert SelfPayment();
-        // F29, and the same argument one step further out. These two addresses accept USDC
+        // F29, and the same argument one step further out. These four addresses accept USDC
         // and can never send it: this contract has no token-moving function other than the
-        // `transferFrom` below, which always pays a third party, and Circle's token holds no
-        // recovery path for a balance credited to itself. Both are permanent properties of
-        // deployed code, so a spend to either destroys the payer's money for good while the
-        // caps, the nonce and the `Spend` event all record a successful payment. Refused here
-        // rather than left to the payer's allowlist, because F_ALLOWLIST is optional and this
-        // hazard is not.
-        if (recipient == address(this) || recipient == address(usdc)) revert UnrecoverableRecipient(recipient);
+        // `transferFrom` below, which always pays a third party, Circle's token holds no
+        // recovery path for a balance credited to itself, and the two ERC-8004 registries are
+        // read-only dependencies whose interfaces carry no transfer at all. All four are
+        // permanent properties of deployed code, so a spend to any of them destroys the payer's
+        // money for good while the caps, the nonce and the `Spend` event all record a successful
+        // payment. Refused here rather than left to the payer's allowlist, because F_ALLOWLIST
+        // is optional and this hazard is not.
+        //
+        // F38 added the two registries. They were legal recipients for the whole of v1 and the
+        // first half of v2, because the list was written out by hand in three places and the
+        // argument above was only ever applied to the first two entries.
+        if (_isUndebitable(recipient)) revert UnrecoverableRecipient(recipient);
         if (m.flags & F_ALLOWLIST != 0 && !_allowlist[mandateId][recipient]) revert RecipientNotAllowed();
 
         if (amount == 0) revert ZeroAmount();
@@ -1111,8 +1116,27 @@ contract MandateManager {
         // human's decision as a side effect of an unrelated payment. The comparison is against
         // the hash rather than a bare flag so the ordinary path — approve, then spend that same
         // request — passes straight through.
+        //
+        // F39: only a LIVE approval is a decision worth protecting. `_cosignApproved` carries a
+        // deadline and this mapping did not, so a reservation outlived the approval that made
+        // it with no path left to clear it. Neither route reached the release at the foot of
+        // this function: a spend naming a different hash reverted right here, and a spend naming
+        // the reserved hash reverted `CosignExpired` inside the branch below. `revoke` never
+        // touches this mapping, `withdrawCosign` answers to the co-signer alone, and
+        // `createMandate` refuses a second grant on the same salt, so no other party could
+        // clear it either. A co-signer could buy a permanent veto over one nonce with a single
+        // legal approval expiring one second later, and the refusal landed on spends BELOW
+        // `cosignThreshold` — spends their signature has no authority over — because this check
+        // sits above the branch that reads the threshold. A dead reservation is now swept and
+        // the payment continues. The live case is untouched, so F30 holds exactly as written.
         bytes32 reservedHash = _cosignReservedNonce[mandateId][nonce];
-        if (reservedHash != 0 && reservedHash != hash) revert NonceReserved(reservedHash);
+        if (reservedHash != 0 && reservedHash != hash) {
+            if (_cosignIsLive(mandateId, reservedHash, nowTs)) revert NonceReserved(reservedHash);
+            delete _cosignReservedNonce[mandateId][nonce];
+            // Zeroed so the release at the foot of this function does not pay to clear a slot
+            // this branch already cleared.
+            reservedHash = 0;
+        }
         if (m.flags & F_COSIGN != 0 && amount > m.cosignThreshold) {
             uint40 validUntil = _cosignApproved[mandateId][hash];
             if (validUntil == 0) revert CosignRequired(hash);
@@ -1429,26 +1453,34 @@ contract MandateManager {
      * way, namely a nonce already consumed, an amount over `perTxCap`, an amount over the
      * remaining `totalCap` headroom, and the `uint96` audit-counter ceiling, which the
      * allowlist brings to five since `_allowlist` is written only in `createMandate` and
-     * has no mutator, so a recipient absent from it now is absent forever.
+     * has no mutator, so a recipient absent from it now is absent forever. F40 found the
+     * sixth in the place this comment had already declared out of bounds, which says
+     * something about how the set should be read: derive it from `spend`'s reverts every
+     * time, and never from a summary of them, this one included.
      *
      * THE HARDER HALF WAS DECIDING WHAT NOT TO REFUSE, and it is a safety question rather
      * than a scope one. A guard here that rejects an approval a `spend` could later have
      * consumed does not fail safe: it makes a legitimate large payment unapprovable, which
      * for a payments primitive is a liveness failure caused by our own caution. So a
-     * condition qualifies only if it can never stop holding. Three do not, and are
-     * deliberately absent:
+     * condition qualifies only if it can never stop holding. Two do not, and one is part
+     * recoverable and part permanent:
      *
      * - `nowTs < m.notBefore` (`NotYetValid`), since time moves and the mandate starts
      *   later; approving ahead of a mandate's start is a legitimate act for a co-signer.
-     * - The rolling window caps (`OverWindowCap`). A window's used total falls as buckets age
-     *   out, so an amount refused now can fit later. This is the sharpest of the three: the
-     *   window arithmetic is the most tempting to mirror and the least safe to.
+     * - The rolling window caps (`OverWindowCap`) are the split case, and F40 below is the
+     *   permanent half of them. A window's used total falls as buckets age out, so an amount
+     *   refused because of `used + amount` can fit later and is not mirrored. `amount` alone
+     *   against `w.cap` is a different matter: `used` cannot go below zero and `w.cap` never
+     *   changes, so an amount above the cap is refused for the life of the mandate. This is
+     *   the sharpest of the three, and the sentence that used to sit here — "an amount
+     *   refused now can fit later" — was true of the sum and false of one of its terms.
      * - The ERC-8004 checks, the identity gate and the credential gate. A credential can be
      *   refreshed and a validation response can be raised, so both are recoverable states.
      *
      * The cost is roughly three extra cold `SLOAD`s — `totalCap`'s slot, the allowlist entry
-     * and the nonce entry — on a call a human sends by hand, rarely, to authorise the largest
-     * payments the mandate allows. That is the right side of the trade.
+     * and the nonce entry — plus one per configured window for F40, so at most `MAX_WINDOWS`
+     * more, on a call a human sends by hand, rarely, to authorise the largest payments the
+     * mandate allows. That is the right side of the trade.
      *
      * The ordering below mirrors `spend`'s, and the claim that buys has to be stated exactly,
      * because the obvious version of it is false. It is NOT "these two functions always agree
@@ -1496,9 +1528,9 @@ contract MandateManager {
 
         // ---- F17: this must name a spend that `spend` could accept --------------------
         // Order mirrors `spend` so identical arguments produce the identical error. Only
-        // PERMANENT refusals appear here; see the notes above this function for the three
-        // recoverable ones (notBefore, window caps, ERC-8004 gates) and why mirroring them
-        // would turn our caution into someone's stuck payment.
+        // PERMANENT refusals appear here; see the notes above this function for what is left
+        // out — notBefore, the recoverable half of the window caps, the ERC-8004 gates — and
+        // why mirroring those would turn our caution into someone's stuck payment.
         //
         // The mandate's liveness comes first, and it comes before the two deadline bounds
         // added below, on purpose: for a mandate that has already expired, `validUntil` is
@@ -1519,9 +1551,11 @@ contract MandateManager {
         // pay gas to authorise it would be exactly the false assurance F17 exists to prevent.
         // Same position relative to the allowlist as in `spend`, for the parity reason below.
         if (recipient == m.payer) revert SelfPayment();
-        // F29's mirror. An approval naming this contract or the token could never be consumed
-        // once `spend` refuses them, so it belongs in the same list as the payer.
-        if (recipient == address(this) || recipient == address(usdc)) revert UnrecoverableRecipient(recipient);
+        // F29's mirror. An approval naming any address that cannot return USDC could never be
+        // consumed once `spend` refuses it, so it belongs in the same list as the payer. F38
+        // widened the list to four and moved it into `_isUndebitable`, so this mirror and the
+        // rule it mirrors are now the same line of code rather than two copies of it.
+        if (_isUndebitable(recipient)) revert UnrecoverableRecipient(recipient);
         // `_allowlist` is written only in `createMandate` and this contract has no mutator for
         // it, so absence is permanent. F20 is an open question about adding a payer-only
         // REMOVE-only mutator, which would not weaken this: removal shrinks the set, so a
@@ -1564,6 +1598,28 @@ contract MandateManager {
         // the shortfall is total, instead of being relative to the sum the co-signer named.
         if (m.spendCount == type(uint32).max) revert SpendCountCeiling();
 
+        // ---- F40: the permanent slice of the rolling window cap -----------------------
+        // The block above, and the note at the head of this function, left the windows out
+        // since `used + amount > w.cap` is recoverable: buckets age out, so an amount refused
+        // now can fit later. That reading is true of the sum and false of one term inside it.
+        // `used` is unsigned, so it never falls below zero, and `w.cap` is written once in
+        // `createMandate` with no mutator anywhere in this contract, so `amount > w.cap` holds
+        // for the life of the mandate however much capacity ages out. An approval above any
+        // window's cap is unconsumable in exactly the sense every other check in this block
+        // tests for, and the repository held both halves of that on one configuration in two
+        // tests that never met: `Cosign.t.sol`'s `test_cosign_isCheckedAfterEveryCap` asserted
+        // the permanent refusal with `used` written as a literal zero, and
+        // `test_f17_approvingWhileAWindowIsFull_isAllowed` asserted that approving against a
+        // full window was allowed.
+        //
+        // At most `MAX_WINDOWS` cold reads, and only for a mandate that configured windows.
+        // Reported with `used = 0` because the refusal does not depend on current consumption,
+        // which is also what makes it safe to report from a function that commits nothing.
+        for (uint256 wi = 0; wi < m.windowCount; ++wi) {
+            WindowSpec storage w = _windows[mandateId][wi];
+            if (amount > w.cap) revert OverWindowCap(w.lengthSeconds, w.cap, 0);
+        }
+
         // ---- F17: the spend named must also NEED a co-signature -----------------------
         // The only refusal here that is not about consumability. `spend` reads the approval
         // mapping solely when `amount > m.cosignThreshold`, so at or below the threshold this
@@ -1595,8 +1651,16 @@ contract MandateManager {
         // nonce pointing somewhere else, so the first could never be consumed — the
         // unconsumable-approval shape F17 refuses, arrived at from the other direction. The
         // co-signer withdraws the one they no longer want and then approves the replacement.
+        //
+        // F39's liveness term, for the reason it carries in `spend`. A reservation whose
+        // approval has lapsed protects nothing, so refusing on it would leave the co-signer
+        // unable to approve a replacement request on that nonce without first withdrawing an
+        // approval that has already expired. The assignment on the next line overwrites the
+        // dead entry, so this branch has no sweep of its own to do.
         bytes32 reservedHash = _cosignReservedNonce[mandateId][nonce];
-        if (reservedHash != 0 && reservedHash != hash) revert NonceReserved(reservedHash);
+        if (reservedHash != 0 && reservedHash != hash && _cosignIsLive(mandateId, reservedHash, nowTs)) {
+            revert NonceReserved(reservedHash);
+        }
         _cosignReservedNonce[mandateId][nonce] = hash;
         _cosignApproved[mandateId][hash] = validUntil;
         emit CosignApproved(mandateId, hash, msg.sender, recipient, amount, validUntil);
@@ -1813,8 +1877,9 @@ contract MandateManager {
     /// use this as a pre-flight check, a `true` that `spend` then refuses is the disagreement
     /// between display and enforcement that #11 and #22 both forbid, and F29 was about to add
     /// a third omitted rule whose failure mode is unrecoverable rather than merely a revert.
-    /// So it now applies every recipient rule `spend` applies: the zero address, the payer,
-    /// this contract, the token, and the allowlist.
+    /// So it now applies every recipient rule `spend` applies: the zero address, the payer, the
+    /// four addresses that can never return USDC, and the allowlist. F38 later widened that
+    /// third rule from two addresses to four, in one place, which is the reason it is a helper.
     ///
     /// It remains a recipient answer only. The caps, the nonce, the co-signature requirement
     /// and the two ERC-8004 gates are all still outside it, so a `true` means "this payee is
@@ -1831,9 +1896,55 @@ contract MandateManager {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) return false;
         if (recipient == address(0) || recipient == m.payer) return false;
-        if (recipient == address(this) || recipient == address(usdc)) return false;
+        if (_isUndebitable(recipient)) return false;
         if (m.flags & F_ALLOWLIST == 0) return true;
         return _allowlist[mandateId][recipient];
+    }
+
+    /// @dev The addresses that can accept USDC and can never send it back. A transfer to any of
+    /// them destroys the payer's money for good, while the caps, the nonce and the `Spend` event
+    /// all record a successful payment.
+    ///
+    /// F38 widened F29's original pair to the full set. This contract has no token-moving
+    /// function other than the `transferFrom` in `spend`, which always pays a third party;
+    /// Circle's token holds no recovery path for a balance credited to itself; and both ERC-8004
+    /// registries are contracts this one only ever reads, whose interfaces carry no transfer of
+    /// any kind. All four are permanent properties of deployed code, so none of the four can
+    /// stop holding.
+    ///
+    /// Factored rather than copied, because the same list is read by `spend`, by
+    /// `approveCosignFor` under F17's mirror rule, and by `isAllowedRecipient`. F29 wrote the
+    /// pair out three times and the third copy is how the registries went missing from all of
+    /// them: one list edited in one place cannot disagree with itself.
+    ///
+    /// @param a The proposed recipient.
+    /// @return True if a transfer to this address destroys the money.
+    function _isUndebitable(address a) private view returns (bool) {
+        // The formatter would put `return` on a line of its own, splitting one list in two.
+        // forgefmt: disable-next-item
+        return a == address(this) || a == address(usdc) || a == address(identityRegistry)
+            || a == address(validationRegistry);
+    }
+
+    /// @dev Whether a stored co-sign approval is still live at `nowTs`.
+    ///
+    /// F39. The boundary is the one `spend` enforces: live while `nowTs < validUntil`, with the
+    /// same exclusive comparison and for the same reason, since Arc's sub-second blocks can
+    /// share a timestamp and an inclusive bound would leave an ambiguous final second.
+    ///
+    /// Factored so the two nonce reservations that consult it — one in `spend`, one in
+    /// `approveCosignFor` — cannot answer this question differently from the enforcer sitting
+    /// three lines below the first of them. It takes the timestamp as an argument rather than
+    /// reading the clock, so a caller cannot compare against a different block than the one it
+    /// already decided the mandate's liveness against.
+    ///
+    /// @param mandateId The mandate.
+    /// @param hash The spend hash a reservation points at.
+    /// @param nowTs The caller's already-read block timestamp.
+    /// @return True if an approval is stored against `hash` and has not reached its deadline.
+    function _cosignIsLive(bytes32 mandateId, bytes32 hash, uint256 nowTs) private view returns (bool) {
+        uint40 validUntil = _cosignApproved[mandateId][hash];
+        return validUntil != 0 && nowTs < validUntil;
     }
 
     /// @dev The permanent half of `isLive`: the mandate does not exist, has been revoked, or is

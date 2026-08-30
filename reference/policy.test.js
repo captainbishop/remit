@@ -86,9 +86,21 @@ const BOSS = '0xBOSS0000000000000000000000000000000000005';
 // USDC by design and has no sweep function, and the token itself. They live in `ctx` rather than
 // on the mandate because they are facts about a deployment, not about a grant — see the note at
 // the check in policy.js about what an omitted pair costs.
+//
+// F38 made it four. Both ERC-8004 registries are contracts the manager only ever reads, and
+// their interfaces carry no transfer of any kind, so a payment to either is as final as one to
+// the manager or the token. `DEPLOY` names all four, which is what a caller comparing this model
+// against a live deployment has to do.
 const MANAGER = '0xMANAGER0000000000000000000000000000000006';
 const TOKEN = '0xTOKEN000000000000000000000000000000000007';
-const DEPLOY = { manager: MANAGER, token: TOKEN };
+const ID_REGISTRY = '0xIDREG000000000000000000000000000000000008';
+const VAL_REGISTRY = '0xVALREG00000000000000000000000000000000009';
+const DEPLOY = {
+  manager: MANAGER,
+  token: TOKEN,
+  identityRegistry: ID_REGISTRY,
+  validationRegistry: VAL_REGISTRY,
+};
 
 let nonceCounter = 0;
 const n = () => `n${++nonceCounter}`;
@@ -747,6 +759,74 @@ test('F29: a caller that names neither address gets the weaker rule, and that is
   );
 });
 
+test('F38: both ERC-8004 registries are refused too, on the spend path and the approval path', () => {
+  // F29 named the manager and the token and stopped there, and the argument it used covers two
+  // more addresses it did not name. The registries are dependencies this system reads: an
+  // identity lookup and a validation lookup, both `view`. Nothing in either interface moves a
+  // token, so USDC credited to one stays there for as long as the contract exists — the same
+  // finality that made F29 necessary, on addresses a payer is more likely to paste by
+  // mistake than the token contract, because they appear in the mandate's own configuration.
+  const m = simpleMandate();
+  for (const bad of [ID_REGISTRY, VAL_REGISTRY]) {
+    const d = evaluate(m, req(usdc('10'), { recipient: bad }), { now: 1, ...DEPLOY });
+    assert.equal(d.allowed, false);
+    assert.equal(d.reason, Denial.UNRECOVERABLE_RECIPIENT, `${bad} on the spend path`);
+  }
+
+  // Ahead of the allowlist and regardless of it, for F29's reason: the request is the mistake.
+  const onIt = simpleMandate({ allowlist: [VENDOR, ID_REGISTRY, VAL_REGISTRY] });
+  for (const bad of [ID_REGISTRY, VAL_REGISTRY]) {
+    assert.equal(
+      evaluate(onIt, req(usdc('10'), { recipient: bad }), { now: 1, ...DEPLOY }).reason,
+      Denial.UNRECOVERABLE_RECIPIENT,
+      `${bad} while sitting on the allowlist`,
+    );
+  }
+
+  // And on the approval path, with the same code, so the two surfaces stay one policy.
+  const c = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  for (const bad of [ID_REGISTRY, VAL_REGISTRY]) {
+    assert.throws(
+      () =>
+        approveCosignFor(
+          c,
+          BOSS,
+          { ...req(usdc('50'), { recipient: bad }), validUntil: DAY },
+          { now: 1, ...DEPLOY },
+        ),
+      (err) => err.code === Denial.UNRECOVERABLE_RECIPIENT,
+      `${bad} on the approval path`,
+    );
+  }
+});
+
+test('F38: the list has four live entries, and each is checked on its own', () => {
+  // The point of the loop is that no entry rides on another. A list that lost one address would
+  // still refuse the other three and still look correct from any test that checks the set as a
+  // whole, which is how F29's two registries went missing from three hand-written copies. So
+  // each address is supplied alone, and asked to be the only reason for a refusal.
+  const m = simpleMandate();
+  const addrs = { manager: MANAGER, token: TOKEN, identityRegistry: ID_REGISTRY, validationRegistry: VAL_REGISTRY };
+  for (const field of Object.keys(addrs)) {
+    const ctx = { now: 1, [field]: addrs[field] };
+    assert.equal(
+      evaluate(m, req(usdc('10'), { recipient: addrs[field] }), ctx).reason,
+      Denial.UNRECOVERABLE_RECIPIENT,
+      `${field} alone in ctx must refuse its own address`,
+    );
+    // The other three are unchecked in that ctx, which is the documented cost of the mirror and
+    // also the proof that this refusal came from the field under test and not from a sibling.
+    for (const otherField of Object.keys(addrs)) {
+      if (otherField === field) continue;
+      assert.equal(
+        evaluate(m, req(usdc('10'), { recipient: addrs[otherField] }), ctx).allowed,
+        true,
+        `${otherField} must be unchecked when only ${field} is named`,
+      );
+    }
+  }
+});
+
 test('only the named spender may spend', () => {
   const m = simpleMandate();
   const d = evaluate(m, req(usdc('1'), { spender: OTHER }), { now: 1 });
@@ -1058,23 +1138,30 @@ test('F30: withdrawing the approval releases the nonce, so the fix does not stra
   assert.equal(spend(m, { ...r, amount: usdc('10'), recipient: OTHER }, { now: 1, ...DEPLOY }).allowed, true);
 
   // A wrong nonce cannot free a nonce belonging to a DIFFERENT live approval — that is what the
-  // conditional release is for. What it does instead is worth naming, because it is the one rough
-  // edge of the pair and the contract behaves identically: the approval is deleted either way, so
-  // a wrong nonce cancels the signature and leaves the nonce held for a hash that no longer
-  // exists. Nothing can use that nonce until the cosigner acts again — the approved spend now
-  // wants a signature that is gone, and any other spend on it meets the reservation.
+  // conditional release is for. What it does instead used to be the one rough edge of the pair:
+  // the approval is deleted either way, so a wrong nonce cancelled the signature and left the
+  // nonce held for a hash that no longer existed, and nothing could use that nonce until the
+  // cosigner acted again.
+  //
+  // F39 removed the edge without touching the release. A reservation binds only while the
+  // approval behind it is live, and a withdrawn approval is not live, so the leftover entry is
+  // inert: still in the Map, and refusing nothing. What the reservation protects is the
+  // cosigner's decision, and a withdrawal is that decision being taken back. The contract
+  // behaves identically — `withdrawCosign` deletes the approval and skips the release, then the
+  // next spend on that nonce finds nothing live behind the reservation and sweeps it.
   const other = req(usdc('60'));
   const otherHash = approveCosignFor(m, BOSS, { ...other, validUntil: DAY }, { now: 1, ...DEPLOY });
   assert.equal(withdrawCosign(m, BOSS, otherHash, 'not-the-nonce'), true, 'the approval went');
   assert.equal(m.cosignReservedNonces.get(other.nonce), otherHash, 'the reservation stayed');
   assert.equal(evaluate(m, other, { now: 1, ...DEPLOY }).reason, Denial.COSIGN_REQUIRED);
   assert.equal(
-    evaluate(m, { ...other, amount: usdc('20') }, { now: 1, ...DEPLOY }).reason,
-    Denial.NONCE_RESERVED,
+    evaluate(m, { ...other, amount: usdc('20') }, { now: 1, ...DEPLOY }).allowed,
+    true,
+    'an inert reservation refuses nothing',
   );
 
-  // Both ways out are available and neither needs the payer. Repeating the withdrawal with the
-  // right nonce frees it.
+  // The Map entry can still be cleared outright, two ways, and neither needs the payer.
+  // Repeating the withdrawal with the right nonce frees it.
   assert.equal(withdrawCosign(m, BOSS, otherHash, other.nonce), false, 'nothing left to cancel');
   assert.equal(m.cosignReservedNonces.has(other.nonce), false, 'but the nonce is free');
   assert.equal(spend(m, { ...other, amount: usdc('20') }, { now: 1, ...DEPLOY }).allowed, true);
@@ -1167,6 +1254,68 @@ test('F30: re-approving the SAME request is allowed, so extending a deadline nee
   assert.equal(m.cosignApprovals.get(hash), BigInt(2 * DAY), 'the later deadline replaced it');
   assert.equal(m.cosignReservedNonces.get(r.nonce), hash);
   assert.equal(evaluate(m, r, { now: DAY + 1, ...DEPLOY }).allowed, true, 'past the old deadline');
+});
+
+test('F39: a lapsed approval stops holding its nonce, and a live one still holds it', () => {
+  // THE ATTACK F30 LEFT BEHIND. The approvals Map carries a deadline; the reservation Map does
+  // not. So a cosigner could approve one request with the shortest legal deadline, let it lapse,
+  // and leave the nonce refused for the life of the mandate. One transaction, and the refusal
+  // landed on spends BELOW the threshold — the ones the signature has no authority over at
+  // all — because the reservation is checked ahead of the branch that reads the threshold.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const held = req(usdc('50'));
+  approveCosignFor(m, BOSS, { ...held, validUntil: 3 }, { now: 1, ...DEPLOY });
+
+  // While the approval is live, F30 holds exactly as it always did: a different spend on that
+  // nonce is refused, and this assertion is the regression guard for the fix below.
+  const small = { ...held, amount: usdc('5'), recipient: OTHER };
+  assert.equal(evaluate(m, small, { now: 1, ...DEPLOY }).reason, Denial.NONCE_RESERVED);
+  assert.equal(evaluate(m, small, { now: 2, ...DEPLOY }).reason, Denial.NONCE_RESERVED);
+
+  // At the deadline the approval is gone — the bound is exclusive, matching every other deadline
+  // in the model — so the reservation has no decision left to protect and the spend goes through.
+  // The Map entry is still there when the spend arrives; what changed is that it no longer binds.
+  assert.equal(m.cosignReservedNonces.has(small.nonce), true, 'the lapse leaves the entry behind');
+  const d = evaluate(m, small, { now: 3, ...DEPLOY });
+  assert.equal(d.allowed, true, 'a dead reservation refuses nothing');
+  assert.equal(spend(m, small, { now: 3, ...DEPLOY }).allowed, true);
+
+  // The entry is cleared as any consumed nonce is, so nothing accumulates.
+  assert.equal(m.cosignReservedNonces.has(small.nonce), false);
+  assert.equal(evaluate(m, small, { now: 3, ...DEPLOY }).reason, Denial.NONCE_ALREADY_USED);
+
+  // The lapsed approval itself is left in its Map, unreferenced and past its deadline, which is
+  // what the contract does too: clearing it would cost a write to remove something already inert.
+  assert.equal(m.cosignApprovals.size, 1);
+});
+
+test('F39: once an approval lapses the cosigner can approve a replacement on that nonce', () => {
+  // The approval path carries the same guard as the spend path and needed the same term. Without
+  // it, the cosigner whose approval expired could not approve anything else on that nonce without
+  // first withdrawing an approval that had already gone — a call that changes nothing and exists
+  // only to satisfy a check reading stale state.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const first = req(usdc('50'));
+  const firstHash = approveCosignFor(m, BOSS, { ...first, validUntil: 3 }, { now: 1, ...DEPLOY });
+
+  // Live: refused, which is F30 and stays.
+  assert.throws(
+    () =>
+      approveCosignFor(m, BOSS, { ...first, amount: usdc('60'), validUntil: DAY }, { now: 1, ...DEPLOY }),
+    (err) => err.code === Denial.NONCE_RESERVED,
+  );
+
+  // Lapsed: allowed, and the write replaces the dead entry rather than leaving two.
+  const replaced = approveCosignFor(
+    m,
+    BOSS,
+    { ...first, amount: usdc('60'), validUntil: DAY },
+    { now: 3, ...DEPLOY },
+  );
+  assert.notEqual(replaced, firstHash);
+  assert.equal(m.cosignReservedNonces.get(first.nonce), replaced, 'one reservation, the new one');
+  assert.equal(m.cosignApprovals.has(replaced), true);
+  assert.equal(spend(m, { ...first, amount: usdc('60') }, { now: 3, ...DEPLOY }).allowed, true);
 });
 
 test('cosign: only the named cosigner may approve', () => {
@@ -1613,6 +1762,10 @@ test('cosign (F17): what must NOT be refused — notBefore, a full window, a mis
   // (b) A full rolling window — the sharpest of the three, because the window arithmetic is
   // the most tempting to mirror and the least safe to. `windowUsage` FALLS as buckets age
   // out, so an amount refused now fits later with nothing else changed.
+  //
+  // F40 mirrors the other half of the same comparison, so the amount here matters: 50 against a
+  // cap of 50 is not above it, and the approval stands. An amount ABOVE the cap never fits, and
+  // the test below is where that is asserted.
   const S = DAY / 12;
   const t0 = 100 * S; // aligned, so the five spends share one bucket and age out together
   const full = cosignMandate({ windows: [win(DAY, usdc('50'), 12)] });
@@ -1640,6 +1793,53 @@ test('cosign (F17): what must NOT be refused — notBefore, a full window, a mis
   assert.equal(evaluate(unattested, r3, withCred(() => null)).reason, Denial.CREDENTIAL_MISSING);
   approveCosignFor(unattested, BOSS, { ...r3, validUntil: 1_000_000 + DAY }, { now: 1_000_000 });
   assert.equal(spend(unattested, r3, withCred(attestation())).allowed, true);
+});
+
+test('cosign (F40): an amount above a window cap is refused, and one that merely does not fit now is not', () => {
+  // The half of `OVER_WINDOW_CAP` that is permanent, and the reason the test above needed care.
+  // Usage falls back toward zero as buckets age out, so `used + amount > cap` clears and is not
+  // mirrored. `amount > cap` cannot clear: usage never goes below zero and `cap` is fixed at
+  // creation, so an amount above it is refused for the life of the mandate. Case (b) above sits
+  // exactly AT the cap, which is why it stays approvable — the comparison is strict.
+  const m = cosignMandate({ windows: [win(DAY, usdc('50'), 12)] });
+  const over = req(usdc('60'));
+
+  // The window is empty, so nothing about current usage is doing the work here.
+  assert.equal(evaluate(m, over, { now: 1, ...DEPLOY }).reason, Denial.OVER_WINDOW_CAP);
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...over, validUntil: DAY }, { now: 1, ...DEPLOY }),
+    (err) => err.code === Denial.OVER_WINDOW_CAP,
+    'above the cap on an empty window',
+  );
+  // Still refused a week later, which is what "permanent" means.
+  assert.throws(
+    () => approveCosignFor(m, BOSS, { ...over, validUntil: 8 * DAY }, { now: 7 * DAY, ...DEPLOY }),
+    (err) => err.code === Denial.OVER_WINDOW_CAP,
+  );
+
+  // At the cap: approvable, and consumable, so the boundary is right rather than only permissive.
+  const atCap = req(usdc('50'));
+  approveCosignFor(m, BOSS, { ...atCap, validUntil: DAY }, { now: 1, ...DEPLOY });
+  assert.equal(spend(m, atCap, { now: 1, ...DEPLOY }).allowed, true);
+
+  // Every window is checked, not just the first. The daily cap here is generous and the weekly
+  // one is not, so a mandate whose first window passes must still meet the second.
+  const two = cosignMandate({
+    perTxCap: usdc('1000'),
+    windows: [win(DAY, usdc('500'), 12), win(7 * DAY, usdc('300'), 12)],
+  });
+  const past = req(usdc('400'));
+  assert.throws(
+    () => approveCosignFor(two, BOSS, { ...past, validUntil: DAY }, { now: 1, ...DEPLOY }),
+    (err) => err.code === Denial.OVER_WINDOW_CAP,
+    'the second window governs',
+  );
+  assert.equal(
+    approveCosignFor(two, BOSS, { ...req(usdc('300')), validUntil: DAY }, { now: 1, ...DEPLOY })
+      .length > 0,
+    true,
+    'at the tighter cap, still approvable',
+  );
 });
 
 test('cosign (F17): a single-defect request is refused with the SAME code by both functions', () => {

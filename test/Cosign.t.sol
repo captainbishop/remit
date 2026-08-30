@@ -774,6 +774,116 @@ contract CosignTest is Base {
         assertEq(mm.cosignApprovalDeadline(id, hash), uint40(block.timestamp + 2 * DAY), "the later deadline won");
     }
 
+    // ---------------------------------------- F39: the reservation must not outlive the approval
+
+    /**
+     * F39, and the shape of the defect F30 left behind.
+     *
+     * `_cosignApproved` carries a deadline. `_cosignReservedNonce` did not, so the reservation
+     * F30 added outlived the approval that justified it. A co-signer who approved 50 USDC with a
+     * deadline of one second, or who simply let a deadline pass, left nonce N refusing every
+     * spend the delegate could name: a spend of the approved request met `CosignExpired`, and a
+     * spend of anything else met `NonceReserved` right here. The refusal landed on payments
+     * BELOW `cosignThreshold` as well, because this check sits above the branch that reads the
+     * threshold — so a signature with no authority over an amount was still blocking it.
+     *
+     * The co-signer could always clear it by calling `withdrawCosign` again with the right
+     * nonce. That is the whole remedy, and it is not enough: the payer and the delegate have no
+     * release of their own, `revoke` does not touch this mapping, and the mapping is private and
+     * absent from both events, so neither of them can even learn which nonce is affected. A
+     * co-signer who is hostile, or merely gone, leaves that nonce dead.
+     *
+     * The fix reads the approval's deadline before obeying the reservation, so this is now a test
+     * about a boundary rather than about a flag. Both sides of it are asserted, because the
+     * comparison has to sit exactly where `spend` puts its own: one second early the reservation
+     * still holds, and at the deadline it does not.
+     */
+    function test_f39_aLapsedReservationNoLongerBlocksTheSpend() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        uint40 validUntil = uint40(block.timestamp + DAY);
+
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, validUntil);
+
+        // While the approval is live the reservation holds. This is F30, unchanged.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, hash));
+        mm.spend(id, vendor, 1, REF, nonce);
+
+        // And it holds through the last block the approval can be used in, since the deadline is
+        // exclusive here for the same reason it is exclusive in `spend`.
+        vm.warp(uint256(validUntil) - 1);
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, hash));
+        mm.spend(id, vendor, 1, REF, nonce);
+
+        // At the deadline the approval is unconsumable, so the reservation is protecting a
+        // decision no one can act on any more, and the small payment goes through.
+        vm.warp(uint256(validUntil));
+        assertFalse(mm.isCosignApproved(id, hash), "the approval is unconsumable at its deadline");
+        payWithNonce(id, vendor, 1, nonce);
+        assertEq(token.balanceOf(vendor), 1, "F39: the dead reservation was swept rather than obeyed");
+
+        // The approval itself is left in storage, inert, which is what
+        // `test_expiredApproval_lingersInStorageButIsInert` above requires.
+        // F39 sweeps the reservation and nothing else.
+        assertEq(mm.cosignApprovalDeadline(id, hash), validUntil, "the approval slot is untouched");
+
+        // And the nonce was freed for one payment, not reopened: it is spent now like any other.
+        vm.prank(agent);
+        vm.expectRevert(MandateManager.NonceAlreadyUsed.selector);
+        mm.spend(id, vendor, 1, REF, nonce);
+    }
+
+    /// The second site, which the sweep of `spend` alone would have missed. `approveCosignFor`
+    /// carried the same unconditional refusal, so after a lapse the co-signer could not approve a
+    /// replacement request on that nonce without first withdrawing an approval that had already
+    /// expired — being told `NonceReserved` about authority that no longer existed.
+    function test_f39_onceAnApprovalLapsesTheCosignerCanApproveAReplacement() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        uint40 validUntil = uint40(block.timestamp + DAY);
+
+        vm.prank(boss);
+        bytes32 first = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, validUntil);
+
+        // Live, so the replacement is still refused. F30's rule holds wherever it means anything.
+        approveReverts(id, vendor, usd(60), nonce, abi.encodeWithSelector(MandateManager.NonceReserved.selector, first));
+
+        vm.warp(uint256(validUntil));
+        vm.prank(boss);
+        bytes32 second = mm.approveCosignFor(id, vendor, usd(60), REF, nonce, uint40(block.timestamp + DAY));
+
+        assertTrue(second != first, "a different amount is a different request");
+        assertTrue(mm.isCosignApproved(id, second), "the replacement is live");
+        payWithNonce(id, vendor, usd(60), nonce);
+        assertEq(token.balanceOf(vendor), usd(60), "and it was usable, which is the whole claim");
+    }
+
+    /// The other route into a reservation with no approval behind it, and the one the model's own
+    /// F30 test had already written down as an accepted rough edge.
+    ///
+    /// `withdrawCosign` takes the nonce so it can release the reservation, and it deliberately
+    /// leaves the reservation alone when the nonce does not match — freeing a nonce that belongs
+    /// to some other live approval would be worse. So the right hash with the wrong nonce deletes
+    /// the approval and leaves the reservation, and the delegate is refused on a nonce whose
+    /// approval is gone. Under F39 that reservation refuses nothing, and the co-signer's repeat
+    /// call with the right nonce becomes a gas refund rather than a rescue.
+    function test_f39_aWithdrawalWithTheWrongNonceStrandsNothing() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.prank(boss);
+        mm.withdrawCosign(id, hash, bytes32("not-the-nonce"));
+        assertEq(mm.cosignApprovalDeadline(id, hash), 0, "the approval is gone");
+
+        payWithNonce(id, vendor, 1, nonce);
+        assertEq(token.balanceOf(vendor), 1, "F39: a reservation with no approval behind it holds nothing");
+    }
+
     // --------------------------------------- F35: the liveness view tells the truth
 
     /// An approval against a revoked mandate can never be consumed, and the DELEGATE can produce
@@ -1059,8 +1169,9 @@ contract CosignTest is Base {
     }
 
     /// F29's mirror on the approval path, and the guard the mutation gate found nothing asserting.
-    /// `test/Views.t.sol:439-465` pins both selectors, and it pins them through `spend`, so
-    /// deleting this line from `approveCosignFor` left all 207 tests passing.
+    /// `Views.t.sol`'s `test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` pins both
+    /// selectors, and it pins them through `spend`, so deleting this line from `approveCosignFor`
+    /// left all 207 tests passing.
     ///
     /// Both addresses belong in the same partition as the payer: an address cannot stop being
     /// itself, so `spend` refuses an approval naming either one for as long as the mandate
@@ -1081,6 +1192,33 @@ contract CosignTest is Base {
         // makes this a mirror of `spend` rather than a rule the approval path invented.
         payReverts(id, address(mm), usd(50), unrecoverable(address(mm)));
         payReverts(id, address(token), usd(50), unrecoverable(address(token)));
+    }
+
+    /// F38's mirror, and the reason F29's list was two entries short. `_isUndebitable` now names
+    /// four addresses: the ERC-8004 identity and validation registries are constructor
+    /// arguments, so they are as fixed as this contract's own address, and neither of them holds
+    /// any code that could send USDC on. An approval naming one is unconsumable for exactly the
+    /// reason an approval naming this contract is, which puts both inside F17's partition rather
+    /// than beside it.
+    ///
+    /// Kept separate from the test above rather than folded into it, because the two pairs were
+    /// wrong in different ways. F29's pair was refused on both paths and asserted on only one.
+    /// F38's pair was refused on neither, and the same mandate that pays a vendor here would
+    /// have paid a registry with the same call and reported success.
+    function test_f38_approvingEitherRegistryAsRecipient_isRefused() public {
+        bytes32 id = grant(cosignParams()); // threshold 10, and no allowlist
+
+        approveReverts(id, address(identity), usd(50), nextNonce(), unrecoverable(address(identity)));
+        approveReverts(id, address(validation), usd(50), nextNonce(), unrecoverable(address(validation)));
+
+        // One unit is at or below the threshold, so these two pin the ordering against
+        // `CosignNotRequired` for the reason the test above gives.
+        approveReverts(id, address(identity), 1, nextNonce(), unrecoverable(address(identity)));
+        approveReverts(id, address(validation), 1, nextNonce(), unrecoverable(address(validation)));
+
+        // The spend path is where the money would have gone.
+        payReverts(id, address(identity), usd(50), unrecoverable(address(identity)));
+        payReverts(id, address(validation), usd(50), unrecoverable(address(validation)));
     }
 
     /**
@@ -1158,9 +1296,13 @@ contract CosignTest is Base {
      * `TotalSpentCeiling`. It was the single survivor out of 21 mutants, and it survived not
      * because the guard is shadowed by a neighbour — the way `BadConfig` hides behind
      * `NotCosigner` in the model — but for the plainer reason that nothing asserted it at all.
-     * `Bounds.t.sol` covers the identical guard on the spend path,
-     * `contracts/MandateManager.sol:1060`, and that coverage reads, from a distance, like
-     * coverage of both while covering only one: the twelve tests above assert eleven guards.
+     * `Bounds.t.sol` covers the identical guard on the spend path — the same
+     * `m.totalSpent > type(uint96).max - amount96`, written once in `spend` and once on the
+     * approval path — and that coverage reads, from a distance, like coverage of both while
+     * covering only one: the twelve tests above assert eleven guards. Named rather than numbered
+     * because the two sites are textually identical, so the line number was the only thing that
+     * could tell them apart and it had stopped doing so: this line cited 1060, which is a
+     * closing brace.
      *
      * Reaching it takes the same two conditions `Bounds.t.sol` documents at length, and the
      * first is a real constraint rather than a fixture convenience: the mandate must have NO
@@ -1383,7 +1525,13 @@ contract CosignTest is Base {
 
     /// A full rolling window is the sharpest of the three, because the window arithmetic is
     /// the most tempting to mirror and the least safe to mirror: used totals FALL as buckets
-    /// age out, so an amount refused now fits later with nothing else changing.
+    /// age out, so an amount refused because of what has already been spent fits later with
+    /// nothing else changing. That is true of the sum `used + amount` and false of `amount` on
+    /// its own, which is F40 immediately below — read the two together, because this test alone
+    /// is what made the window caps look wholly recoverable for two revisions.
+    ///
+    /// The amount here is 50 against a cap of 50, so F40's strict comparison leaves it
+    /// approvable and this test asserts what it always asserted.
     function test_f17_approvingWhileAWindowIsFull_isAllowed() public {
         MandateManager.MandateParams memory p = emptyParams();
         p.perTxCap = usd(100);
@@ -1410,6 +1558,86 @@ contract CosignTest is Base {
         vm.warp(uint256(t0) + DAY + DAY / 12); // the bucket ages out
         payWithNonce(id, vendor, usd(50), nonce);
         assertEq(token.balanceOf(vendor), usd(100), "and the approval survived to be used");
+    }
+
+    /**
+     * F40: the permanent half of the same predicate the test above calls recoverable.
+     *
+     * `used + amount > w.cap` is recoverable and is correctly left out of F17's block. `amount >
+     * w.cap` on its own is not. `used` is unsigned, so it never falls below zero, and `w.cap` is
+     * written once in `createMandate` and has no mutator anywhere in this contract, so an amount
+     * above a window's cap is refused for the life of the mandate however much capacity ages out.
+     * That is the same permanence every other condition in F17's block tests for.
+     *
+     * This file already held both halves, in two tests that never met: the one above approves 50
+     * against a cap of 50 and reasons about recovery, and `test_cosign_isCheckedAfterEveryCap`
+     * refuses 90 against the same cap with the reported `used` written as a literal zero.
+     * `reference/policy.js` carried the same gap, so the model could not have caught it either —
+     * a reminder that a differential suite only finds what one of the two sides knows.
+     */
+    function test_f40_approvingAboveAWindowCap_isRefused() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.perTxCap = usd(100);
+        p.flags = F_PER_TX;
+        p.windows = new MandateManager.WindowParams[](1);
+        p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(50), buckets: 12});
+        p = withCosign(p, boss, usd(10));
+        p = withExpiry(p);
+        bytes32 id = grant(p);
+
+        // Nothing spent yet, so the refusal cannot be blamed on consumption. The reported `used`
+        // is zero for the same reason: the answer does not depend on it.
+        approveReverts(id, vendor, usd(60), nextNonce(), overWindowCap(DAY, usd(50), 0));
+
+        // `spend` refuses the identical request with identical revert data, which is what makes
+        // this a mirror of `spend` rather than a rule the approval path invented.
+        payReverts(id, vendor, usd(60), overWindowCap(DAY, usd(50), 0));
+
+        // A week later, with every bucket long since aged out, on the same terms. This is the
+        // assertion that separates F40 from the test above: no passage of time makes 60 fit
+        // under 50, so there is no later moment at which this approval becomes usable.
+        vm.warp(block.timestamp + WEEK);
+        approveReverts(id, vendor, usd(60), nextNonce(), overWindowCap(DAY, usd(50), 0));
+
+        // Exactly the cap is still approvable, and still consumable. Without this half a guard
+        // written `>=` would satisfy everything above while refusing the largest payment
+        // the mandate was configured to allow, and nothing above would report it.
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, hash), "the cap itself is approvable");
+        payWithNonce(id, vendor, usd(50), nonce);
+        assertEq(token.balanceOf(vendor), usd(50), "and consumable, so the comparison is strict");
+    }
+
+    /// Every configured window is consulted, not just the first. Two windows with the tighter cap
+    /// second is the ordinary shape for this — a generous daily limit with a smaller hourly one
+    /// under it — and a loop that stopped after `windows[0]` would store an approval the second
+    /// window can never pass.
+    function test_f40_theBindingWindowIsFoundWhereverItSits() public {
+        uint32 hour = 1 hours; // no `HOUR` in `Base`, and one test does not earn one
+        MandateManager.MandateParams memory p = emptyParams();
+        p.perTxCap = usd(100);
+        p.flags = F_PER_TX;
+        p.windows = new MandateManager.WindowParams[](2);
+        p.windows[0] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(90), buckets: 12});
+        p.windows[1] = MandateManager.WindowParams({lengthSeconds: hour, cap: usd(20), buckets: 4});
+        p = withCosign(p, boss, usd(10));
+        p = withExpiry(p);
+        bytes32 id = grant(p);
+
+        // 30 clears the daily cap and can never clear the hourly one, and both paths name the
+        // window that actually refused rather than the first one they looked at.
+        approveReverts(id, vendor, usd(30), nextNonce(), overWindowCap(hour, usd(20), 0));
+        payReverts(id, vendor, usd(30), overWindowCap(hour, usd(20), 0));
+
+        // 20 fits both, so this mandate is not simply refusing everything.
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(20), REF, nonce, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, hash), "an amount inside both caps is approvable");
+        payWithNonce(id, vendor, usd(20), nonce);
+        assertEq(token.balanceOf(vendor), usd(20));
     }
 
     /// An ERC-8004 credential that has not been filed yet is recoverable by a third party the

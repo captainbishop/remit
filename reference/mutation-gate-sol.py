@@ -6,6 +6,7 @@
 #     python3 reference/mutation-gate-sol.py [functionName]              # default: approveCosignFor
 #     python3 reference/mutation-gate-sol.py createMandate --only 873    # one guard, named by line
 #     python3 reference/mutation-gate-sol.py spend --injections          # the must-not-refuse half
+#     python3 reference/mutation-gate-sol.py _cosignIsLive --hand        # inside one condition
 #
 # WHY THIS EXISTS, and why it is a second file rather than a flag on the first.
 #
@@ -39,6 +40,18 @@
 #               credential must all CLEAR, because refusing them turns our caution into
 #               someone's unapprovable payment, and each injection must be caught.
 #
+#   HAND      — rewrite one condition, or one loop bound, into a stated wrong version. The other
+#               two operators work on whole statements, so neither reaches INSIDE a condition: an
+#               `&&` losing a conjunct, a `>` written `>=`, a loop reading one element where it
+#               should read every one. Three of this contract's claims sit at exactly that depth.
+#               F38's list of four undebitable addresses is one `||` chain, F39's liveness test is
+#               one `&&`, and F40's window bound is one comparison inside a loop. Worse, a
+#               `private view` helper that holds no `revert` at all offers the removal operator
+#               nothing to rewrite, so `_isUndebitable` and `_cosignIsLive` were unreachable by
+#               construction until this operator existed. Each case names its before and after
+#               text, must match exactly once inside the target, and declares whether it expects
+#               to be caught or to survive.
+#
 # A survivor is a HYPOTHESIS, not a verdict. The first window injection written for the JS
 # mutation gate compared an object to a BigInt and was never true, so it "survived" while
 # proving nothing. Probe a survivor (an `emit log_uint` or a `console.log` in the injected
@@ -55,12 +68,15 @@
 # `contracts/MandateManager.sol` before and after and refuses to exit 0 if the two differ.
 #
 # COST. Ten runs on 2026-08-30 put this at 18-21s per mutant including its recompile, plus one
-# baseline of about the same per target, so the contract's whole census — 85 removals over 11
-# targets plus 6 injections, 91 mutants — is roughly half an hour. An earlier note here guessed
-# ~57s each from the compile and suite times measured separately, which overstated it threefold —
+# baseline of about the same per target, so a census of the whole contract runs past half an hour.
+# That census is 89 removals over 10 targets plus 6 injections, with 6 hand cases on top that the
+# two automatic operators cannot build. It was derived on 2026-08-30 by counting mutable `revert`
+# lines per target with this script's own `is_code` and `function_bounds`, and it moves whenever a
+# guard is added, so re-derive it rather than quoting the figure here. An earlier note guessed ~57s
+# per mutant from the compile and suite times measured separately, which overstated it threefold —
 # forge caches almost all of that between mutants. The whole suite runs against every mutant, with
 # no --match-path shortcut, so "caught" means some named test in the repo noticed rather than a
-# chosen one.
+# chosen one. The hand cases cost the same per mutant, and were added on 2026-08-30.
 
 
 import hashlib
@@ -106,8 +122,12 @@ REL_SRC = Path("contracts") / "MandateManager.sol"
 # the target's injections and no removals. Neither flag can stand in for a full run — both print
 # their partial scope on the last line, because the census claims in THREAT-MODEL.md rest on bare
 # runs and a partial one must not be quotable as though it were.
+#
+# `--hand` is the third of these, and the only one that can be a target's whole run: two of the
+# five functions it reaches hold no `revert` at all, so bare is not an option for them. It queues
+# the target's hand cases and nothing else.
 def parse_args(argv):
-    target, only, inj_only = None, None, False
+    target, only, inj_only, hand_only = None, None, False, False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -120,27 +140,34 @@ def parse_args(argv):
             only = a.split("=", 1)[1]
         elif a == "--injections":
             inj_only = True
+        elif a == "--hand":
+            hand_only = True
         elif a.startswith("-"):
-            die(f"unknown option {a!r}. The options are --only LINE[,LINE...] and --injections")
+            die(
+                f"unknown option {a!r}. The options are --only LINE[,LINE...], --injections "
+                "and --hand"
+            )
         elif target is None:
             target = a
         else:
             die(f"unexpected argument {a!r}. One target function per run.")
         i += 1
+    if hand_only and (inj_only or only is not None):
+        die("--hand builds only the hand cases, so it cannot be combined with the other two")
     if only is not None and inj_only:
         die("--only names removals by line and --injections excludes removals; pick one")
     if only is None:
-        return target or "approveCosignFor", None, inj_only
+        return target or "approveCosignFor", None, inj_only, hand_only
     try:
         wanted = {int(x) for x in only.replace(",", " ").split()}
     except ValueError:
         die(f"--only {only!r} is not a list of line numbers")
     if not wanted:
         die("--only was given no line numbers")
-    return target or "approveCosignFor", wanted, inj_only
+    return target or "approveCosignFor", wanted, inj_only, hand_only
 
 
-TARGET, ONLY, INJ_ONLY = parse_args(sys.argv[1:])
+TARGET, ONLY, INJ_ONLY, HAND_ONLY = parse_args(sys.argv[1:])
 
 # The project's established seed. Pinned for the baseline AND every mutant, so a failure is
 # attributable to the mutation rather than to a fresh fuzz corpus. See foundry.toml on what
@@ -203,6 +230,101 @@ INJECTIONS = {
                 "F22: the spender refused as its own recipient, on the approval path",
                 "        if (recipient == m.spender) revert SelfPayment();",
             ),
+        ],
+    },
+}
+
+# ---------------------------------------------------------------- the hand cases
+#
+# Keyed by target, like the injections, and each case names the exact source lines it replaces so
+# that a rewrite of the guard breaks the case loudly rather than mutating nothing at all. `find`
+# is a list of consecutive stripped code lines and has to match exactly once inside the target;
+# `replace` supplies the mutant's lines with their own indentation, because a two-line condition
+# collapsing to one is the commonest shape here.
+#
+# `survives` is the difference between this table and the two automatic operators. A hand case is
+# written by a reader who already believes something about the code, so the case has to state which
+# outcome it expects; most expect to be caught, and the one that expects to survive says why. If a
+# test ever kills that one, the gate reports that the recorded reason has stopped being true — the
+# same discipline `EQUIVALENT` applies to the removals, for the same reason.
+HAND = {
+    "_isUndebitable": {
+        "cases": [
+            {
+                # F38's whole finding is that this list was two entries long when the constructor
+                # takes four addresses. Each entry is dropped on its own because `Views.t.sol`
+                # asserts all four by name for exactly this reason: a list that loses one has to
+                # fail on the entry it lost rather than shift the blame to a neighbour.
+                "label": "the identity registry falls out of the list",
+                "find": [
+                    "return a == address(this) || a == address(usdc) || a == address(identityRegistry)",
+                    "|| a == address(validationRegistry);",
+                ],
+                "replace": [
+                    "        return a == address(this) || a == address(usdc)"
+                    " || a == address(validationRegistry);",
+                ],
+            },
+            {
+                "label": "the validation registry falls out of the list",
+                "find": [
+                    "return a == address(this) || a == address(usdc) || a == address(identityRegistry)",
+                    "|| a == address(validationRegistry);",
+                ],
+                "replace": [
+                    "        return a == address(this) || a == address(usdc)"
+                    " || a == address(identityRegistry);",
+                ],
+            },
+        ],
+    },
+    "_cosignIsLive": {
+        "cases": [
+            {
+                # F39 turns on this conjunct and nothing else. Without it a reservation outlives
+                # the approval that created it, which is the stranding the finding is named for.
+                "label": "the deadline stops being read, so an expired approval reads as live",
+                "find": ["return validUntil != 0 && nowTs < validUntil;"],
+                "replace": ["        return validUntil != 0;"],
+            },
+            {
+                # The label and the replacement below were crossed with the pair above until the
+                # first real run on 2026-08-30, which reported the wrong one of the two as a
+                # survivor. A label that does not describe its own replacement is a claim about
+                # code that is not being built, so check each against the other when editing here.
+                "label": "the empty slot stops being distinguished from a live one",
+                "find": ["return validUntil != 0 && nowTs < validUntil;"],
+                "replace": ["        return nowTs < validUntil;"],
+                "survives": (
+                    "`validUntil` is a uint40 and `nowTs` a uint256, so the comparison widens "
+                    "`validUntil` to uint256 and a never-approved slot reads 0, which makes "
+                    "`nowTs < 0` false for every clock value there is. The conjunct removed here "
+                    "therefore refuses the identical input the one left behind refuses, and no "
+                    "test can separate them. THREAT-MODEL.md records this mutant as unkillable "
+                    "rather than untested."
+                ),
+            },
+        ],
+    },
+    "approveCosignFor": {
+        "cases": [
+            {
+                # The comparison F40 turns on. `Cosign.t.sol` claims in a comment that a `>=`
+                # here would satisfy every other check while refusing the largest payment the
+                # mandate allows; this case is that claim run rather than asserted.
+                "label": "F40's window cap becomes exclusive, refusing an amount equal to the cap",
+                "find": ["if (amount > w.cap) revert OverWindowCap(w.lengthSeconds, w.cap, 0);"],
+                "replace": [
+                    "            if (amount >= w.cap) revert OverWindowCap(w.lengthSeconds, w.cap, 0);",
+                ],
+            },
+            {
+                # A loop that reads one element where it should read every one is the defect the
+                # removal operator is least able to see, because every statement in it survives.
+                "label": "F40 reads only the first window, so a second window's cap goes unchecked",
+                "find": ["for (uint256 wi = 0; wi < m.windowCount; ++wi) {"],
+                "replace": ["        for (uint256 wi = 0; wi < 1 && wi < m.windowCount; ++wi) {"],
+            },
         ],
     },
 }
@@ -373,7 +495,7 @@ for i in range(start, end + 1):
     if "revert " not in line or not is_code(line) or not REVERT.search(line):
         continue
     mutable.append(i + 1)
-    if INJ_ONLY or (ONLY is not None and i + 1 not in ONLY):
+    if INJ_ONLY or HAND_ONLY or (ONLY is not None and i + 1 not in ONLY):
         continue
     err = re.search(r"revert\s+(\w+)", line).group(1)
     mutated = list(original)
@@ -388,6 +510,18 @@ if ONLY is not None:
             f"(lines {start + 1}-{end + 1}). That target offers: {mutable}"
         )
 
+# Looked up here rather than beside the build below, because a `--hand` run of a target with no
+# hand cases has to die before anything prints how that run was scoped. A log saying injections
+# were skipped, followed by a refusal to run at all, describes a run that never existed.
+hand = HAND.get(TARGET)
+EXPECT_SURVIVES = {}
+if HAND_ONLY and not hand:
+    die(
+        f"--hand was asked for {TARGET}, which has no HAND entry. The {len(HAND)} targets that "
+        f"have one are: {', '.join(sorted(HAND))}. A condition worth mutating by hand is worth "
+        f"writing down first, so add the case before running it."
+    )
+
 inj = INJECTIONS.get(TARGET)
 if INJ_ONLY and not inj:
     die(
@@ -395,8 +529,9 @@ if INJ_ONLY and not inj:
         f"must-not-refuse property to state is not the same as one that passes; run it bare for "
         f"its {len(mutable)} removal(s), or write the entry first."
     )
-if inj and ONLY is not None:
-    print(f"  --only is set, so the {len(inj['cases'])} injection(s) for {TARGET} are skipped")
+if inj and (ONLY is not None or HAND_ONLY):
+    flag = "--only" if ONLY is not None else "--hand"
+    print(f"  {flag} is set, so the {len(inj['cases'])} injection(s) for {TARGET} are skipped")
 elif inj:
     anchor = [i for i in range(start, end + 1) if inj["anchor"] in original[i] and is_code(original[i])]
     if len(anchor) != 1:
@@ -407,7 +542,38 @@ elif inj:
     for label, code in inj["cases"]:
         mutants.append(("injected", label, original[: at + 1] + code.split("\n") + original[at + 1 :], None))
 
+# The hand cases. Built only under `--hand`, and a bare run says so rather than leaving them
+# out unremarked: a target whose claims sit inside a condition would otherwise produce a full-
+# looking census log with those claims never built, which is the one way this tool could mislead.
+if hand and not HAND_ONLY:
+    print(f"  {len(hand['cases'])} hand case(s) exist for {TARGET} and need --hand; not built here")
+elif hand:
+    if mutable:
+        print(f"  --hand is set, so the {len(mutable)} removal(s) for {TARGET} are skipped")
+    for case in hand["cases"]:
+        find, repl = case["find"], case["replace"]
+        hits = [
+            i
+            for i in range(start, end + 1 - len(find) + 1)
+            if all(is_code(original[i + k]) and original[i + k].strip() == find[k] for k in range(len(find)))
+        ]
+        if len(hits) != 1:
+            die(
+                f"hand case {case['label']!r} matched {len(hits)} places in {TARGET}; need exactly "
+                f"1. Its first line reads {find[0]!r}. The guard has been rewritten, so the case "
+                f"is describing code that is not there and has to be updated before it can run."
+            )
+        i = hits[0]
+        mutants.append(("hand", case["label"], original[:i] + repl + original[i + len(find) :], None))
+        if case.get("survives"):
+            EXPECT_SURVIVES[case["label"]] = case["survives"]
+
 if not mutants:
+    if hand:
+        die(
+            f"{TARGET} contains no `revert` guards to mutate, which is why it has {len(hand['cases'])} "
+            f"hand case(s). Run: python3 reference/mutation-gate-sol.py {TARGET} --hand"
+        )
     die(f"{TARGET} contains no `revert` guards to mutate")
 
 # ---------------------------------------------------------------- the throwaway copy
@@ -472,6 +638,19 @@ for n, (kind, label, lines, key) in enumerate(mutants, 1):
                 "entry is stale and should come out. Being caught is the better outcome; the "
                 "reason recorded in the entry is what has stopped being true."
             )
+    # A hand case carries its own expectation, so the same two-way check applies to it. The
+    # difference is that its twin sits on the mutated line rather than below it, which is why
+    # there is no shadow line to look up and the verdict is reported without one.
+    why = EXPECT_SURVIVES.get(label) if kind == "hand" else None
+    if why and verdict == "SURVIVED":
+        verdict = "EQUIVALENT"
+        eq = {"shadow": None, "why": why}
+    elif why and verdict == "caught":
+        note = (
+            "this hand case was written expecting to survive and a test killed it, so the reason "
+            "recorded with the case has stopped being true and the case needs rewriting. Being "
+            "caught is the better outcome of the two."
+        )
     print(f"{verdict}  ({time.time() - t:.0f}s)")
     results.append((kind, label, verdict, r, eq, at, note))
 
@@ -488,7 +667,10 @@ for kind, label, verdict, r, eq, at, note in results:
         more = f" (+{len(r['killers']) - 3} more)" if len(r["killers"]) > 3 else ""
         print(f"               by: {killed}{more}   [{r['failed']} failing]")
     elif verdict == "EQUIVALENT":
-        print(f"               shadowed by line {at}: {eq['shadow']}")
+        if eq["shadow"] is None:
+            print("               unkillable rather than untested:")
+        else:
+            print(f"               shadowed by line {at}: {eq['shadow']}")
         for para in textwrap.wrap(eq["why"], 84):
             print(f"               {para}")
     else:
@@ -533,9 +715,10 @@ if not bad:
         print("     could not be by any test that could be written:")
         for label in eqs:
             print(f"       EQUIVALENT  {label}")
-        print("     Each neuters a guard whose successor refuses the same input under the same error")
-        print("     name, so nothing outside the contract can observe the removal. The shadow each")
-        print("     one leans on was checked for above, and the exemption lapses if it disappears.")
+        print("     Each removal there neuters a guard whose successor refuses the same input under")
+        print("     the same error name, and each hand case there drops a conjunct whose twin on the")
+        print("     same line already refuses everything it would have. Every shadow a removal leans")
+        print("     on was looked up above, and the exemption lapses if it disappears.")
     if stale:
         # Said again down here because the warning is easy to scroll past, and a reader who stops
         # at the last line would otherwise take a bookkeeping problem for a clean run.
@@ -549,6 +732,14 @@ if not bad:
     elif ONLY is not None:
         print(f"     SCOPE: --only. {len(mutable) - len(mutants)} other removal(s) and every injection")
         print(f"     for {TARGET} were not built, so this run is not a census of the target.")
+    elif HAND_ONLY:
+        other = len(mutable) + (len(inj["cases"]) if inj else 0)
+        if other:
+            print(f"     SCOPE: hand cases only. {other} removal(s) and injection(s) for {TARGET}")
+            print("     were not built, so this run is not a census of the target.")
+        else:
+            print(f"     SCOPE: hand cases only, and they are everything {TARGET} offers — it holds")
+            print("     no `revert` and has no injections, so this run does cover the whole target.")
     sys.exit(0)
 print(f"{len(bad)} mutant(s) not caught. Each is a HYPOTHESIS: probe it before believing it,")
 print("then either fix the mutant or add the test it is missing.")
