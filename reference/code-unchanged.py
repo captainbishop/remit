@@ -18,10 +18,10 @@ printed as a unified diff and the exit status is 1.
 
 `--pinned` adds a stricter requirement: every surviving code line must still sit at
 the same line NUMBER. That matters for `contracts/MandateManager.sol`, which this
-repository cites by line throughout — a threat-model finding names a guard as
-`:1479`, and the mutation gate's own logs record which line each mutant came from.
-Rewriting a comment block to a different number of lines would leave all of that
-pointing one line off with nothing to announce it, so a comment pass over the
+repository cites by line throughout — a threat-model finding names a guard by the
+line it sits on, and the mutation gate's logs record which line each mutant came
+from. Rewriting a comment block to a different number of lines would leave all of
+that pointing one line off with nothing to announce it, so a comment pass over the
 contract is written to keep each block's line count and is checked here.
 
 The stripper is deliberate about one case: `//` inside a string literal is code,

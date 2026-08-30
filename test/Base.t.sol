@@ -68,9 +68,18 @@ abstract contract Base is Test {
      * field it is stored in, which is the year 36812.
      *
      * The contract permits it. `expiresAt` is only ever compared, never used in
-     * arithmetic — MandateManager.sol:608 in `spend` and :1012 in `isLive` are its only
-     * two readers — and the only grant-time rule on the value is that it exceed
+     * arithmetic, and the only grant-time rule on the value is that it exceed
      * `notBefore`.
+     *
+     * Four sites read the stored field and all four are comparisons: `spend` and
+     * `approveCosignFor` each refuse with `Expired`, `approveCosignFor` refuses a
+     * co-sign deadline reaching past it with `BadDeadline`, and `_isPermanentlyDead`
+     * folds the same test into `isLive`. This comment named two of them by line until
+     * 2026-08-30 — 608 for `spend` and 1012 for `isLive` — and both numbers held at
+     * `92445dd`, before F17 added the mirror and F35 moved the expiry test out of
+     * `isLive` into a helper. They are named rather than numbered now, because the
+     * count is what carries the argument: a fifth reader that did arithmetic on the
+     * field is what would put `FAR` back in question.
      */
     uint40 internal constant FAR = type(uint40).max;
 

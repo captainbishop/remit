@@ -3,12 +3,12 @@
 line-citations.py — find every "file:LINE" pointer in the repository and check it.
 
 This repository cites itself by line number constantly: a threat-model
-finding names the guard it is about as `contracts/MandateManager.sol:1479`, a
-mutation gate's comment records which guard it deliberately skips as
-"line 602's `if (!mandate)`", and a design note points at the test that
-proves a claim. Those pointers are evidence, and a wording pass that reflows
-a comment block moves the code below it, so a pointer that was exact becomes
-a pointer at a blank line with nothing to announce the change.
+finding names the guard it is about as `File.sol:1479`, a mutation gate's
+comment records which guard it deliberately skips as "line 602's
+`if (!mandate)`", and a design note points at the test that proves a claim.
+Those pointers are evidence, and a wording pass that reflows a comment block
+moves the code below it, so a pointer that was exact becomes a pointer at a
+blank line with nothing to announce the change.
 
     python3 reference/line-citations.py              # list every citation and what it points at now
     python3 reference/line-citations.py HEAD         # additionally, report drift since HEAD
@@ -163,6 +163,15 @@ QUOTED = (
 # Placeholder names this file's own documentation uses to show a citation shape. No file
 # in the repository answers to either, so they resolve nowhere and would report as an
 # unresolved filename on every run.
+#
+# The docstring above uses one for a second reason, learned on 2026-08-30. It had shown
+# the shape with a real filename and a real line number, which makes it a live citation
+# this tool then follows, and it had been wrong for long enough that no one could say
+# when: `:1479` was `address recipient,` rather than any guard, and the "line 602" beside
+# it was where `reference/policy.js` held that guard at `af9df40`, which the file has
+# since left behind. An illustration carries no evidence, so it should carry no target
+# either. A count of how far a pointer has drifted is itself a pointer, and dates the
+# same way.
 ILLUSTRATIVE = {"File.sol", "path/to/File.sol"}
 
 _FILES: list[Path] = []
