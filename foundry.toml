@@ -94,14 +94,28 @@ fail_on_revert = false
 shrink_run_limit = 20000
 
 # `forge lint` on 2026-08-24 reported 91 warnings: 5 in the contract, 86 in the tests.
+# Those figures record that run and they stay. The present-tense count is six, because
+# v2 added one more annotation; re-derived 2026-08-30 by grepping `forge-lint` out of
+# the contract rather than by reading this comment.
 # The split below is deliberate and the asymmetry is the point.
 #
-# The contract's five are annotated INDIVIDUALLY, in place, each with a written reason
+# The contract's six are annotated INDIVIDUALLY, in place, each with a written reason
 # for why that specific cast cannot truncate or why that specific timestamp read is
-# sound. Three unsafe-typecast (two `uint96(amount)`, one `uint64(nowTs / subLength)`)
-# and two block-timestamp, both in `isLive`. Those five are exactly the questions an
-# auditor opens with, and we are paying for an audit, so the answers belong next to the
+# sound. Three unsafe-typecast — `uint96(amount)` in `spend` and in `approveCosignFor`,
+# `uint64(nowTs / w.subLength)` in `_checkAndCommitWindows` — and three block-timestamp,
+# one each in `isCosignApproved`, `_isPermanentlyDead` and `isLive`. An earlier version
+# of this comment put two block-timestamp reads "both in `isLive`", which described v1
+# and points at the wrong code now. Those six are exactly the questions an auditor
+# opens with, and we are paying for an audit, so the answers belong next to the
 # code rather than in a config file that suppresses the question.
+#
+# The 2026-08-30 re-run established one more thing: a clean `forge lint` is a claim
+# about DEFAULT severity. `forge lint --severity info` returns twelve notes in real
+# repo code — `multi-contract-file` on the four declarations in `MandateManager.sol`
+# and two in `MockRegistries.sol`, `screaming-snake-case-immutable` on the three
+# immutables, and `screaming-snake-case-const` on MockUSDC's `name`, `symbol` and
+# `decimals`. All twelve are naming or file-layout conventions, and FORGE.md judges
+# each one.
 #
 # The tests are excluded as a CLASS, because 76 of the 86 are `bytes32("literal")` —
 # a conversion solc itself rejects at compile time if the literal exceeds 32 bytes, so

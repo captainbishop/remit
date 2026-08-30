@@ -7,7 +7,7 @@ is the port of `reference/policy.test.js`, which has 94 tests and verifies the *
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 225 pass; `forge lint` was last clean before v2 reached the contract.** First
+**Status: all 225 pass; `forge lint` at default severity is clean on the v2 tree.** First
 compiled and first run on 2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at
 200 runs, in about twelve seconds; the last timed run was 13.84 seconds at 225. That covers
 2,048 fuzz runs across the four property tests and 49,152 calls across the three invariants.
@@ -153,7 +153,7 @@ forge test --match-path 'test/Windows.t.sol'
 forge test --match-test 'test_ATTACK'
 forge test --gas-report           # run 2026-08-24; see DESIGN.md for the table
 FOUNDRY_PROFILE=deep forge test   # 20k fuzz runs, 2000 invariant runs, depth 256
-forge lint                        # run 2026-08-24; expect 0 — see the section below
+forge lint                        # run 2026-08-30; expect 0 — see the section below
 ```
 
 The default profile is tuned to finish while you watch it. The deep profile is the
@@ -373,7 +373,7 @@ attempt in a low-level call and tallies refusals in `handler.refusals()`, so a p
 denial is counted rather than propagated. Non-vacuity is established separately, by the
 two guard tests named under "Running".
 
-## What `forge lint` found, and why 91 warnings became five annotations
+## What `forge lint` found, and why 91 warnings became six annotations
 
 `forge build` had been ending with *"Compiler run successful with warnings"* since the
 first compile, and the warnings were left alone on the reasonable-sounding grounds that
@@ -389,30 +389,33 @@ The decision that got it there is written down below rather than left as a habit
 working `*.log` captures from that session are gitignored and local; the numbers that
 matter are in this document.)
 
-**The contract's five are annotated individually, in place.** They are three
-`unsafe-typecast` and two `block-timestamp`, each with a
-`// forge-lint: disable-next-line(...)` pragma sitting under a comment that gives the
-actual reason:
+**The contract's six are annotated individually, in place.** The 2026-08-24 run produced
+five of them and v2 added the sixth. They are three `unsafe-typecast` and three
+`block-timestamp`, each with a `// forge-lint: disable-next-line(...)` pragma sitting under
+a comment that gives the actual reason:
 
-The two `uint96(amount)` casts in `spend` cannot truncate because `amount` is bounded by
-an unconditional `AmountTooLarge` guard that runs before any policy check — and the
-comment says explicitly that moving that guard behind a flag makes both casts unsound,
-because a caller could then pass `2^96` and have it wrap to `0`, spending nothing against
-the caps while the transfer moves the full amount.
+The two `uint96(amount)` casts — one in `spend`, one in `approveCosignFor` — cannot truncate
+since `amount` is bounded by an unconditional `AmountTooLarge` guard that runs before any
+policy check, and the comment beside each says explicitly that moving that guard behind a
+flag makes the cast unsound, because a caller could then pass `2^96` and have it wrap to
+`0`, spending nothing against the caps while the transfer moves the full amount. Both sat in
+`spend` in v1, and the cosign approval surface v2 added carries the second one now.
 
 The `uint64(nowTs / w.subLength)` cast in `_checkAndCommitWindows` is bounded above by
 `block.timestamp` itself, since `subLength` is at least 1; `uint64` saturates around
 584 billion years.
 
-The two `block.timestamp` reads in `isLive` get the longest justification, because the
-lint's objection — a proposer can nudge the clock — is answered structurally rather than
-avoided. Nothing in that function *grants* capacity from a timestamp: window accounting
-deliberately has no upper bound on bucket index, so a clock moved forward cannot age out
-live history and refill a cap (that was a real bug, and it is now a named regression
-test), and a clock moved backwards can only make `isLive` return false, which refuses
-spends. The payer's actual remedy, `revoke`, never consults the clock at all.
+The three `block.timestamp` reads get the longest justification, because the lint's
+objection — a proposer can nudge the clock — is answered structurally rather than
+avoided. They sit in `isCosignApproved`, `_isPermanentlyDead` and `isLive`; v1 carried two
+and both were inside `isLive`, so a reader working from an older copy of this section will
+look in the wrong place. Nothing in any of the three *grants* capacity from a timestamp:
+window accounting deliberately has no upper bound on bucket index, so a clock moved forward
+cannot age out live history and refill a cap (that was a real bug, and it is now a named
+regression test), and a clock moved backwards can only make `isLive` return false, which
+refuses spends. The payer's actual remedy, `revoke`, never consults the clock at all.
 
-Those five are the first questions an auditor asks, and this is a contract that is meant
+Those six are the first questions an auditor asks, and this is a contract that is meant
 to hold real money, so the answers belong beside the code.
 
 **The 86 in `test/` are excluded as a class**, via `[lint] ignore = ["**/*.t.sol"]` in
@@ -491,6 +494,51 @@ came out of the test harness, which is the same pattern as the first compile and
 first run — three passes now, and all the defects have been on the verification side.
 That is reassuring about the contract and it is also exactly what you would expect from a
 codebase whose contract has been read many times and whose harness has been read once.
+
+### The 2026-08-30 re-run, and what a silent clean run proves on its own
+
+`forge lint` on the v2 tree printed one line — `No files changed, compilation skipped` — and
+nothing else. **A run that read the source and found nothing is byte-identical to a run that
+read no source at all**, so that output certifies nothing by itself. It is the same trap the
+glob table above records in its other form, and it takes the same answer: a control that has
+to come back non-zero.
+
+The control was `contracts/LintProbe.sol`, a throwaway file carrying four deliberate
+violations — a constant named `lowerCaseConst`, a function named `Mixed_Case`, an unbounded
+`uint64(x)`, and `(a / b) * 1e18`. It went inside `contracts/` on purpose, because
+`src = "contracts"` makes that unambiguously the same source set as the contract; a probe
+placed outside `src` could be skipped for being out of scope and would reproduce the silence
+it exists to break. With the probe present the same bare invocation
+reported `warning[divide-before-multiply]` and `warning[unsafe-typecast]` against it.
+Removing the probe returned the 38-byte clean line. The file is untracked and was deleted
+in the same paste that read it.
+
+**Linting is independent of compiling, and that independence is what makes the clean result
+usable.** Running the probe a second time against a warm cache printed `No files changed,
+compilation skipped` *and* both warnings. Had the warnings vanished, every clean run in this
+repo would have been an artefact of `out/` being up to date rather than a statement about
+the code.
+
+**The clean result is a claim about default severity, and the note class beneath it is not
+empty.** `forge lint --severity info` returns twelve notes in real repo code, and every one
+of them is a naming or file-layout convention rather than a defect:
+
+| lint | where | count |
+| --- | --- | --- |
+| `multi-contract-file` | `MandateManager.sol` :147, :156, :164, :194 | 4 |
+| `screaming-snake-case-immutable` | `MandateManager.sol` :205, :210, :214 | 3 |
+| `screaming-snake-case-const` | `MockUSDC.sol` :52, :53, :54 | 3 |
+| `multi-contract-file` | `MockRegistries.sol` :16, :74 | 2 |
+
+`multi-contract-file` objects to the four declarations in one file, which is the zero-import
+single-file design chosen on purpose and described under Layout; splitting the three
+interfaces into their own files would add the imports that design exists to avoid. The three
+`MockUSDC` constants are `name`, `symbol` and `decimals`, whose names ERC-20 fixes, so
+renaming them to satisfy a style note would break the standard the mock exists to imitate.
+The three immutables are `usdc`, `identityRegistry` and `validationRegistry`, and each is
+`public`, so renaming one changes a getter in the ABI — a decision about the contract's
+public surface rather than a lint fix, and it is recorded as an open decision instead of
+being settled inside this section.
 
 ## What the first compile was predicted to find
 
