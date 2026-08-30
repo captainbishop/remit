@@ -2980,6 +2980,38 @@ still be hiding there.
 - **`forge lint` on the v2 tree.** `windowRemaining`'s `uint64` cast carries no
   suppression comment where its twin in `_checkAndCommitWindows` does; whether that is a
   new warning is #14's to find out.
+
+  **CLOSED 2026-08-30.** It is not a new warning. `forge lint` on the v2 tree is clean at
+  default severity, and the run was proved to have read the source rather than skipped it:
+  a throwaway `contracts/LintProbe.sol` carrying four deliberate violations made the same
+  bare invocation report two warnings, and a second run against a warm cache printed
+  `No files changed, compilation skipped` *together with* both warnings, so linting does not
+  depend on compiling. `FORGE.md:498-542` carries the method and the numbers.
+
+  The commenting asymmetry is real and the reason for it is not established. Both casts have
+  the same shape — `uint64` of a `uint256` divided by a `uint32` `subLength` — and only the
+  one in `_checkAndCommitWindows` is annotated, yet the unannotated one in `windowRemaining`
+  raises nothing. The visible difference is the numerator: the annotated cast takes the
+  `nowTs` parameter, the unannotated one takes `block.timestamp` directly. Whether Foundry
+  1.7.1's `unsafe-typecast` rule distinguishes those two is unverified here, so treat the
+  silence as a measurement of this Foundry version and not as a property of the code. A
+  version bump can make the unannotated line fire while the annotated one keeps its
+  exemption, which is the wrong way round for whoever reads the warning first.
+  `windowRemaining` is a `view` that grants nothing, so nothing turns on it today.
+
+  The same run also established that a clean `forge lint` is a claim about **default**
+  severity. `forge lint --severity info` returns 14 notes, 2 on the probe and 12 in repo
+  code: four `multi-contract-file` in `MandateManager.sol`, one for each of the three
+  interfaces and one for the contract; three `screaming-snake-case-immutable` there, on
+  `usdc`, `identityRegistry` and `validationRegistry`; three `screaming-snake-case-const` in
+  `MockUSDC.sol`, on `name`, `symbol` and `decimals`; and two `multi-contract-file` in
+  `MockRegistries.sol`. Every one is a naming or file-layout convention, and renaming any
+  of the three immutables would change a getter in the ABI of a contract that moves
+  money, so it is an open decision about the public surface rather than a lint fix.
+
+  Correcting the record on the way through: the contract carries **six** in-place
+  suppressions, three `unsafe-typecast` and three `block-timestamp`, where both
+  `foundry.toml` and `FORGE.md` had described v1's five. Fixed in `5653bcb`.
 - **Three co-signature behaviours `test/Cosign.t.sol` never runs**, enumerated against the
   file rather than sampled, and all three are F17's: approving on a **revoked** mandate;
   approving on an **expired** one, or letting a live approval outlive the mandate's
