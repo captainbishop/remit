@@ -7,8 +7,8 @@ one is written for someone who is starting out, and it assumes nothing.
 ## Where you are
 
 **All five stages below are done, as of 2026-08-24.** Node is installed and the reference
-tests pass — 57 of them in the current tree, since v2 has been adding to that suite. Foundry
-is installed under WSL, the contract compiles, and all 140 Forge tests pass, including
+tests pass — 94 of them in the current tree, since v2 has been adding to that suite. Foundry
+is installed under WSL, the contract compiles, and all 219 Forge tests pass, including
 2,048 randomised fuzz runs and 49,152 invariant calls. Gas is measured, and stage 4 is
 complete: the contract is deployed to Arc Testnet with its source published, a mandate has
 been granted, and **an agent has spent your money under policy without ever holding your
@@ -37,15 +37,15 @@ a real blockchain rather than only in tests.
 
 The **reference model** (`reference/policy.js`) is the rulebook, written in JavaScript.
 It decides every question: is this spend allowed, and if not, exactly why. It works right
-now, and its 57 tests pass.
+now, and its 94 tests pass.
 
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
-Solidity, the language blockchains run. As of 2026-08-24 it compiles, the 140 tests written
-against it all pass, and it is **deployed and working on Arc's test network** — five real
-mandates, five real payments, and thirty-one transactions in all, every one visible in the
-explorer.
+Solidity, the language blockchains run. It first compiled on 2026-08-24 against 140 tests,
+every one of which passed; the suite has since grown to 219, and all 219 pass. It is
+**deployed and working on Arc's test network** — five real mandates, five real payments, and
+thirty-one transactions in all, every one visible in the explorer.
 
-The **Forge tests** (`test/`, 140 of them) check the contract against its real storage
+The **Forge tests** (`test/`, 219 of them) check the contract against its real storage
 layout, including thousands of randomised runs. They all pass.
 
 The **demo** (`demo/playground.html`) is a web page that simulates the whole thing in a
@@ -169,13 +169,13 @@ node --test reference/policy.test.js
 The last lines should read:
 
 ```
-# tests 57
-# pass 57
+# tests 94
+# pass 94
 # fail 0
 ```
 
 That is the rulebook verifying itself, including six deliberately reconstructed attacks
-it defeats. If you see `57 pass`, the foundation of the project is sound and you have run
+it defeats. If you see `94 pass`, the foundation of the project is sound and you have run
 your first test suite. If you see anything else, paste all of it to me — that would be
 surprising, and I would want to know.
 
@@ -185,8 +185,9 @@ pinning the audit counter's own upper bound, which the model previously could no
 because the contract panicked there and a JavaScript integer has no width to panic at;
 three for the holes in the co-signature requirement; six for the joint-ceiling view; and
 one for the narrowed definition of a bounded mandate — a per-transaction cap or a window is
-no longer enough on its own, because neither limits what can be spent over a lifetime. This
-number will move again when the merkle allowlist lands.)
+no longer enough on its own, because neither limits what can be spent over a lifetime. It
+then went 57 → 69 → 72 → 76 → 92 → 94 as later v2 tasks each brought their own regression
+tests, so the merkle allowlist was never what moved it next.)
 
 ## Stage 2 — compile the contract ✅ done
 
@@ -241,14 +242,14 @@ with the whole account in `FORGE.md`. The pattern matters more than the detail h
 warning you have decided to ignore stops being read, and the count I was carrying in my
 head had drifted from five to ninety-one without anyone noticing.
 
-## Stage 3 — run the 140 contract tests ✅ done
+## Stage 3 — run the 219 contract tests ✅ done
 
 ```
 forge test
 ```
 
-All 140 pass, in about twelve seconds. Then two specific checks, which matter more than they
-look:
+All 219 pass. The last timed run took seventeen seconds at 207 tests, so expect roughly
+that. Then two specific checks, which matter more than they look:
 
 ```
 forge test --match-test test_flagConstants_matchTheContract

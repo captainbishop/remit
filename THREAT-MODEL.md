@@ -363,9 +363,22 @@ what it does not, and which areas remain unexamined.
 > way.** F3, F9, F10 and F11 all landed, taking the fixed-in-code bucket from eighteen to
 > **twenty-two of thirty-seven**. `contracts/MandateManager.sol` is **2,138 lines and 38 errors**,
 > from 2,043 and 37 at `db1c08c`, both counted from the file. The suite is **219 cases** — 216 named
-> `test*` plus 3 named `invariant_`, which `reference/vacuity-check.py` reports directly and whose
-> per-file distribution sums to the figure the run log prints. The model is **94 tests**, all
-> passing, so 212 and 92 are history, as 209, 207, 182, 178 and 177 were before them.
+> `test*` plus 3 named `invariant_`, which `reference/vacuity-check.py` reports directly. The
+> per-file distribution sums to the same: `Cosign` 48 → 53, `Bounds` 31 → 32, `Views` 25 → 26, and
+> the other seven case-bearing files unmoved at `Creation` 44, `Gates` 24, `Windows` 14,
+> `Idempotency` 13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4 and `Base` 0. The model is
+> **94 tests**, all passing, so 212 and 92 are history, as 209, 207, 182, 178 and 177 were before
+> them.
+>
+> **The assertion figures moved further than the case count, and the checker's printed breakdown
+> does not sum to its own total.** `reference/vacuity-check.py` now reports **402 primitive
+> assertion calls** against 362 at `af9df40`, **92** in-code `vm.expectRevert` with **0** bare
+> against 90, and **seven** assertion-bearing helpers against six, `payReverts` alone standing at 82
+> call sites. Its components sum to **408**: `assertRevertedWith` appears in the list for
+> information and stays out of the total, under the same rule §5 records for the 287-versus-290
+> discrepancy in the anchor — every `assert*(` across the `.t.sol` files, less the denial helper
+> counted once already. **A breakdown that has to be read with a rule will be re-added wrongly**, so
+> the rule sits here beside the figure rather than only in the tool's output.
 >
 > **Both mutation censuses moved, and one of the moves has no fix behind it.** The Solidity census is
 > **95 — 89 removals plus 6 injections** over eleven targets, from 91, and the four new sites are

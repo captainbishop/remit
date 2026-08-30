@@ -84,7 +84,7 @@ them and the ring-bucket state has to be rebuilt from scratch.
 The live investigation against this deployment finishes first. Cut v2 when the
 ERC-8004 verification work (#32) is done, the 53,114 question (#31) is settled, and the
 docs are corrected (#33) — then make every change below in one pass, re-run the
-140 tests plus `forge test --profile deep`, redeploy, and re-measure.
+full suite plus `forge test --profile deep`, redeploy, and re-measure.
 
 *Status, 2026-08-25:* #32, #33, #44 and #45 are all done, so the live
 investigation against this deployment is complete — all five state-changing
@@ -448,15 +448,15 @@ requirement anywhere that it be in the future.
 `hasBound` to `hasLifetimeBound` at lines 217–218 and the suite goes from 56 tests to **57**,
 derived by running it rather than counted by hand: `node --test policy.test.js` reports
 `# tests 57 / # pass 57 / # fail 0`. **That 57 is the figure as of #22 and is left as history, not
-updated in place** — the model suite is **76** as of 2026-08-28, having gained F16's and F17's
-cosign tests, F19's four refusals, and the four the `evaluate` mutation gate demanded. F1 gets no
-mirror because the model has no `getMandate`
+updated in place** — it reached **76** on 2026-08-28, having gained F16's and F17's cosign
+tests, F19's four refusals, and the four the `evaluate` mutation gate demanded, and stands at
+**94** today. F1 gets no mirror because the model has no `getMandate`
 and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
 would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
-asymmetry reads as a decision rather than an omission. The Solidity suite is now **157** test
-functions by static count across eleven files, up two net — a static count, not a `forge test`
-count, and therefore **unverified**, because forge does not run in the environment these edits
-were made in.
+asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
+functions by static count across eleven files at #22, up two net — a static count, not a
+`forge test` count, and therefore **unverified** then, because forge did not run in the
+environment these edits were made in, and `forge test` reports **219** today.
 
 **What it broke.** `DESIGN.md`'s flagship worked example and the narrative `THREAT-MODEL.md`
 F2 is built on are now un-creatable for a *second and independent* reason:
@@ -927,8 +927,8 @@ found nothing: all 157 test functions assert something, no `vm.expectRevert()` a
 suite is bare, and every one of the 31 custom errors `MandateManager` declares is expected by
 at least one test. The 157 was also counted from the source for the first time —
 `grep -cE '^    function (test|testFuzz|invariant)'` across the eleven files sums to exactly
-the 157 `forge test` reports, so the figure this repository quotes in a dozen places now has
-two independent derivations instead of one runner's word.
+the 157 `forge test` reports, so the count this repository quoted in a dozen places had two
+independent derivations rather than one runner's word. `vacuity-check.py` now derives it live.
 
 **Both halves of that were re-derived on 2026-08-28 and both still hold at 182 and 35.** No
 orphan among the 35 errors — `CosignNotRequired` and `SelfPayment` joined since — and the test

@@ -1,18 +1,18 @@
 # Running the Forge suite
 
-140 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
+219 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
-is the port of `reference/policy.test.js`, which has 57 tests and verifies the *policy*.
+is the port of `reference/policy.test.js`, which has 94 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 140 pass, and `forge lint` is clean.** First compiled and first run on
-2026-08-24, under `solc` 0.8.28
-with the optimizer at 200 runs, in about twelve seconds. That covers 2,048 fuzz runs across
-the four property tests and 49,152 calls across the three stateful invariants. What the
-first compile and the first run each cost is recorded below, because a suite's first green
-is the only time you learn whether it was testing anything.
+**Status: all 219 pass, and `forge lint` is clean.** First compiled and first run on
+2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at 200 runs, in about
+twelve seconds; the last timed run was seventeen seconds at 207. That covers 2,048 fuzz
+runs across the four property tests and 49,152 calls across the three stateful invariants.
+What the first compile and the first run each cost is recorded below, because a suite's
+first green is the only time you learn whether it was testing anything.
 
 **They also pass under `--gas-report`, but only since 2026-08-25, and the reason is worth
 knowing before you trust a `gasleft()` figure.** `--gas-report` adds per-call tracing
@@ -79,7 +79,7 @@ Those are bash commands. On Windows they belong in WSL rather than PowerShell, a
 `START-HERE.md` has the step-by-step for setting that up.
 
 Vendoring is deliberate, and the reason is reproducibility rather than convenience.
-Every gas figure in `DESIGN.md` and all 140 tests are properties of exact bytes compiled by
+Every gas figure in `DESIGN.md` and every test in `test/` is a property of exact bytes compiled by
 solc 0.8.28 at `optimizer_runs = 200`, and re-resolving the dependency — whether by
 `forge install`, a submodule, or a fresh clone of a moving branch — risks fetching
 different bytes with no error and invalidating the whole baseline. `forge install` is the
@@ -159,15 +159,15 @@ forge lint                        # run 2026-08-24; expect 0 — see the section
 The default profile is tuned to finish while you watch it. The deep profile is the
 pre-audit setting and takes minutes.
 
-**The deep profile was run on 2026-08-25 and it passes: 140 passed, 0 failed, 0 skipped,
-exit 0, in 15m51.857s wall.** Full output including the config dump is
-`evidence/deep.log`. What that actually bought, stated in calls rather than in runs: each
-of the three `invariant_` functions in `WindowInvariant.t.sol` ran 2,000 sequences of 256
-handler calls, so 512,000 calls apiece and 1,536,000 in total, against 16,384 apiece under
-the default profile. Each of the four `testFuzz_` functions in `WindowFuzz.t.sol` ran
-20,000 cases instead of 512. Nothing new was found — no counterexample, no shrink, no
-revert that the policy did not intend. The only line in the log matching `panic` is the
-name of a test that asserts a panic.
+**The deep profile was run on 2026-08-25 at 140 tests: 140 passed, 0 failed, 0 skipped,
+exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence/deep.log`.
+The suite is 219 tests now, so the deep profile has not been run against its current form.
+What that run bought, in calls rather than runs: each of the three `invariant_` functions in
+`WindowInvariant.t.sol` ran 2,000 sequences of 256 handler calls, so 512,000 calls apiece
+and 1,536,000 in total, against 16,384 apiece under the default profile. Each of the four
+`testFuzz_` functions in `WindowFuzz.t.sol` ran 20,000 cases instead of 512. Nothing new
+was found — no counterexample, no shrink, no revert that the policy did not intend. The
+only line in the log matching `panic` is the name of a test that asserts a panic.
 
 Note the invocation. It is written above as `FOUNDRY_PROFILE=deep forge test` rather than
 `forge test --profile deep`, and the reason is a failure mode this repo has already been
@@ -203,21 +203,21 @@ success having tested nothing.
 
 ```
 test/Base.t.sol            harness: mocks, actors, params builders, denial helpers
-test/Creation.t.sol        26  grant-time validation — every way a mandate is refused
-test/Bounds.t.sol          25  per-tx, lifetime, allowlist, spender, time, revocation
+test/Creation.t.sol        44  grant-time validation — every way a mandate is refused
+test/Bounds.t.sol          32  per-tx, lifetime, allowlist, spender, time, revocation
 test/Windows.t.sol         14  the rolling-window ring, by hand, with the boundary probes
-test/Gates.t.sol           18  ERC-8004 identity and credential gates
-test/Cosign.t.sol          17  what a co-signature actually commits to
+test/Gates.t.sol           24  ERC-8004 identity and credential gates
+test/Cosign.t.sol          53  what a co-signature actually commits to
 test/Idempotency.t.sol     13  nonce replay, and that a denial consumes nothing
-test/Views.t.sol           14  the pre-flight views an agent decides on
+test/Views.t.sol           26  the pre-flight views an agent decides on
 test/WindowFuzz.t.sol       4  exact-ledger property tests, bounded loops
 test/WindowInvariant.t.sol  5  the same property, with the fuzzer choosing the sequence
 test/ArcParity.t.sol        4  matched local control for the real Arc Testnet transactions
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-Nine of the 140 are named attack simulations (`test_ATTACK_*`), one is a regression for
-a bug that shipped into the model (`test_REGRESSION_*`), and four pin behaviour that is
+Ten of the 219 are named attack simulations (`test_ATTACK_*`), one is a regression for
+a bug that shipped into the model (`test_REGRESSION_*`), and three pin behaviour that is
 deliberately weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
 **`forge test` prints `Ran 13 test suites`, and the arithmetic reconciling that count with
@@ -226,7 +226,7 @@ Eleven files hold fourteen non-abstract contracts; `ArcParity.t.sol` alone decla
 one per measured transaction, because each needs cold storage. Subtract `WindowHandler` —
 non-abstract but a fuzzing handler with no test functions of its own — and you get 13.
 `Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. In total: 11 files,
-13 suites, 140 tests, and all three numbers are correct at the same time.
+13 suites, 219 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
 

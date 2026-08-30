@@ -22,7 +22,7 @@ saying which release it means, it means v1.
 
 | File | What it is |
 |---|---|
-| `contracts/MandateManager.sol` | The whole system. 35 custom errors, 5 events, no imports, no inheritance, no owner. |
+| `contracts/MandateManager.sol` | The whole system. 38 custom errors, 5 events, no imports, no inheritance, no owner. |
 
 There is nothing else in `contracts/`. The contract declares the three interfaces it
 needs inline at lines 136, 144 and 151 rather than importing them, so the file is
@@ -38,12 +38,12 @@ self-contained and can be read start to finish without following a dependency.
 
 ## Out of scope
 
-- `test/` — 11 `.t.sol` files, 185 tests.
+- `test/` — 11 `.t.sol` files, 219 tests.
 - `lib/forge-std/` — forge-std 1.9.6, vendored as 53 tracked files. Test-only;
   `grep -rc forge-std contracts/` returns 0. It is vendored rather than submoduled, so
   no upstream SHA is recorded and byte-equality against the v1.9.6 tag has never been
   checked. An auditor who cares should fetch the tag and diff the 53 files themselves.
-- `reference/` — a JavaScript model of the policy (`policy.js`), its 76-test suite, and
+- `reference/` — a JavaScript model of the policy (`policy.js`), its 94-test suite, and
   two mutation-testing scripts. The model exists to cross-check the contract, and the
   two have disagreed twice in ways that mattered, so it is useful context. It is not
   deployed and it holds nothing.
@@ -100,7 +100,7 @@ is the document about what that means for a payer.
 |---|---|
 | What is this and why | `README.md` |
 | Design decisions and the arguments behind them | `DESIGN.md` |
-| Trust assumptions, threat model, 28 recorded findings, 17 invariants | `THREAT-MODEL.md` |
+| Trust assumptions, threat model, 37 recorded findings, 22 invariants | `THREAT-MODEL.md` |
 | What immutability costs and what recourse a payer has | `IMMUTABILITY.md` |
 | Test and tooling conventions, compiler settings | `FORGE.md` |
 | Live transactions, gas measurements, verification output | `evidence/` |

@@ -462,7 +462,7 @@ mandate or the ERC-20 allowance independently stops all spending.
 executable model of every decision the contract makes. It is the source of truth because
 it is the artifact that has actually been executed.
 
-`reference/policy.test.js` is 57 tests over that model: construction guards, each
+`reference/policy.test.js` is 94 tests over that model: construction guards, each
 cap and check, named attack tests, and property-based fuzzers. It includes a greedy
 adversary that aims spends at bucket boundaries across `K ∈ {2,3,4,6,12,24}` × 25
 seeds × 200 steps, checked against a brute-force exact ledger. This is the primary
@@ -471,15 +471,15 @@ correctness evidence for the whole project.
 `contracts/MandateManager.sol` is the on-chain implementation, written to mirror the
 model, with every deliberate deviation commented at the point it occurs.
 
-`test/` is the Forge port: 140 tests against the real storage layout, covering the same
+`test/` is the Forge port: 219 tests against the real storage layout, covering the same
 ground plus the three properties a model structurally cannot express — transactional
 rollback, storage aliasing in the bucket ring, and packed-`uint96` arithmetic. See
-FORGE.md. As of 2026-08-24 it compiles and all 140 pass.
+FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 219 pass now.
 
 ## Status and limits
 
 The reference model is real, executed, and passing: `node --test
-reference/policy.test.js` reports 57 tests, 57 pass, 0 fail. It found six genuine
+reference/policy.test.js` reports 94 tests, 94 pass, 0 fail. It found six genuine
 cap-bypass bugs during development, four in the window algorithm and two in the
 credential check, each of which is now a named regression test.
 
@@ -514,10 +514,10 @@ entries. The other four are unrelated: two are semantics the model simply had ba
 the zero-as-unset shape appears is worth auditing mechanically rather than reasoning
 about case by case.
 
-**The Solidity compiles and passes its suite, as of 2026-08-24.** It was authored in an
-environment with no `solc` and no network access, so this was the first mechanical check
-it had ever received. Under `solc` 0.8.28 with the optimizer at 200 runs it compiles with
-no errors, and `forge test` reports 140 of 140 passing: 2,048 fuzz runs across four
+**The Solidity compiles and passes its suite, and first did so on 2026-08-24.** It was
+authored with no `solc` and no network access, so that was its first mechanical check.
+Under `solc` 0.8.28 with the optimizer at 200 runs it compiles with no errors, and `forge
+test` reported 140 of 140 then and reports 219 of 219 now: 2,048 fuzz runs across four
 property tests and 49,152 calls across three stateful invariants, with both anti-vacuity
 guards green — so the suite is exercising the engine rather than agreeing with itself.
 

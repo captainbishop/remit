@@ -404,11 +404,11 @@ surface is five mandates, five spends, three revocations, four cosignature trans
 in total, every one status 1, with both ERC-8004 checks having fired against Arc's real
 registries. All five state-changing functions have now run live, so none of them stands at
 zero. Line 13 likewise credits the reference model with 46 tests, which was right then and
-is 57 now.
+is 94 now.
 
 The one part of that banner which is correct and which the v2 replacement keeps verbatim is
 the `NOT AUDITED` / no-real-money half.
-`CHANGELIST.md:87` quotes the stale banner deliberately and annotates it four lines later;
+`CHANGELIST.md:140` quotes the stale banner deliberately and corrects it two lines below;
 that quotation is not a defect and should not be "fixed".
 
 **A number written into an immutable contract is a permanent claim, so it has to be derived
