@@ -368,4 +368,236 @@ contract WindowsTest is Base {
         assertEq(mm.windowRemaining(id, 1), 0);
         assertEq(mm.windowRemaining(id, 3), 0);
     }
+
+    // ---------------------------------------------------------------------------------
+    // The accepted extremes of the geometry.
+    //
+    // Every window elsewhere in this file runs at K == 12 or K == 24, and the fuzzer
+    // draws K from {2, 3, 4, 6, 12, 24}. createMandate accepts three shapes outside that
+    // range — one bucket, thirty-two buckets, and a sub-period of one second — and until
+    // this section no spend had ever run through any of them. The last two tests here
+    // cover MAX_WINDOWS, which had been built once and never spent against.
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * One bucket is a ring of two slots, and it charges twice the nominal window.
+     *
+     * A window needs a non-zero length, a non-zero cap, a bucket count from 1 to
+     * MAX_BUCKETS, and a length its bucket count divides evenly. One bucket satisfies all
+     * four. The counted span is (K+1) sub-periods, which at K == 1 is two full windows, so a
+     * payer who writes "1200 per day, one bucket" has asked for 1200 per two days. That is
+     * the K/(K+1) conservatism at its widest: sustained throughput is half of nominal here,
+     * against 92% at the K == 12 used by the rest of this file.
+     */
+    function test_bucketsOfOne_chargesTwoWindowsBeforeReleasing() public {
+        bytes32 id = grant(windowOnlyParams(DAY, CAP, 1));
+        MandateManager.WindowSpec memory w = mm.getWindow(id, 0);
+        assertEq(uint256(w.buckets), 1, "one bucket, so the ring is two slots wide");
+        assertEq(uint256(w.subLength), DAY, "and the sub-period is the whole window");
+
+        uint64 t0 = uint64(((block.timestamp / DAY) + 1) * DAY);
+        vm.warp(t0);
+        pay(id, CAP);
+        assertEq(mm.windowRemaining(id, 0), 0, "the cap is consumed");
+
+        // A nominal window later the bucket index has advanced by one, and `oldest` is that
+        // same index, so the spend still counts at full weight.
+        vm.warp(t0 + DAY);
+        assertEq(mm.windowRemaining(id, 0), 0, "one window on, none of it has come back");
+        payReverts(id, 1, overWindowCap(DAY, CAP, CAP));
+
+        vm.warp(t0 + 2 * DAY - 1);
+        assertEq(mm.windowRemaining(id, 0), 0, "still none of it a second before 2L");
+
+        vm.warp(t0 + 2 * DAY);
+        assertEq(mm.windowRemaining(id, 0), CAP, "the whole cap returns at 2L");
+
+        // Bucket b+2 shares a ring slot with bucket b, whose index has aged out, so this
+        // spend takes the recycle branch. The refusal that follows reports `used` as one cap
+        // rather than two, which is how recycling is told apart from accumulating.
+        pay(id, CAP);
+        payReverts(id, 1, overWindowCap(DAY, CAP, CAP));
+        assertEq(token.balanceOf(vendor), uint256(CAP) * 2);
+    }
+
+    /**
+     * MAX_BUCKETS is 32, and the ring it builds holds 33 live buckets at once.
+     *
+     * `Creation.t.sol` already covers the refusal above 32; acceptance at exactly 32 had no
+     * test, and no spend in the suite had ever run against a ring wider than 25 slots. The
+     * extra slot is the property here. A cap of 33 units is filled by 33 spends of one unit
+     * at 33 consecutive sub-periods, because all 33 count at full weight. A 32-slot ring
+     * would have overwritten the first of them when the thirty-third was written, and the
+     * thirty-third spend would then have been admitted with room to spare.
+     */
+    function test_bucketsAtTheMaximum_keepsThirtyThreeBucketsLiveAtOnce() public {
+        uint8 buckets = 32;
+        uint32 sub = DAY / buckets; // 2700 seconds, and 86400 % 32 == 0, so the length divides evenly
+        uint96 cap = usd(3300); // 33 buckets x 100
+
+        bytes32 id = grant(windowOnlyParams(DAY, cap, buckets));
+        assertEq(uint256(mm.getWindow(id, 0).subLength), sub, "MAX_BUCKETS is accepted as written");
+
+        uint64 t0 = uint64(((block.timestamp / sub) + 1) * sub);
+        for (uint64 i = 0; i <= buckets; ++i) {
+            vm.warp(t0 + i * sub);
+            pay(id, usd(100));
+        }
+        assertEq(mm.windowRemaining(id, 0), 0, "33 live buckets exactly fill a 33-unit cap");
+        payReverts(id, 1, overWindowCap(DAY, cap, cap));
+
+        // One sub-period on, the oldest of the 33 drops out and one bucket's worth returns.
+        // Release is one bucket at a time at every K, and K == 32 is the finest release this
+        // contract can be configured to give.
+        vm.warp(t0 + 33 * sub);
+        assertEq(mm.windowRemaining(id, 0), usd(100), "exactly one bucket released");
+    }
+
+    /**
+     * A sub-period of one second, which needs lengthSeconds == buckets.
+     *
+     * The smallest window createMandate will build is one second with one bucket. At one
+     * second per bucket the bucket index equals the raw timestamp, the largest value the ring
+     * arithmetic is ever handed, and the reason `_checkAndCommitWindows` carries a written
+     * justification for its uint64 cast. A one-second window releases after two seconds, for
+     * the same reason the day-long window above releases after two days.
+     */
+    function test_subLengthOfOneSecond_releasesAfterTwoSeconds() public {
+        bytes32 id = grant(windowOnlyParams(1, usd(100), 1));
+        assertEq(uint256(mm.getWindow(id, 0).subLength), 1, "one second per bucket");
+
+        uint64 t0 = uint64(block.timestamp);
+        pay(id, usd(100));
+        assertEq(mm.windowRemaining(id, 0), 0);
+
+        vm.warp(t0 + 1);
+        assertEq(mm.windowRemaining(id, 0), 0, "a second later the spend still counts");
+        payReverts(id, 1, overWindowCap(1, usd(100), usd(100)));
+
+        vm.warp(t0 + 2);
+        assertEq(mm.windowRemaining(id, 0), usd(100), "released at two seconds");
+        pay(id, usd(100));
+        assertEq(token.balanceOf(vendor), uint256(usd(100)) * 2);
+    }
+
+    /**
+     * The same one-second geometry at the last second a mandate can spend in.
+     *
+     * `FAR` is uint40 max and the expiry comparison is exclusive, so FAR - 1 is the last
+     * live second. With a one-second sub-period the bucket index equals the timestamp, so
+     * this is the largest index the ring can be given by any mandate the suite can build,
+     * and it occupies 40 of the field's 64 bits. The closing refusal shows the expiry
+     * arriving a second later, which is what bounds the index in the first place.
+     */
+    function test_subLengthOfOneSecond_atTheLastSpendableSecond_stillBuckets() public {
+        bytes32 id = grant(windowOnlyParams(1, usd(100), 1));
+
+        uint64 t0 = uint64(FAR) - 3;
+        vm.warp(t0);
+        pay(id, usd(100));
+        assertEq(mm.windowRemaining(id, 0), 0, "an index of 2^40 - 4 behaves like any other");
+
+        vm.warp(t0 + 1);
+        payReverts(id, 1, overWindowCap(1, usd(100), usd(100)));
+
+        vm.warp(t0 + 2); // FAR - 1
+        assertEq(mm.windowRemaining(id, 0), usd(100), "and it ages out on schedule");
+        pay(id, usd(100));
+
+        vm.warp(t0 + 3); // FAR, which the exclusive comparison refuses
+        payReverts(id, 1, MandateManager.Expired.selector);
+    }
+
+    /**
+     * The most expensive spend this contract can be asked to perform.
+     *
+     * MAX_WINDOWS is 4 and MAX_BUCKETS is 32, so one spend reads at most 4 * (32 + 1) = 132
+     * ring slots. Bounding that number is why those two constants exist.
+     * `Creation.t.sol` builds a four-window mandate, asserts windowCount == 4 and stops, so
+     * the worst case the limits are there to keep survivable had never executed.
+     *
+     * The four windows are identical because that is the only way all 132 slots hold an
+     * amount at one instant: a slot stays live for (K+1) sub-periods, so windows of different
+     * sub-lengths fill and empty on different schedules. A payer would write four different
+     * lengths, and the test below does; this one is the cost ceiling rather than a shape
+     * anyone would grant.
+     *
+     * The 33 spends fill every slot in every window. The spend after them reads all 132,
+     * counts 128, and recycles the 4 that have aged out. Its gas belongs to the gas report
+     * rather than to an assertion here, for two reasons: --gas-report perturbs `gasleft()` in
+     * this suite, and all calls in one test function share a transaction, so the slots are
+     * warm after the first spend and a figure taken here would understate a real one. Point
+     * `forge test --isolate --gas-report` at this test for the cold number.
+     */
+    function test_fourWindowsAtMaxBuckets_theMaximumCostSpend_succeeds() public {
+        uint96 cap = usd(3300); // 33 buckets x 100, in each of the four windows
+        MandateManager.MandateParams memory p = emptyParams();
+        p.windows = new MandateManager.WindowParams[](4);
+        for (uint256 i = 0; i < 4; ++i) {
+            p.windows[i] = MandateManager.WindowParams({lengthSeconds: DAY, cap: cap, buckets: 32});
+        }
+        p = withExpiry(p); // v2: four windows are still no lifetime bound
+        bytes32 id = grant(p);
+        assertEq(uint256(mm.getMandate(id).windowCount), 4, "MAX_WINDOWS, each at MAX_BUCKETS");
+
+        uint32 sub = DAY / 32;
+        uint64 t0 = uint64(((block.timestamp / sub) + 1) * sub);
+        for (uint64 i = 0; i <= 32; ++i) {
+            vm.warp(t0 + i * sub);
+            pay(id, usd(100));
+        }
+        for (uint256 wi = 0; wi < 4; ++wi) {
+            assertEq(mm.windowRemaining(id, wi), 0, "all four windows are exactly full");
+        }
+
+        // 132 slots read, 128 counted, 4 recycled.
+        vm.warp(t0 + 33 * sub);
+        pay(id, usd(100));
+        assertEq(mm.getMandate(id).totalSpent, usd(3400), "34 spends of 100 landed");
+
+        // The windows are identical, so the first one binds and names itself.
+        payReverts(id, 1, overWindowCap(DAY, cap, cap));
+    }
+
+    /**
+     * Four windows of four different lengths, with the fourth one refusing.
+     *
+     * `_checkAndCommitWindows` walks the windows in order and writes each one before reading
+     * the next, so a refusal raised by the fourth arrives with three windows already debited
+     * in storage. Correctness rests on the whole transaction reverting, and at MAX_WINDOWS
+     * there are three commits to unwind against the one the two-window test above unwinds.
+     * The four lengths are the ones `Creation.t.sol` grants, with the caps rearranged to put
+     * the tightest window last.
+     */
+    function test_fourWindows_refusalByTheLast_unwindsTheFirstThree() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.windows = new MandateManager.WindowParams[](4);
+        p.windows[0] = MandateManager.WindowParams({lengthSeconds: 3600, cap: usd(500), buckets: 6});
+        p.windows[1] = MandateManager.WindowParams({lengthSeconds: DAY, cap: usd(1000), buckets: 12});
+        p.windows[2] = MandateManager.WindowParams({lengthSeconds: WEEK, cap: usd(2000), buckets: 7});
+        p.windows[3] = MandateManager.WindowParams({lengthSeconds: 30 days, cap: usd(300), buckets: 30});
+        p = withExpiry(p);
+        bytes32 id = grant(p);
+
+        // The four sub-periods are 600, 7200, 86400 and 86400 seconds, and 86400 is a
+        // multiple of each, so one warp puts all four windows on a bucket boundary together.
+        vm.warp(((block.timestamp / DAY) + 1) * DAY);
+
+        payReverts(id, usd(400), overWindowCap(30 days, usd(300), 0));
+        assertEq(mm.windowRemaining(id, 0), usd(500), "window 0 kept nothing");
+        assertEq(mm.windowRemaining(id, 1), usd(1000), "window 1 kept nothing");
+        assertEq(mm.windowRemaining(id, 2), usd(2000), "window 2 kept nothing");
+        assertEq(mm.windowRemaining(id, 3), usd(300), "and the window that refused is clean too");
+        assertEq(mm.getMandate(id).totalSpent, 0);
+        assertEq(token.balanceOf(vendor), 0);
+
+        // The reads above report the three windows intact. This spend proves they are intact
+        // in storage as well, by drawing the full headroom each one should still have.
+        pay(id, usd(300));
+        assertEq(mm.windowRemaining(id, 0), usd(200));
+        assertEq(mm.windowRemaining(id, 1), usd(700));
+        assertEq(mm.windowRemaining(id, 2), usd(1700));
+        assertEq(mm.windowRemaining(id, 3), 0, "and the tightest window is now exactly full");
+        payReverts(id, 1, overWindowCap(30 days, usd(300), usd(300)));
+    }
 }
