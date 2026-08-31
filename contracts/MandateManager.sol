@@ -2094,21 +2094,21 @@ contract MandateManager {
     /// agent should read this before building a transaction — a mandate can be
     /// perfectly healthy while the payer has revoked the allowance or run dry.
     ///
-    /// ARC NOTE: `balanceOf` here reads the 6-decimal ERC-20 view of a native
-    /// balance held at 18 decimals, so it truncates — a native balance of
-    /// 100.0000001 USDC reads as 100, and a non-zero balance below 1e-6 USDC
-    /// reads as 0. That error is one-directional: this view can under-report by
-    /// up to 1e-6 USDC, never over-report, so an agent that trusts it will at
-    /// worst skip a spend it could have made. This is also the only place the
-    /// contract reads a balance at all; the `spend` path never does, so the
-    /// truncation cannot affect what a policy permits.
+    /// ARC NOTE: `balanceOf` here reads the 6-decimal ERC-20 view of a native balance held at
+    /// 18 decimals, so it truncates — a native balance of 100.0000001 USDC reads as 100, and a
+    /// non-zero balance below 1e-6 USDC reads as 0. That error is one-directional: this view can
+    /// under-report by up to 1e-6 USDC, never over-report, so an agent that trusts it will at
+    /// worst skip a spend it could have made. This is also the only place the contract reads a
+    /// balance at all; the `spend` path never does, so the truncation cannot affect what a
+    /// policy permits. It reserves nothing for gas either: on Arc that balance is also what the
+    /// payer pays fees from, so a delegate taking the whole of this number leaves them unable to
+    /// afford `revoke` (F42).
     ///
     /// @param mandateId The mandate.
-    /// @return The largest single spend that would actually go through right now, in USDC
-    /// base units — `policyHeadroom` clamped at `type(uint96).max`, then by the payer's
-    /// allowance to this contract and their USDC balance. Still silent on the allowlist, the
-    /// co-signature threshold, the two ERC-8004 gates and nonce reuse, all of which
-    /// `spend` also applies.
+    /// @return The largest single spend that would actually go through right now, in USDC base
+    /// units — `policyHeadroom` clamped at `type(uint96).max`, then by the payer's allowance to
+    /// this contract and their USDC balance. Still silent on the allowlist, the co-signature
+    /// threshold, the two ERC-8004 gates and nonce reuse, all of which `spend` also applies.
     function spendable(bytes32 mandateId) external view returns (uint256) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) return 0;

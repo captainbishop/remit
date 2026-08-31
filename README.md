@@ -264,7 +264,11 @@ forge verify-contract <deployed-address> \
 
 A payer then calls `USDC.approve(mandateManager, budget)` — approve the intended
 budget, not `type(uint256).max`, so the allowance is a hard outer ceiling — followed
-by `createMandate(salt, params)`, and then the delegate can `spend`.
+by `createMandate(salt, params)`, and then the delegate can `spend`. That ceiling
+has two purposes: it caps what a bug in this contract could cost, and since USDC
+is also Arc's gas token, it keeps the rest of the balance — the part that pays
+for `revoke` — outside the delegate's reach for as long as the mandate lasts.
+`THREAT-MODEL.md` F42 has the arithmetic.
 
 ## Status
 

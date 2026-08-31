@@ -316,6 +316,24 @@ transactions, that Arc is producing blocks, and that USDC behaves as specified. 
 trust boundaries, they are enumerated in `THREAT-MODEL.md` §2, and no amount of contract
 design removes them.
 
+On Arc, "can still send transactions" has a price, and it is paid out of the balance the
+mandate spends. USDC is the gas token and its native and ERC-20 views are one balance, so
+every `transferFrom` a delegate makes draws down the same pot the payer needs in order to
+end the mandate. A delegate that never exceeds a cap can still leave the payer holding live
+authority with nothing left to pay for revoking it. Measured on Arc Testnet, `revoke` costs
+30,808 gas and `approve(remit, 0)` costs 38,338 over a live allowance slot; across Arc's
+published fee band of 20 to 20,000 Gwei that is between $0.000767 and $0.7668 for the more
+expensive of the two. Leaving about $0.77 of the balance outside the allowance covers both
+switches at the worst fee Arc permits.
+
+Note which of the two costs more. The switch this section calls the important one is 24%
+dearer than `revoke`, so it is the first to move out of reach as the balance falls. The
+control that survives the squeeze is the allowance itself: approve the intended budget
+rather than `type(uint256).max`, and the remainder of the balance stays beyond the
+delegate's reach for as long as the mandate lasts, enforced by Circle's token rather than
+by this contract. `THREAT-MODEL.md` F42 carries the full arithmetic, the fee band, and the
+reasons a gas reserve inside `spend` was considered and declined.
+
 ## 8. Migration runbook
 
 Use this if v1 ever needs abandoning. The ordering is deliberate: the step that does not

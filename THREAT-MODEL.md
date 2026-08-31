@@ -542,6 +542,17 @@ it cannot bound what the payer's own account can do, and it never claimed to —
 already makes the `msg.value` point. What is added here is the smart-account consequence,
 which matters because the L3 vault design in `L3-VAULT.md` makes a contract the payer.
 
+**The payer's power to end a mandate is funded by the balance the mandate spends.** USDC is Arc's
+gas token and the native and ERC-20 views are one balance, so the fees for `revoke` and for
+`approve(usdc, remit, 0)` are drawn from the same pot the delegate is authorised to draw down. A
+delegate that stays inside every cap can therefore leave the payer holding a live mandate with
+nothing left to pay for ending it, and no cap in this contract prevents that because the write path
+never reads a balance. The measured cost of each control, the fee band it varies across, and the
+reason a reserve inside `spend` would refuse honest payments without closing the hole are all in
+F42. The short form for a payer is that the allowance is the reserve: approve the intended budget
+rather than `type(uint256).max`, and the remainder of the balance stays outside the delegate's reach
+for as long as the mandate lasts, enforced by Circle's token rather than by this contract.
+
 **Circle is in the trust boundary.** USDC on Arc is a Circle-operated asset with a
 runtime-enforced blocklist and an upgradeable implementation. A blocklisted payer or
 recipient makes a spend revert. That is the correct outcome for Remit (nothing moves, no
@@ -2375,7 +2386,8 @@ Four limits are structural, and no amount of test-writing moves them:
   ETH from a balance the mock does not model, so the entire class *"a spend succeeds and leaves
   the payer unable to fund their next transaction"*, and its mirror *"the delegate's own
   balance is consumed by gas until it cannot submit"*, is unreachable in CI by construction —
-  not untested, untestable here.
+  not untested, untestable here. F42 adjudicates the first of those two and prices it from real
+  Arc receipts, since the cost of a revocation is measurable even where the coupling is not.
 - **The native/ERC-20 dual view is deliberately unmodelled**, and the mock's header says so
   with its reason (`MandateManager` only ever touches the ERC-20 interface), so the premise of
   the ARC NOTE at `v2:1077-1084` — one underlying balance, viewed at 18 decimals natively and 6
@@ -3235,6 +3247,103 @@ data. A second approval on a fresh nonce then settles the identical spend, which
 a wasted approval rather than a loss. The middle assertion also pins `lengthSeconds + subLength` as
 the exact release point, so a ring that handed capacity back one bucket early would fail there while
 satisfying everything around it.
+
+### F42 — Gas and budget are one balance on Arc, so a mandate can be spent down to where revoking it is unaffordable
+
+**Severity: low · Status: DOCUMENTED, 2026-08-31 — the boundary is stated in §2, the pre-flight view now says what it does not reserve, and no guard changed on either side · Confidence: certain; every figure below is either a receipt from Arc Testnet or a fee bound Arc publishes.**
+
+The sweep reported it as a kill switch: `spend` never reads a balance, so a spend can pass every
+cap in this contract and still leave the payer holding a live mandate they can no longer afford to
+end. The four `allowance` and `balanceOf` sites in this file are all inside views, and the write
+path calls `transferFrom` and lets Circle's token decide. That much is accurate, and the premise
+underneath it is firmer than the report stated.
+
+**One balance, two interfaces, and Arc says so in those words.** The native view at 18 decimals and
+the ERC-20 view at 6 are windows onto a single quantity: *"The ERC-20 and native interfaces share
+the same underlying balance. An ERC-20 transfer directly moves the native balance, and a native
+send is reflected in the ERC-20 balance. These are not two separate tokens."* Fees on Arc are
+denominated in that same USDC. So the money a mandate authorises the delegate to move is the money
+the payer pays for `revoke` with, and the two are not merely correlated — they are one number.
+`DESIGN.md` already treats this unification as a reason to build here, since it leaves one quantity
+to bound rather than a stablecoin budget beside an unbounded gas account. The same property read
+from the other side is this finding.
+
+**The arithmetic, from three receipts and Arc's published fee band.** `evidence/` carries real Arc
+Testnet revocations: the payer's path costs 30,808 gas, the spender's 32,945, and a repeat on an
+already-revoked mandate 28,008. Withdrawing the allowance with `approve(usdc, remit, 0)` over a live
+slot was measured against Arc's own USDC at 38,338. Arc sets a minimum base fee of 20 Gwei on
+testnet and a maximum of 20,000 Gwei, a band of a thousand to one, and warns that a `maxFeePerGas`
+below the floor may stay pending indefinitely. Converted to the 6-decimal units a payer reads:
+
+| control | gas | at the 20 Gwei floor | at the 20,000 Gwei ceiling |
+|---|---|---|---|
+| `revoke`, payer | 30,808 | 617 units, $0.000617 | 616,160 units, $0.6162 |
+| `revoke`, spender | 32,945 | 659 units, $0.000659 | 658,900 units, $0.6589 |
+| `approve(usdc, remit, 0)` | 38,338 | 767 units, $0.000767 | 766,760 units, $0.7668 |
+
+A reserve of about **$0.77** therefore covers the most expensive of the three controls at the worst
+fee Arc permits, and roughly a thousandth of a cent covers the smallest of them at the floor. The
+exposure is small in absolute terms and total in kind: what runs out is not value but the payer's
+ability to act at all.
+
+**The truncation in the pre-flight view is not a buffer, and the factor is 616.** `spendable` reads
+`balanceOf`, which shows an 18-decimal balance through a 6-decimal window and therefore hides
+anything below one millionth of a USDC — at most 999,999,999,999 wei. `revoke` at the fee floor
+costs 616,160,000,000,000 wei. So a delegate that spends exactly the number the contract hands it
+leaves the payer short of the least costly control by a factor of about 616, at the lowest fee the
+chain allows, and the shortfall widens with the fee. The view's own note calls the truncation
+one-directional and harmless, which it is for its own purpose; it does not make the remainder a
+gas reserve, and it never claimed to.
+
+**A reserve inside `spend` was considered and declined, on four counts.** The first is that this
+contract cannot know the price. A reserve sized at the floor withholds 617 units and buys nothing
+during a spike, and one sized at the ceiling withholds 616,160 units from every mandate for as long
+as the contract exists, in a deployment with no upgrade path. The second is that it would put a
+floor under a payment the payer may fully intend: a mandate written to move a whole balance once,
+to a vendor or to a successor account, would become impossible to complete. The third is that it
+would make the write path read a balance, which the design keeps it clear of on purpose, and would
+hand the 6-decimal truncation a say in what a policy permits — the exact outcome the pre-flight
+view's note rules out when it observes that `spend` never reads a balance, so the truncation cannot
+reach a policy decision.
+
+**The fourth count is the one that settles it: the guard would not hold.** Nothing stops the payer
+from sending the reserve away as native value in their next transaction, and no allowance or mandate
+is consulted on that path — §2 opens with Arc's own statement of it. A guard the protected party
+undoes with their own next transaction, bought at the price of a permanent floor under every mandate
+in an immutable contract, is a bad trade. This is F41's reasoning applied a second time: prefer the
+configuration the payer controls over a refusal this contract cannot size.
+
+**The control that does hold is the allowance, and Circle's token enforces it rather than we do.**
+Remit can never move more than the allowance in total, because `transferFrom` decrements it on every
+spend. For an EOA payer — the only configuration in which a mandate bounds anything at all, as this
+file's header and §2 both say — approving the intended budget rather than `type(uint256).max` leaves
+the remainder of the balance outside the delegate's reach entirely, and the payer chooses the size
+of that remainder without asking anyone. Both the contract header and `README.md` already give this
+advice and both give one reason for it, that a bug in this contract cannot cost more than the
+allowance. The second reason is this finding, and unlike the first it needs no bug: an honest
+delegate operating exactly within its authority produces the same result.
+
+**Two mitigations exist for the cooperative case and neither helps against a hostile delegate.**
+`revoke` accepts the spender as well as the payer, so an agent that has been told to stop can end
+its own authority at its own expense, and F11 makes a repeat idempotent and silent so a payer and a
+delegate racing to revoke cannot both fail. A delegate spending the payer toward the floor is by
+definition not cooperating, so both mitigations describe the case that was never the concern. Arc's
+relayer and 4337 paymaster support is the real escape, and it is an escape a payer has to arrange
+before they need it: a smart account has to be one already, and delegating an EOA under 7702 is
+itself a transaction the payer pays for.
+
+**No test is owed here, and the reason is on record above rather than new.** §4 already lists the
+absence of gas coupling in `MockUSDC` as a structural limit and names this exact class — a spend
+that succeeds and leaves the payer unable to fund their next transaction — as unreachable in CI by
+construction, because Foundry pays fees in ETH from a balance the mock does not model. What is
+observable has receipts instead: the revocation gas figures come from Arc, and the balance those
+fees were drawn from is the balance `evidence/` reconciles.
+
+**`reference/policy.js` owes no matching correction, which makes this the opposite case to F41.**
+The model speaks 6-decimal ERC-20 units exclusively and says so in its own units header, never
+models a balance or an allowance, and stops short of the clamp on purpose, leaving that intersection
+to the contract's views. There is no twin sentence to bring into line because the model never makes
+the claim.
 
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
