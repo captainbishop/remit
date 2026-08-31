@@ -1469,11 +1469,11 @@ contract MandateManager {
      *   later; approving ahead of a mandate's start is a legitimate act for a co-signer.
      * - The rolling window caps (`OverWindowCap`) are the split case, and F40 below is the
      *   permanent half of them. A window's used total falls as buckets age out, so an amount
-     *   refused because of `used + amount` can fit later and is not mirrored. `amount` alone
-     *   against `w.cap` is a different matter: `used` cannot go below zero and `w.cap` never
-     *   changes, so an amount above the cap is refused for the life of the mandate. This is
-     *   the sharpest of the three, and the sentence that used to sit here — "an amount
-     *   refused now can fit later" — was true of the sum and false of one of its terms.
+     *   refused because of `used + amount` can fit later and is not mirrored. F41 scopes that
+     *   "later": on a window at or above `MAX_COSIGN_TTL` it lands past the approval's death.
+     *   `amount` alone against `w.cap` is a different matter: `used` cannot go below zero and
+     *   `w.cap` never changes, so an amount above the cap is refused for the life of the
+     *   mandate. That is the sharpest of the three, and F40 below is where it is refused.
      * - The ERC-8004 checks, the identity gate and the credential gate. A credential can be
      *   refreshed and a validation response can be raised, so both are recoverable states.
      *
@@ -1606,12 +1606,12 @@ contract MandateManager {
         // `createMandate` with no mutator anywhere in this contract, so `amount > w.cap` holds
         // for the life of the mandate however much capacity ages out. An approval above any
         // window's cap is unconsumable in exactly the sense every other check in this block
-        // tests for, and the repository held both halves of that on one configuration in two
-        // tests that never met: `Cosign.t.sol`'s `test_cosign_isCheckedAfterEveryCap` asserted
-        // the permanent refusal with `used` written as a literal zero, and
-        // `test_f17_approvingWhileAWindowIsFull_isAllowed` asserted that approving against a
-        // full window was allowed.
-        //
+        // tests for, and `Cosign.t.sol` held both halves on one configuration, in two tests
+        // that never met: `test_cosign_isCheckedAfterEveryCap` asserted the permanent refusal
+        // with `used` a literal 0; `test_f17_approvingWhileAWindowIsFull_isAllowed` asserted
+        // that approving against a full window was allowed. F41 scopes the second: the room
+        // a spend uses returns up to `lengthSeconds + subLength` later and an approval lives
+        // at most `MAX_COSIGN_TTL`, so at or past that window length no approval sees it back.
         // At most `MAX_WINDOWS` cold reads, and only for a mandate that configured windows.
         // Reported with `used = 0` because the refusal does not depend on current consumption,
         // which is also what makes it safe to report from a function that commits nothing.

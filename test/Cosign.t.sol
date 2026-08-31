@@ -1640,6 +1640,82 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(vendor), usd(20));
     }
 
+    /// F41 scopes the one cap `approveCosignFor` half-mirrors on purpose. An amount above `w.cap`
+    /// is refused there because no passage of time makes it fit, while `used + amount` over the cap
+    /// is allowed through because buckets age out. That second reading has a scope nothing in the
+    /// contract enforces: the room a spend consumes returns `lengthSeconds + subLength` later at
+    /// worst, an approval lives at most `MAX_COSIGN_TTL`, and on a window at or past that length
+    /// the first number is the larger one. The co-signer then pays for an approval that dies before
+    /// the capacity it was waiting on comes back.
+    ///
+    /// Documented rather than refused, because a quarterly budget with monthly buckets is an
+    /// ordinary corporate configuration: bounding `lengthSeconds` at grant time would forbid
+    /// quarterly-budget-plus-co-signer to prevent a wasted approval, and what is lost here is gas
+    /// and one nonce rather than money. Every other test in this file leaves the window at `DAY`,
+    /// so this is also the only place the long-window arithmetic is exercised at all.
+    function test_f41_anApprovalCanDieBeforeTheWindowRoomReturns() public {
+        uint32 quarter = 90 days;
+        uint32 subLength = quarter / 3; // 30 days, which is also exactly `MAX_COSIGN_TTL`
+
+        MandateManager.MandateParams memory p = emptyParams();
+        p.perTxCap = usd(100);
+        p.flags = F_PER_TX;
+        p.windows = new MandateManager.WindowParams[](1);
+        p.windows[0] = MandateManager.WindowParams({lengthSeconds: quarter, cap: usd(100), buckets: 3});
+        p = withCosign(p, boss, usd(10));
+        p = withExpiry(p);
+        bytes32 id = grant(p);
+
+        // Align to a bucket boundary so all ten spends land in one bucket and age out together.
+        uint64 t0 = uint64((block.timestamp / subLength + 1) * subLength);
+        vm.warp(t0);
+        for (uint256 i = 0; i < 10; ++i) {
+            pay(id, usd(10)); // at the threshold, so unsigned
+        }
+
+        // The window is now exactly full, and the approval is still legal: 50 is under the cap, so
+        // F40's permanent half passes, and `used + 50` over the cap is the half F17 leaves out.
+        // `validUntil` is the longest deadline this contract will accept.
+        bytes32 nonce = nextNonce();
+        uint40 validUntil = uint40(t0 + mm.MAX_COSIGN_TTL());
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, validUntil);
+        assertTrue(mm.isCosignApproved(id, hash), "the approval is accepted and reads as live");
+
+        // One second before it lapses, which is the last moment it could be used, the window still
+        // refuses. `isCosignApproved` answers true because the approval is live; the refusal
+        // belongs to the window, and no view in this contract joins the two.
+        vm.warp(uint256(validUntil) - 1);
+        assertTrue(mm.isCosignApproved(id, hash), "live to the last second, and unusable throughout");
+        vm.prank(agent);
+        vm.expectRevert(overWindowCap(quarter, usd(100), usd(100)));
+        mm.spend(id, vendor, usd(50), REF, nonce);
+
+        // The room comes back at `lengthSeconds + subLength`, pinned here from below. A ring that
+        // released capacity one bucket early would satisfy the block after this one and fail here.
+        vm.warp(uint256(t0) + quarter + subLength - 1);
+        vm.prank(agent);
+        vm.expectRevert(overWindowCap(quarter, usd(100), usd(100)));
+        mm.spend(id, vendor, usd(50), REF, nonce);
+
+        // And this is the finding. The window has room, the request is unchanged, and the answer is
+        // that the co-signature expired 90 days ago. `_checkAndCommitWindows` runs above the cosign
+        // branch in `spend`, so the error moves from the cap to the deadline at this exact second.
+        vm.warp(uint256(t0) + quarter + subLength);
+        assertFalse(mm.isCosignApproved(id, hash), "the approval did not survive the wait");
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignExpired.selector, hash, validUntil));
+        mm.spend(id, vendor, usd(50), REF, nonce);
+
+        // A wasted approval rather than a broken mandate: the same request settles on a second
+        // approval, so the cost is the co-signer's gas and one nonce, not the payer's capacity.
+        bytes32 nonce2 = nextNonce();
+        vm.prank(boss);
+        mm.approveCosignFor(id, vendor, usd(50), REF, nonce2, uint40(block.timestamp + DAY));
+        payWithNonce(id, vendor, usd(50), nonce2);
+        assertEq(token.balanceOf(vendor), usd(150), "ten tens, plus the fifty that finally landed");
+    }
+
     /// An ERC-8004 credential that has not been filed yet is recoverable by a third party the
     /// cosigner does not control, which is precisely why refusing here would be wrong: the
     /// approval would have to be re-obtained for a condition that fixed itself.

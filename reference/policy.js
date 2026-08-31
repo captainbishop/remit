@@ -1104,7 +1104,11 @@ function revoke(mandate, caller) {
  *     start date is the ordinary case for a scheduled payment, not an error.
  *   - A full rolling window. The sharpest of the three, because the window arithmetic is the
  *     most tempting to mirror and the least safe to: `windowUsage` FALLS as buckets age out, so
- *     an amount refused now fits later with nothing else changed.
+ *     an amount refused now fits later with nothing else changed. F41 scopes "later": the room
+ *     returns at worst `lengthSeconds + subLength` after the spend that took it, and an approval
+ *     lives at most `MAX_COSIGN_TTL`, so on a window at or past that length this one lapses
+ *     first. The omission still stands, because refusing at grant time would forbid a quarterly
+ *     budget with a cosigner to spare the cosigner one wasted transaction.
  *   - The ERC-8004 identity and credential checks, which a third party the cosigner does not
  *     control can restore. There is a second, structural reason visible only in this model:
  *     mirroring them would force `approveCosignFor` to take `ctx.resolveIdentityOwner` and
@@ -1268,7 +1272,10 @@ function approveCosignFor(mandate, caller, request, ctx) {
   // `used + amount > cap` and false of `amount > cap` on its own: usage only ever falls back
   // toward zero, and `cap` is fixed at creation, so an amount above a window's cap is refused
   // for the life of the mandate. Only that term is mirrored. An amount that fits the cap but
-  // not today's remaining headroom stays approvable, because buckets age out.
+  // not today's remaining headroom stays approvable, because buckets age out — at worst
+  // `lengthSeconds + subLength` after the spend that took the room, which F41 scopes: an
+  // approval lives at most `MAX_COSIGN_TTL`, so past that window length it lapses before the
+  // capacity returns. Documented rather than refused, for the reason the note above gives.
   //
   // `effective` is reported as 0 rather than measured, since the refusal does not depend on
   // current usage — the same value the contract puts in `OverWindowCap`'s third field here.
