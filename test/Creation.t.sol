@@ -20,6 +20,11 @@ contract CreationTest is Base {
 
     /// The flag mirrors in Base must match the contract, or every flag-dependent
     /// test in this suite is testing the wrong bit while still passing.
+    ///
+    /// F44 added the last two assertions, and they are drift checks of the same kind one
+    /// level up: `F_KNOWN` is the set `createMandate` accepts, so a future eighth flag added
+    /// without widening the mask would be refused by the very path that introduces it, and no
+    /// test of that flag on its own would say why.
     function test_flagConstants_matchTheContract() public view {
         assertEq(mm.F_PER_TX(), F_PER_TX, "F_PER_TX");
         assertEq(mm.F_TOTAL(), F_TOTAL, "F_TOTAL");
@@ -28,6 +33,10 @@ contract CreationTest is Base {
         assertEq(mm.F_IDENTITY(), F_IDENTITY, "F_IDENTITY");
         assertEq(mm.F_CREDENTIAL(), F_CREDENTIAL, "F_CREDENTIAL");
         assertEq(mm.F_ALLOWLIST(), F_ALLOWLIST, "F_ALLOWLIST");
+
+        uint8 declared = F_PER_TX | F_TOTAL | F_COSIGN | F_EXPIRY | F_IDENTITY | F_CREDENTIAL | F_ALLOWLIST;
+        assertEq(mm.F_KNOWN(), declared, "F_KNOWN must be the OR of every flag the contract declares");
+        assertEq(mm.F_KNOWN(), 0x7F, "and that is bits 0 through 6, leaving bit 7 outside the set");
     }
 
     /// The domain separator is mixed into every mandateId and every spend hash, so
@@ -546,14 +555,37 @@ contract CreationTest is Base {
         mm.createMandate(bytes32("g"), p);
     }
 
+    /**
+     * Both bounds sit in the FUTURE, and that placement is the substance of this test.
+     *
+     * F45's clock guard sits immediately below the ordering guard and refuses any `expiresAt`
+     * at or before `block.timestamp` under the same `BadConfig` name. This test used to name
+     * 2000 for both fields, against a suite whose clock starts at 1,000,000 — so once F45
+     * landed, the clock guard answered first and the expectation was satisfied whether the
+     * ordering guard existed or not. The mutation gate is what showed it: deleting the
+     * ordering guard left this test green, on a run where the other 28 mutants all failed a
+     * named test. The contract was never wrong; the evidence for one of its lines was.
+     *
+     * Ahead of the clock, only the ordering guard can refuse these params, and it is the only
+     * line in `createMandate` that reads `notBefore` at all. Keep the pair in the future.
+     */
     function test_createMandate_expiryNotAfterNotBefore_reverts() public {
         MandateManager.MandateParams memory p = simpleParams();
-        p.notBefore = 2000;
-        p.expiresAt = 2000; // exclusive expiry means this window is empty
+        uint40 t = uint40(block.timestamp + DAY);
+        p.notBefore = t;
+        p.expiresAt = t; // exclusive expiry means this window is empty
         p.flags |= F_EXPIRY;
         vm.prank(payer);
         vm.expectRevert(MandateManager.BadConfig.selector);
         mm.createMandate(bytes32("h"), p);
+
+        // One second of window and the same mandate is granted, which is what makes the
+        // refusal above evidence about the ordering rule rather than about these params being
+        // unacceptable for some other reason. `isLive` is deliberately not asserted: the start
+        // is still ahead of the clock, so a live mandate is not what this shape should produce.
+        p.expiresAt = t + 1;
+        bytes32 id = grant(p);
+        assertEq(mm.getMandate(id).expiresAt, t + 1, "a non-empty window is written as given");
     }
 
     /// minResponse of 0 would accept a FAILED attestation, since ERC-8004 uses 0
@@ -731,5 +763,166 @@ contract CreationTest is Base {
         p = withExpiry(p); // v2: four windows are still not a lifetime bound
         bytes32 id = grant(p);
         assertEq(mm.getMandate(id).windowCount, 4);
+    }
+
+    // --------------------------------------------------- F44: the flag mask
+
+    /**
+     * F44. A flags word carrying bit 7 is refused.
+     *
+     * `flags` is a uint8 with seven meanings, so bit 7 could be set, stored verbatim, returned
+     * by `getMandate` and read by nothing. Every rule in this file exists to stop a mandate
+     * whose display and whose enforcement disagree, and an inert eighth bit is that shape with
+     * no field of its own to lie about.
+     *
+     * It is refused rather than masked away because this contract is immutable and its
+     * mandates are permanent. The note in `createMandate` earmarks bit 7 for a merkle
+     * allowlist in a later version, so a mandate created today with bit 7 set would read to
+     * that version as carrying a check this one never applied, and there is no later pass that
+     * could correct it.
+     */
+    function test_f44_unknownFlagBit_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.flags |= 0x80;
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// The same word without bit 7 is accepted, so the guard refuses the bit rather than the
+    /// mandate — and the stored value is checked, because what F44 protects is what
+    /// `getMandate` reports.
+    function test_f44_theSameMandateWithoutBit7_isAccepted() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        bytes32 id = grant(p);
+        assertEq(mm.getMandate(id).flags, p.flags, "the seven live bits are stored as given");
+        assertEq(mm.getMandate(id).flags & 0x80, 0, "and bit 7 is not among them");
+    }
+
+    /// Bit 7 on its own is refused by the mask and not by `Unbounded`, which would fire on the
+    /// same params if the mask ran later. That ordering is the assertion: the mask sits above
+    /// every rule that reads the word, so nothing below it has to reason about the extra bit.
+    function test_f44_bit7Alone_isRefusedByTheMaskNotByUnbounded() public {
+        MandateManager.MandateParams memory p = emptyParams();
+        p.flags = 0x80;
+        grantReverts(p, MandateManager.BadConfig.selector);
+
+        // The same params with the bit cleared reach `Unbounded`, which is what makes the line
+        // above evidence about the mask instead of a coincidence with a check further down.
+        p.flags = 0;
+        grantReverts(p, MandateManager.Unbounded.selector);
+    }
+
+    // ------------------------------------------------- F45: born expired
+
+    /**
+     * F45. A mandate whose expiry has already gone by is refused at creation.
+     *
+     * The paired guard beside it orders `expiresAt` after `notBefore` and says nothing about
+     * the clock, so both values could sit in the past. What that produces reverts `Expired` on
+     * its first spend and on every later one: authority that was never exercisable for a
+     * single block.
+     *
+     * The cost of accepting it is more than a wasted grant. The (payer, salt) slot is consumed
+     * permanently and `revoke` never clears it, so the payer cannot re-issue the mandate they
+     * meant under the same salt, and anything pinned off-chain to that id has to be re-cut.
+     * This is the rule F17 applies to a co-signature, applied one level up — an object no later
+     * call could accept is refused where it would be created.
+     */
+    function test_f45_expiryAlreadyPast_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams(); // already carries F_EXPIRY
+        p.expiresAt = uint40(block.timestamp - 1);
+        grantReverts(p, MandateManager.BadConfig.selector);
+    }
+
+    /// The boundary. `expiresAt` is exclusive, so a mandate dying at the current second is
+    /// already dead and is refused, while one second later is alive however briefly and is
+    /// accepted. Refusing the second case would be the contract deciding how short a mandate a
+    /// payer is allowed to want.
+    function test_f45_theBoundaryIsTheCurrentSecond() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.expiresAt = uint40(block.timestamp);
+        grantReverts(p, MandateManager.BadConfig.selector);
+
+        p.expiresAt = uint40(block.timestamp + 1);
+        bytes32 id = grant(p);
+        assertTrue(mm.isLive(id), "one second of life is still life");
+    }
+
+    /// The guard is conditioned on the flag, and this is the test that says so. With `F_EXPIRY`
+    /// unset the field must be zero, which the mirror beside F45 enforces — so a version of
+    /// F45 that dropped its flag term would read `0 <= block.timestamp`, hold for every clock,
+    /// and refuse every expiry-free mandate ever granted. The warp makes the clock large enough
+    /// that no smaller reading of the comparison could pass by accident.
+    function test_f45_doesNotReachAMandateWithNoExpiry() public {
+        vm.warp(block.timestamp + 3650 days);
+        MandateManager.MandateParams memory p = emptyParams();
+        p.totalCap = usd(100);
+        p.flags = F_TOTAL;
+        bytes32 id = grant(p);
+        assertEq(mm.getMandate(id).expiresAt, 0, "no expiry, so F45 had no field to test");
+        assertTrue(mm.isLive(id), "and the mandate is live");
+    }
+
+    // ----------------------------------------- F43: the allowlist writer
+
+    /**
+     * F43. The allowlist writer refuses every address the enforcer refuses.
+     *
+     * `spend` and `isAllowedRecipient` reject six addresses outright: the zero address, the
+     * payer, and the four in `_isUndebitable` — this contract, the token, and both ERC-8004
+     * registries. The writer used to reject one of the six, so the other five could be stored
+     * as a `true` that no spend could honour. F29 put the payer and two undebitable addresses
+     * on the enforcer's list and F38 widened that list to four; neither pass came back to the
+     * writer, so the two sets drifted apart at the commit meant to make them agree.
+     *
+     * The harm is a mandate the payer cannot use. An allowlist holding only refusable addresses
+     * grants authority over no address the contract will pay, and the salt is consumed proving it.
+     *
+     * `vendor` sits first in every list below so the refusal is observably about the second
+     * entry rather than about the list existing at all.
+     */
+    function test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses() public {
+        address[6] memory refused =
+            [address(0), payer, address(mm), address(token), address(identity), address(validation)];
+
+        for (uint256 i = 0; i < refused.length; ++i) {
+            MandateManager.MandateParams memory p = simpleParams();
+            p.allowlist = new address[](2);
+            p.allowlist[0] = vendor;
+            p.allowlist[1] = refused[i];
+            p.flags |= F_ALLOWLIST;
+            grantReverts(p, MandateManager.BadConfig.selector);
+        }
+    }
+
+    /// The other half of the agreement. For each of the six the enforcer says no as well, so the
+    /// writer now refuses what a spend would have refused rather than a set of its own. Read
+    /// through `isAllowedRecipient` on a mandate carrying no allowlist, which is the widest
+    /// configuration there is — a `false` there can only have come from the six.
+    function test_f43_theEnforcerRefusesTheSameSix() public {
+        bytes32 id = grant(simpleParams()); // no F_ALLOWLIST, so every other address is payable
+        assertTrue(mm.isAllowedRecipient(id, vendor), "the control: an ordinary address is payable");
+
+        address[6] memory refused =
+            [address(0), payer, address(mm), address(token), address(identity), address(validation)];
+        for (uint256 i = 0; i < refused.length; ++i) {
+            assertFalse(mm.isAllowedRecipient(id, refused[i]), "the enforcer must refuse it too");
+        }
+    }
+
+    /// And the writer refuses nothing beyond the six. An ordinary list is written, readable
+    /// afterwards and spendable against, so F43 narrowed what the writer rejects without
+    /// narrowing the feature.
+    function test_f43_anOrdinaryAllowlistIsStillWritten() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.allowlist = new address[](2);
+        p.allowlist[0] = vendor;
+        p.allowlist[1] = other;
+        p.flags |= F_ALLOWLIST;
+        bytes32 id = grant(p);
+
+        assertTrue(mm.isAllowedRecipient(id, vendor), "the first entry was written");
+        assertTrue(mm.isAllowedRecipient(id, other), "and the second");
+        assertFalse(mm.isAllowedRecipient(id, boss), "and nothing else was");
+        payTo(id, vendor, usd(10));
     }
 }

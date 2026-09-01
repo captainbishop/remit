@@ -671,24 +671,32 @@ false or overstated claims in comments and documents rather than defects in code
 for a primitive whose entire product is *legibility of authority* is not a lesser
 category.
 
-**Forty-one findings, counted from the headings below rather than asserted** — `grep -c
-"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 41, which is the check, not the
+**Forty-six findings, counted from the headings below rather than asserted** — `grep -c
+"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 46, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **twenty-five are
+long the search ran. They partition exactly, which is more useful than the total: **twenty-nine are
 already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; eleven in `af9df40` on
 2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; F3, F9,
-F10, F11 in #24 on 2026-08-30; and F38, F39, F40 in `8487b5a` later the same day); **two were fixed
-in this document as it was being written** (F22 and F23, both missing trust boundaries — §2 gained
-its sixth and seventh in one day); **one has a fix that changes v2's behaviour** (F13); **seven are
-comment rewrites** that change nothing any code does (F4, F7, F8, F14, F21 and F41 in the contract,
-F26 in the mocks — that last one is in `test/`, so it is free of the frozen-metadata constraint that
-governs `contracts/`, and F41 is the only member of the bucket that also brought a test); **three
-are documentation** (F2, F6, F18); **one needs a decision before it can be sized** (F20, whether the
-contract gains a sixth state-changing function, and its first that mutates a mandate after
-creation); **one needs a four-line test before it can be sized at all**, because one of its two
-possible answers cannot be settled by reading source (F24); and **one needs nothing** (F12).
-25 + 2 + 1 + 7 + 3 + 1 + 1 + 1 = 41, which is the arithmetic and not a second assertion of the
-same number.
+F10, F11 in #24 on 2026-08-30; F38, F39, F40 in `8487b5a` later the same day; and F43, F44, F45, F46
+in the working tree on 2026-08-31, uncommitted as this is written, under the rule the next paragraph
+states); **two were fixed in this document as it was being written** (F22 and F23, both missing trust
+boundaries — §2 gained its sixth and seventh in one day); **one has a fix that changes v2's
+behaviour** (F13); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F14,
+F21, F41 and F42 in the contract, F26 in the mocks — that last one is in `test/`, so it is free of the
+frozen-metadata constraint that governs `contracts/`; F41 is the only member of the bucket that also
+brought a test, and F42 is the only one whose other half is a paragraph in §2, which is why it sits
+here rather than under documentation); **three are documentation** (F2, F6, F18); **one needs a
+decision before it can be sized** (F20, whether the contract gains a sixth state-changing function,
+and its first that mutates a mandate after creation); **one needs a four-line test before it can be
+sized at all**, because one of its two possible answers cannot be settled by reading source (F24);
+and **one needs nothing** (F12). 29 + 2 + 1 + 8 + 3 + 1 + 1 + 1 = 46, which is the arithmetic and
+not a second assertion of the same number.
+
+**This paragraph was stale by one for a day, and the failure is the one it warns about.** F42 landed
+with its own section and never entered the partition, so the sentence above read *forty-one* while
+both `grep -c` commands it cites returned 42 — a count asserted from memory in the one paragraph that
+exists to say counts are derived. Re-derived on 2026-08-31 by running both commands and rebuilding
+the buckets from the headings.
 
 **The fixed bucket carried two statuses for one day, and now carries one again.** F38, F39 and F40
 were written into the working tree and counted as fixed before any of it had been committed,
@@ -698,6 +706,16 @@ below said so in its own status line rather than leaving a reader to infer it fr
 status lines now name the commit like every other member of the bucket. The note stays because the
 weaker claim was made in writing, and a document that upgrades its own evidence without saying so
 is harder to audit than one that records when it did.
+
+**And it carries two statuses again, from 2026-08-31.** F43, F44, F45 and F46 are in the working tree
+with a test each, and none of it has been compiled or run — every Solidity build, `forge test`,
+`forge lint` and mutation-gate run in this project happens on the author's machine rather than in the
+session that writes the code, so there is a window between a fix being written and a fix being
+evidenced, and each of the four status lines names that window instead of implying a green run. What
+is owed before they read like the rest of the bucket: a clean build, the suite passing with the four
+new tests in it, and a mutation-gate run over every guard the commit touches — which for these four
+is the whole point, since a removed guard no test notices is the failure mode all four findings are
+instances of.
 
 **A whole bucket emptied on 2026-08-29, by this document's own rule.** The first bucket is a status
 and the rest are costs, so a finding moves into it when it lands — F19 was in "changes v2's
@@ -2195,9 +2213,9 @@ other four do not, and that folds into F18's documentation pass.
 **Severity: low · Status: open, and one of its two possible answers is not something this pass can settle · Confidence: certain about the guard, explicitly unresolved about the consequence.**
 
 `createMandate` refuses a flag whose registry is missing — `v2:447` for `F_CREDENTIAL`,
-`v2:448` for `F_IDENTITY`, both `BadConfig` — and `Creation.t.sol:657`
-(`test_createMandate_gateWithoutRegistry_reverts`) pins both halves against a manager
-constructed with `address(0), address(0)`. That is the right guard and it is tested.
+`v2:448` for `F_IDENTITY`, both `BadConfig` — and `test_createMandate_gateWithoutRegistry_reverts`
+pins both halves against a manager constructed with `address(0), address(0)`. That is the right
+guard and it is tested.
 
 It compares against `address(0)`. A registry address that is **non-zero and has no code** —
 one digit wrong, an address from a different chain, a contract that was never deployed there —
@@ -2213,7 +2231,8 @@ decode failure into the `catch` clause or reverts the calling frame uncaught dec
 error the payer sees. Both outcomes are denials, so no funds are at risk either way; the
 difference is `CredentialMissing()` and `IdentityNotHeld()` versus an opaque revert with no
 selector. **No test covers it**, because `Base.t.sol`'s `setUp` constructs the manager with two
-live mocks and `Creation.t.sol:658` is the only other construction, using zero.
+live mocks and the one inside `test_createMandate_gateWithoutRegistry_reverts` is the only
+other construction, using zero.
 
 The test that settles it is four lines and belongs in #23:
 `new MandateManager(address(token), address(0xdead), address(0xdead))`, grant a mandate with a
@@ -2424,10 +2443,10 @@ defects gives no way to tell a verified assumption from an unexamined one:
 - **The pending state cannot pass the gate**, whichever way the live registry answers. A zero
   validator denies at `v2:863`; the requested validator with `response = 0` denies at `v2:879`,
   because `v2:563` refuses `minResponse == 0` at grant time. That guard is the one doing the
-  work here, and its stated reason — the comment on its own line, and
-  `Creation.t.sol:561`'s test name, both amount to *"0 would accept a failed attestation"* — is
-  correct and does not mention this second consequence. Worth adding to it: the same line also
-  makes an unanswered request unspendable.
+  work here, and its stated reason — the comment on its own line, and the name of
+  `test_createMandate_credentialWithZeroMinResponse_reverts`, both amount to *"0 would accept
+  a failed attestation"* — is correct and does not mention this second consequence. Worth
+  adding to it: the same line also makes an unanswered request unspendable.
 - **The infinite-approval divergence cannot be observed.** `MockUSDC:90-91` skips the allowance
   decrement for `type(uint256).max`, claiming to match Circle's implementation, which is
   unverified against Arc. It cannot matter: `2^256-1` minus any `uint96` still exceeds every
@@ -2435,8 +2454,8 @@ defects gives no way to tell a verified assumption from an unexamined one:
   either way. Finite allowances *are* exercised — nine explicit `approve` sites across
   `ArcParity`, `Idempotency` and `Views`, including two at `0`.
 - **The constructor's zero-address asymmetry is deliberate and right.** `_usdc` is refused at
-  zero (`v2:359`, pinned by `Creation.t.sol:673`); the registries are accepted at zero and
-  refused only when a flag needs one (`v2:447-448`). A manager with no registries is a
+  zero (`v2:359`, pinned by `test_constructor_zeroUsdc_reverts`); the registries are accepted at
+  zero and refused only when a flag needs one (`v2:447-448`). A manager with no registries is a
   perfectly good manager for mandates that set neither flag, and forcing two addresses on a
   deployment that will never consult a registry would be worse. Likewise `MockUSDC.burnFrom`
   emitting `Transfer(from, address(0))` while bypassing `_move`'s zero-address refusal
@@ -3345,6 +3364,174 @@ models a balance or an allowance, and stops short of the clamp on purpose, leavi
 to the contract's views. There is no twin sentence to bring into line because the model never makes
 the claim.
 
+### F43 — The allowlist writer stored a `true` for five of the six addresses the enforcer refuses
+
+**Severity: low as exposure and medium as a footgun — nothing can be taken through a permission no
+spend honours, but the payer's grant is unusable and the salt that named it is spent · Status: fixed
+in the working tree, uncommitted and unrun as this is written · Confidence: certain; the writing set and
+the enforcing set are readable side by side in one file.**
+
+`spend` and `isAllowedRecipient` refuse six recipients outright: the zero address, the payer, and
+the four `_isUndebitable` covers — this contract, the USDC token, and both ERC-8004 registries.
+`createMandate`'s allowlist loop refused one of them. So a payer could name any of the other five,
+the loop would write `_allowlist[mandateId][a] = true`, and the storage word would record permission
+that no spend could ever honour.
+
+**The drift is a history of two passes that never came back here.** F29 put the payer and two
+undebitable addresses on the enforcer's list. F38 widened that list to four and moved it into
+`_isUndebitable`. Both changes were about the enforcer, both were right, and neither touched the
+writer — so a set that started one apart ended six apart, at the commits meant to make the contract
+agree with itself.
+
+**The harm is a mandate that can pay nothing, and a salt that cannot be reused.** A payer whose
+allowlist holds only refusable addresses gets a grant whose every spend reverts
+`RecipientNotAllowed`. The `(payer, salt)` slot is permanent — `revoke` never clears it — so the
+grant they meant has to be re-issued under a fresh salt, and the receipt from the first attempt
+reads like an ordinary success.
+
+**The fix refuses at the door rather than skipping the entry**, which is the answer this contract
+already gives everywhere display and enforcement would otherwise disagree: F32 refuses a filled-in
+struct with its flag unset rather than dropping the data, and F17 refuses an approval no spend could
+consume rather than storing it. Skipping a refusable address without a word would leave the payer
+holding a receipt for a list they did not get.
+
+**Three tests, and the second is the one that makes the claim symmetric.**
+`test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses` walks all six addresses through
+`createMandate` and expects `BadConfig` for each, with `vendor` first in every list so the refusal
+is observably about the second entry rather than about the list existing.
+`test_f43_theEnforcerRefusesTheSameSix` walks the same six through `isAllowedRecipient` on a mandate
+with no allowlist at all, and opens with a control asserting an ordinary address is payable — so the
+pair is evidence that the two sets are now one set, rather than two lists that happen to be the same
+length. `test_f43_anOrdinaryAllowlistIsStillWritten` grants a two-member list, asserts both members
+and one non-member, and spends to the first, which is what stops the fix from being a guard that
+refuses everything.
+
+### F44 — Bit 7 of `flags` was stored, returned and enforced by nothing, on a contract that has already promised that bit to a later version
+
+**Severity: informational for this contract and medium for the next one — nothing bit 7 does today
+can move money, and that is the whole problem · Status: fixed in the working tree, uncommitted and
+unrun as this is written · Confidence: certain; the bit is unread anywhere in the contract, which is
+a property of a single file.**
+
+`flags` is a `uint8` and this contract acts on bits 0 through 6. A payer could set bit 7 and
+`createMandate` would store it, `getMandate` would return it, and no check would read it. That is the
+display-and-enforcement disagreement every other rule in `createMandate` exists to refuse, arriving
+through the one field that has a spare bit to carry it.
+
+**It matters more than a spare bit usually would, for two reasons that are both about permanence.**
+The contract is immutable and its mandates never change after creation, so a mandate carrying an
+inert bit carries it for good. And the bit is not merely unused: `createMandate`'s own note already
+commits bit 7 to a merkle allowlist in a later version. A mandate created today with bit 7 set would
+read to that version as carrying a check this one never applied — and since a mandate cannot be
+edited, there is no pass that could come back and correct it.
+
+**The fix is a mask and a revert**, `F_KNOWN = 0x7F`, placed above every rule that reads `flags` so
+no later check has to reason about what the extra bit meant. Making the mask a public constant
+rather than a literal is what lets a test assert it against the seven flag constants instead of
+against another copy of `0x7F`.
+
+**Four assertions, and one of them is a drift guard rather than a behaviour test.** The existing
+`test_flagConstants_matchTheContract` gained two lines: `F_KNOWN` must equal the OR of every flag
+the contract declares, and that value must be `0x7F`. Together they fail if a later version adds
+bit 7 as a flag and forgets to widen the mask, or widens the mask and forgets the flag — which is
+the same class of two-sets-drifting failure F43 records one section above.
+`test_f44_unknownFlagBit_reverts` sets bit 7 on an otherwise valid grant and expects `BadConfig`.
+`test_f44_theSameMandateWithoutBit7_isAccepted` grants the same params unmodified and reads the
+stored flags back, so the refusal is attributable to the bit. And
+`test_f44_bit7Alone_isRefusedByTheMaskNotByUnbounded` sets `flags` to exactly `0x80` and then to
+`0`, expecting `BadConfig` and then `Unbounded` — because a mandate with no bound at all is already
+refused, and without that pair the mask's test could pass on a contract whose mask does nothing.
+
+### F45 — A mandate could be created with its expiry already in the past, which spends the salt to buy an authority that reverts on its first use
+
+**Severity: low as exposure and medium as a footgun, for the same reason F43 is: the loss is the
+grant and the salt, not the money · Status: fixed in the working tree, uncommitted and unrun as this
+is written · Confidence: certain; the guard order was walked and the existing expiry tests were
+re-read against it.**
+
+`createMandate` already checked `expiresAt` twice — that it is not zero when `F_EXPIRY` is set, and
+that it sits after `notBefore`. Neither compares it to the clock. Both bounds can be satisfied by a
+pair of timestamps that are both in the past, so a mandate could be created already dead: `isLive`
+returns false from the first block, every `spend` reverts `Expired` for the whole of its life, and
+the payer's authority is worth nothing.
+
+**What makes it worth a revert rather than the payer's problem to notice is the salt.** The
+`(payer, salt)` slot is permanent and `revoke` never clears it, so the grant has to be re-issued
+under a different salt — a payer who scripts their salts from a counter or a purchase order has to
+break that scheme to recover. The gas is trivial; the collision is not.
+
+**This is F17's rule one level up.** F17 refuses a co-signature no later `spend` could consume, at
+the point it would be written rather than at the point it fails. A mandate whose expiry has already
+passed is the same object at a different scale: nothing any later call can do will make it usable, so
+it is refused where it would be created.
+
+**The bound is exclusive, to match `spend`.** At `expiresAt` the mandate is already dead, so equality
+belongs with the past, and a payer asking for a mandate that expires this second gets the same answer
+as one asking for a mandate that expired last year.
+
+**One existing test looked as though the new guard would break it, and reading the order settled it
+without a run.** `test_createMandate_expiryNotAfterNotBefore_reverts` uses `notBefore = 2000` and
+`expiresAt = 2000` against a clock warped to 1,000,000, so F45's condition also holds there — but
+the `expiresAt <= notBefore` guard runs first and both raise `BadConfig`, so the test still proves
+its own claim. `ArcParity.t.sol` was the other candidate, since its `ARC_EXPIRES` is a hard-coded
+2026-09-30 that the wall clock will pass within the month; it warps to a fixed `ARC_NOW` well before
+that date and never reads the wall clock, so F45 cannot fire there either.
+
+**Three tests, arranged so the guard cannot pass by being too broad.** The finding itself is
+`test_f45_expiryAlreadyPast_reverts`, which sets the expiry one second behind the clock on an
+otherwise valid grant. `test_f45_theBoundaryIsTheCurrentSecond` refuses an expiry of exactly
+`block.timestamp` and then grants `block.timestamp + 1` and asserts `isLive`, which pins the
+exclusive bound from both directions rather than from one. `test_f45_doesNotReachAMandateWithNoExpiry`
+warps ten years forward and grants a mandate with no `F_EXPIRY` at all, asserting the stored
+`expiresAt` is zero and the mandate is live — the case where the field exists, holds a value far in
+the past, and must be ignored because the flag says it means nothing.
+
+### F46 — `approveCosignFor` stated a rule about which refusal a co-signer hears first, and then broke it for one of the three deadline bounds
+
+**Severity: low — no permission changes and no state differs; the cost is one wasted transaction and
+a co-signer sent to fix the wrong field · Status: fixed in the working tree, uncommitted and unrun as
+this is written · Confidence: certain; the move is three lines and nothing between the two positions
+reads the value.**
+
+The comment at the head of `approveCosignFor` states the rule plainly: mandate liveness comes before
+the deadline bounds, because for a mandate that has already expired any legal `validUntil` is
+necessarily past `m.expiresAt` too, so checking a deadline first would answer *your deadline is
+wrong* when the truth is *this mandate is dead*. A revert that sends the reader to fix the wrong
+thing is a worse answer than no revert.
+
+**Two of the three bounds honoured that. The clock bound sat above the pair.** So a co-signer who
+named a stale `validUntil` on a revoked or expired mandate was told `BadDeadline`, corrected the
+deadline, paid gas a second time, and only then heard `Revoked` or `Expired`. Nothing was permitted
+that should not have been, and nothing was refused that should have been allowed — the defect is
+entirely in which of two simultaneous truths the caller is told, on a call a human sends by hand.
+
+**The move is the minimum that satisfies the stated rule.** Folding all three deadline bounds
+together at the mandate-relative block would have been tidier, but it pushes a bad-deadline revert
+past up to `MAX_WINDOWS` cold reads and changes the refusal order for callers who are not the subject
+of this finding. Placing the clock bound directly below `Revoked` and `Expired` travels exactly as far
+as the rule names: nothing in between reads `validUntil`, and a deadline outside the band is still
+refused before the recipient and cap run below it, which is where the storage reads are.
+
+**Why no test caught it, and why the other two bounds were safe.** Every existing `BadDeadline`
+expectation sits on a live mandate, and both liveness tests reach the contract through
+`approveReverts`, which fills a `validUntil` one day out — inside the legal band. So the two
+conditions were never wrong at the same time, and the ordering the comment asserted was held up by
+nothing on the clock bound. It was held up on the other two: the expiry test's `validUntil` is a day
+past `m.expiresAt`, so a mandate-relative bound above the pair would have answered first. A stated
+invariant with no request that can violate it is a comment, and this document's recurring finding is
+that comments drift.
+
+**One test, three requests, and the third is what makes the first two mean anything.**
+`test_f46_deadMandateOutranksAStaleDeadline` sends a stale deadline to a revoked mandate and then to
+an expired one, asserting the selector is `Revoked` and `Expired` rather than `BadDeadline`. Then it
+sends the same stale deadline to a live mandate and asserts `BadDeadline` — without which both
+assertions above would hold just as well on a contract that had dropped the clock bound entirely. It
+reads the revert data through `tryApprove` rather than `vm.expectRevert`, because the claim is about
+which of two errors arrives, and only the returned selector can say which one the contract chose.
+
+
+
+
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
 Two kinds of gap are listed together because a reader deciding how much weight to put on
@@ -3741,12 +3928,12 @@ still be hiding there.
   `function` keyword, so `constructor` as a target died on "no function constructor(" instead of
   running. Behind that gap sits the contract's whole defence against a permanently mis-wired
   deployment, `if (_usdc == address(0)) revert BadConfig();`, and it is the one refusal in the
-  file that no "the gate is clean" claim has ever covered. `Creation.t.sol:673` does assert it, so
-  this was a hole in the verification rather than in the contract. The opener now accepts both
-  spellings and the target runs, which is how the census above reaches 89 and not 88. [**That step
-  belongs to the constructor alone and it still does.** The census reads 91 as of 2026-08-30 for a
-  separate reason, the two F22 injections, so read 88 → 89 as this bullet's own contribution rather
-  than as a running total.]
+  file that no "the gate is clean" claim has ever covered. `test_constructor_zeroUsdc_reverts` does
+  assert it, so this was a hole in the verification rather than in the contract. The opener now
+  accepts both spellings and the target runs, which is how the census above reaches 89 and not 88.
+  [**That step belongs to the constructor alone and it still does.** The census reads 91 as of
+  2026-08-30 for a separate reason, the two F22 injections, so read 88 → 89 as this bullet's own
+  contribution rather than as a running total.]
 - **The ValidationRegistry's pending state.** Arc documents a two-step flow, so a `requestHash`
   can be requested and unanswered — a state `MockValidationRegistry`'s binary `set` flag cannot
   express, and one the 2026-08-24 live probe did not reach, since those three hashes had never

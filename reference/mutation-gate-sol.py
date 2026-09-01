@@ -325,6 +325,96 @@ HAND = {
                 "find": ["for (uint256 wi = 0; wi < m.windowCount; ++wi) {"],
                 "replace": ["        for (uint256 wi = 0; wi < 1 && wi < m.windowCount; ++wi) {"],
             },
+            {
+                # F46 is an ORDERING claim, and ordering is invisible to the removal operator:
+                # every guard here still exists in the pre-F46 arrangement, so removing any one
+                # of them individually says nothing about which one answers first. The mutant is
+                # written as an INSERTION rather than a move because a `find` must match
+                # consecutive CODE lines and `is_code` refuses comments, so the eleven-line region
+                # holding the pair and the bound cannot be matched as a block. Inserting a second
+                # copy of the bound above the pair is faithful all the same: once the upper copy
+                # runs first, no input that reaches the lower copy can fail it, so the two-copy
+                # contract and the pre-F46 one refuse the same inputs under the same names.
+                "label": "F46's clock bound climbs back above the liveness pair",
+                "find": ["if (m.revoked) revert Revoked();"],
+                "replace": [
+                    "        if (validUntil <= nowTs || uint256(validUntil) > nowTs + MAX_COSIGN_TTL) {",
+                    "            revert BadDeadline(validUntil);",
+                    "        }",
+                    "        if (m.revoked) revert Revoked();",
+                ],
+            },
+        ],
+    },
+    "createMandate": {
+        "cases": [
+            # F43 is one three-way disjunction, so the removal operator can only delete the whole
+            # refusal. What F43 was a fix FOR is a list that lost members one at a time — the
+            # enforcer's set grew from one address to six across F29 and F38 while the writer's
+            # stayed at one — so the mutant that matters drops a single disjunct. Each is dropped
+            # on its own because `Creation.t.sol` walks all six addresses inside one test: a list
+            # that loses one has to fail on the member it lost.
+            {
+                "label": "F43 stops refusing the zero address",
+                "find": ["if (a == address(0) || a == msg.sender || _isUndebitable(a)) revert BadConfig();"],
+                "replace": ["            if (a == msg.sender || _isUndebitable(a)) revert BadConfig();"],
+            },
+            {
+                "label": "F43 stops refusing the payer",
+                "find": ["if (a == address(0) || a == msg.sender || _isUndebitable(a)) revert BadConfig();"],
+                "replace": ["            if (a == address(0) || _isUndebitable(a)) revert BadConfig();"],
+            },
+            {
+                "label": "F43 stops refusing the four undebitable addresses",
+                "find": ["if (a == address(0) || a == msg.sender || _isUndebitable(a)) revert BadConfig();"],
+                "replace": ["            if (a == address(0) || a == msg.sender) revert BadConfig();"],
+            },
+            {
+                # The same loop-bound case F40 carries, and it is killable here for a reason written
+                # into the test: every list in the F43 refusal test puts `vendor` first and the
+                # refusable address SECOND, so a loop reading one element reaches none of the six.
+                # `test_f43_anOrdinaryAllowlistIsStillWritten` is the second killer, asserting the
+                # second entry became readable.
+                "label": "F43 reads only the first allowlist entry, so a second one goes unchecked",
+                "find": ["for (uint256 i = 0; i < p.allowlist.length; ++i) {"],
+                "replace": ["        for (uint256 i = 0; i < 1 && i < p.allowlist.length; ++i) {"],
+            },
+            {
+                # F45's boundary. `expiresAt` is exclusive everywhere else in the contract, so an
+                # inclusive reading here would accept a mandate that dies on the very second it
+                # is created — born dead, salt consumed, and `spend` refusing it forever.
+                "label": "F45's boundary turns exclusive, accepting a mandate that dies this second",
+                "find": ["if (flags & F_EXPIRY != 0 && p.expiresAt <= block.timestamp) revert BadConfig();"],
+                "replace": [
+                    "        if (flags & F_EXPIRY != 0 && p.expiresAt < block.timestamp) revert BadConfig();",
+                ],
+            },
+            {
+                # The conjunct that keeps F45 off expiry-free mandates. Without it the comparison
+                # reads `0 <= block.timestamp`, which holds for every clock value there is, and
+                # every mandate bounded by a total cap alone is refused at creation.
+                "label": "F45 stops reading the flag, so an expiry-free mandate is refused",
+                "find": ["if (flags & F_EXPIRY != 0 && p.expiresAt <= block.timestamp) revert BadConfig();"],
+                "replace": ["        if (p.expiresAt <= block.timestamp) revert BadConfig();"],
+            },
+            {
+                # Recorded because the equivalence is the reason the mask form was chosen, and a
+                # reason left in prose is a reason no later pass re-checks.
+                "label": "F44's mask is written as a magnitude test instead",
+                "find": ["if (flags & ~F_KNOWN != 0) revert BadConfig();"],
+                "replace": ["        if (flags > F_KNOWN) revert BadConfig();"],
+                "survives": (
+                    "`flags` is a uint8 and `F_KNOWN` is 0x7F, so `flags & ~F_KNOWN != 0` and "
+                    "`flags > F_KNOWN` are the same predicate: bit 7 is the only bit that can "
+                    "carry a uint8 above 0x7F. No test can separate them because no input "
+                    "separates them. The mask form is kept for the version after this one — if an "
+                    "eighth flag is ever declared, `F_KNOWN` gains a bit and the mask still reads "
+                    "correctly, while the magnitude test would silently start admitting the new "
+                    "bit's absence as the boundary. That is a claim about a contract this one "
+                    "cannot upgrade into, which is why it is checked here rather than asserted in "
+                    "a comment."
+                ),
+            },
         ],
     },
 }
@@ -412,8 +502,9 @@ def function_bounds(lines, name):
     matched nothing and the gate refused the target outright, which left the contract's only
     defence against a permanently mis-wired deployment — the `if (_usdc == address(0)) revert
     BadConfig();` in the constructor — as the one refusal in the file that the gate could not
-    address, and `Creation.t.sol:673` already asserts it. So the omission was in the tooling and
-    not in the contract, and this opener is what lets the gate confirm the assertion bites.
+    address, and `test_constructor_zeroUsdc_reverts` already asserts it. So the omission was in
+    the tooling and not in the contract, and this opener is what lets the gate confirm the
+    assertion bites.
     """
     openers = ("    constructor(",) if name == "constructor" else (f"    function {name}(",)
     try:

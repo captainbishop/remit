@@ -314,15 +314,15 @@ contract BoundsTest is Base {
 
     /// Ordering, not the guard. `SelfPayment` names the mistake in the request;
     /// `RecipientNotAllowed` would send the reader off to edit a config that is not wrong.
-    /// Putting the payer explicitly ON the allowlist is what makes the ordering observable —
-    /// the allowlist passes, and this still refuses.
-    function test_f19_selfPaymentOutranksTheAllowlist_evenWithThePayerOnIt() public {
-        MandateManager.MandateParams memory p = simpleParams();
-        p.allowlist = new address[](2);
-        p.allowlist[0] = payer;
-        p.allowlist[1] = vendor;
-        p.flags |= F_ALLOWLIST;
-        bytes32 id = grant(p);
+    ///
+    /// F43 changed how that is observed, and the old name with it. This test used to put the
+    /// payer ON the allowlist so the list check passed and `SelfPayment` was the only refusal
+    /// left — but the writer now refuses to store the payer, so that configuration cannot be
+    /// created and its refusal is asserted in `Creation.t.sol` instead. The ordering claim
+    /// survives intact: with `F_ALLOWLIST` set the payer is necessarily absent, so BOTH guards
+    /// would fire, and the one the caller hears is the one that names the real mistake.
+    function test_f19_selfPaymentOutranksTheAllowlist() public {
+        bytes32 id = grant(withAllowlist(simpleParams(), vendor));
 
         // F36 changed how this is observed, and deliberately. `isAllowedRecipient` now applies
         // every recipient rule `spend` applies, so it refuses the payer whether or not the list
@@ -332,9 +332,10 @@ contract BoundsTest is Base {
         assertFalse(mm.isAllowedRecipient(id, payer), "F36: the view refuses the payer, list or no list");
         payReverts(id, payer, usd(10), MandateManager.SelfPayment.selector);
 
-        // The same code when the payer is absent from the allowlist, so the answer does
-        // not depend on a configuration the caller cannot see.
-        payReverts(grant(withAllowlist(simpleParams(), vendor)), payer, usd(10), MandateManager.SelfPayment.selector);
+        // The control, and the reason the line above is about ordering rather than about a guard
+        // that never fires: a recipient whose only fault is absence from this same list gets the
+        // list's own error.
+        payReverts(id, other, usd(10), MandateManager.RecipientNotAllowed.selector);
     }
 
     /// The guard must refuse a shape, not narrow the mandate: a third party is still payable

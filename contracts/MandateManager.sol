@@ -284,6 +284,16 @@ contract MandateManager {
     /// @notice Restrict recipients to the mandate's allowlist. Without this flag any
     /// non-zero address that is not the payer may receive.
     uint8 public constant F_ALLOWLIST = 1 << 6;
+    /// @notice The flag bits this contract acts on: 0 through 6.
+    ///
+    /// F44. `flags` is a uint8 and only those seven bits mean anything here, so a payer could
+    /// set bit 7 and have it stored by `createMandate`, returned by `getMandate` and enforced
+    /// by nothing — the display-and-enforcement disagreement that every other rule in that
+    /// function exists to refuse. It matters more than a spare bit usually would because this
+    /// contract is immutable and its mandates are permanent: the note in `createMandate`
+    /// earmarks bit 7 for a merkle allowlist in a later version, so a mandate created today
+    /// with bit 7 set would read to that version as carrying a check this one never applied.
+    uint8 public constant F_KNOWN = 0x7F;
 
     // ---------------------------------------------------------------------
     // Storage. Field order is chosen for slot packing; do not reorder casually.
@@ -712,6 +722,10 @@ contract MandateManager {
         if (p.spender == address(0)) revert BadConfig();
 
         uint8 flags = p.flags;
+        // F44. A flags word carrying a bit this contract does not act on is refused before any
+        // rule below reads it, so no later check has to reason about what the extra bit meant.
+        // See `F_KNOWN` for why an inert bit is worth a revert on an immutable contract.
+        if (flags & ~F_KNOWN != 0) revert BadConfig();
 
         // ---------------------------------------------------------------------
         // Refusing to mint an unbounded authority is the entire point of the
@@ -747,13 +761,25 @@ contract MandateManager {
         if ((flags & F_CREDENTIAL != 0) != (p.credential.validator != address(0))) revert BadConfig();
         if ((flags & F_ALLOWLIST != 0) != (p.allowlist.length > 0)) revert BadConfig();
         if (flags & F_EXPIRY != 0 && p.expiresAt <= p.notBefore) revert BadConfig();
-        // The mirror of the line above, and the last field in the struct that could lie.
+        // F45. The same field against the clock, which the line above does not reach: that one
+        // only orders `expiresAt` after `notBefore`, and both may sit in the past. A mandate
+        // whose expiry has already gone by reverts `Expired` on its first spend and on every
+        // later one, so it is born unusable — and it consumes its salt doing so, since the
+        // (payer, salt) slot is permanent and `revoke` never clears it. The payer pays for a
+        // grant they cannot use and cannot re-issue under the same salt, which is why this is
+        // refused rather than left to the payer to notice. Exclusive to match `spend`: at
+        // `expiresAt` the mandate is already dead, so equality belongs with the past.
+        //
+        // This is the same rule F17 applies to a co-signature: an object no later call could
+        // ever accept is refused at the point it would be created, not at the point it fails.
+        if (flags & F_EXPIRY != 0 && p.expiresAt <= block.timestamp) revert BadConfig();
+        // The mirror of the two lines above, and the last field in the struct that could lie.
         // With F_EXPIRY unset, v1 accepted any `expiresAt`, wrote it to storage and
         // emitted it in `MandateCreated`, while nothing ever read it — both `spend` and
         // `isLive` condition the comparison on the flag. `getMandate` could therefore
         // show a payer a mandate that expired last Tuesday and that spends forever.
         // One-directional rather than an iff for the same reason the threshold rule
-        // below is: with the flag SET, the paired guard above already constrains the
+        // below is: with the flag SET, the two guards above already constrain the
         // value, so only the flag-unset direction is left to close.
         //
         // `notBefore` needs no such rule and that asymmetry is deliberate: it is
@@ -869,9 +895,22 @@ contract MandateManager {
             if (effectiveMax <= p.cosignThreshold) revert BadConfig();
         }
 
+        // ---- F43: the writer must refuse every recipient the enforcer refuses -------------
+        // `spend` and `isAllowedRecipient` reject six addresses outright — the zero address,
+        // the payer, and the four in `_isUndebitable` — so storing a `true` for any of them
+        // records permission no spend can honour. F29 put the payer and two undebitable
+        // addresses on the enforcer's list, F38 widened that list to four and moved it into the
+        // helper, and neither pass came back here, so the set this loop stores and the set the
+        // enforcer honours drifted from one address to six.
+        //
+        // What it costs to leave: a payer whose allowlist holds only refusable addresses gets a
+        // mandate with no recipient it can pay, and the (payer, salt) slot is consumed
+        // permanently, so the grant they meant has to be re-issued under a fresh salt.
+        // `msg.sender` is the payer here — the same value written as `payer: msg.sender` above.
         for (uint256 i = 0; i < p.allowlist.length; ++i) {
-            if (p.allowlist[i] == address(0)) revert BadConfig();
-            _allowlist[mandateId][p.allowlist[i]] = true;
+            address a = p.allowlist[i];
+            if (a == address(0) || a == msg.sender || _isUndebitable(a)) revert BadConfig();
+            _allowlist[mandateId][a] = true;
         }
 
         // ---- F32: an unset flag must mean the payer did not supply the data -----------
@@ -1520,11 +1559,6 @@ contract MandateManager {
         if (msg.sender != m.cosigner) revert NotCosigner();
 
         uint256 nowTs = block.timestamp;
-        // Both bounds refuse rather than clamp, and the lower one is why zero can keep
-        // meaning "no approval" in the mapping.
-        if (validUntil <= nowTs || uint256(validUntil) > nowTs + MAX_COSIGN_TTL) {
-            revert BadDeadline(validUntil);
-        }
 
         // ---- F17: this must name a spend that `spend` could accept --------------------
         // Order mirrors `spend` so identical arguments produce the identical error. Only
@@ -1532,16 +1566,30 @@ contract MandateManager {
         // out — notBefore, the recoverable half of the window caps, the ERC-8004 gates — and
         // why mirroring those would turn our caution into someone's stuck payment.
         //
-        // The mandate's liveness comes first, and it comes before the two deadline bounds
-        // added below, on purpose: for a mandate that has already expired, `validUntil` is
-        // necessarily past `m.expiresAt` too, so checking the deadline first would answer
-        // "your deadline is wrong" when the truth is "this mandate is dead". A revert that
-        // sends the reader to fix the wrong thing is a worse answer than no revert.
+        // The mandate's liveness comes first, and it comes before all three deadline bounds,
+        // on purpose: for a mandate that has already expired, `validUntil` is necessarily past
+        // `m.expiresAt` too, so checking a deadline first would answer "your deadline is wrong"
+        // when the truth is "this mandate is dead". A revert that sends the reader to fix the
+        // wrong thing is a worse answer than no revert.
+        //
+        // F46 finished that sentence. The two mandate-relative bounds were below the pair from
+        // the start, but the clock bound sat above it, so a co-signer who named a stale
+        // `validUntil` on a dead mandate was told to fix the deadline, fixed it, paid gas a
+        // second time and only then heard that the mandate was dead. It now sits directly below
+        // the pair, which is as far as it needs to travel: nothing between the two positions
+        // reads `validUntil`, and keeping it ahead of the recipient and cap run below means a
+        // deadline outside the band is still refused before the first storage read.
         if (m.revoked) revert Revoked();
         // `m.revoked` is one-way — `revoke` only ever writes true — so this can never stop
         // holding. Same for expiry, which is fixed at creation and only recedes further
         // into the past, with an exclusive bound matching `spend`.
         if (m.flags & F_EXPIRY != 0 && nowTs >= m.expiresAt) revert Expired();
+
+        // Both clock bounds refuse rather than clamp, and the lower one is why zero can keep
+        // meaning "no approval" in the mapping.
+        if (validUntil <= nowTs || uint256(validUntil) > nowTs + MAX_COSIGN_TTL) {
+            revert BadDeadline(validUntil);
+        }
 
         if (recipient == address(0)) revert ZeroRecipient();
         // F19's guard, mirrored here under F17's rule rather than added to it as an

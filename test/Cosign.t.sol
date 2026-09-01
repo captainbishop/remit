@@ -1115,6 +1115,48 @@ contract CosignTest is Base {
         payReverts(id, vendor, usd(50), MandateManager.Expired.selector);
     }
 
+    /**
+     * F46 makes the rest of the ordering the test above claims actually observable.
+     *
+     * That test does pin one of the three deadline bounds: `validUntil` is a day past
+     * `m.expiresAt` there, so the mandate-relative bound would have answered first if it sat
+     * above the pair. The clock bound is the one it cannot see, because `approveReverts` always
+     * fills a `validUntil` one day out, which is inside the legal band. And the clock bound was
+     * the one in the wrong place: it sat above the liveness pair, so a cosigner who named a
+     * stale deadline on a dead mandate was told to fix the deadline, fixed it, paid gas a second
+     * time, and only then heard that the mandate was dead.
+     *
+     * The first two requests are wrong in two ways each, and the answer has to name the fault
+     * the cosigner cannot fix. The third is the control: the same stale deadline on a live
+     * mandate, which must still be refused, or the two assertions above would also hold on a
+     * contract that had simply dropped the bound.
+     */
+    function test_f46_deadMandateOutranksAStaleDeadline() public {
+        bytes32 revoked = grant(cosignParams());
+        vm.prank(payer);
+        mm.revoke(revoked);
+
+        (bool ok, bytes memory err) = tryApprove(revoked, vendor, usd(50), nextNonce(), uint40(block.timestamp - 1));
+        assertFalse(ok, "a revoked mandate with a stale deadline is refused");
+        assertEq(selectorOf(err), MandateManager.Revoked.selector, "and the fault named is the mandate");
+
+        MandateManager.MandateParams memory p = cosignParams(); // already carries F_EXPIRY
+        p.expiresAt = uint40(block.timestamp + DAY);
+        bytes32 expired = grant(p);
+        vm.warp(uint256(p.expiresAt));
+
+        (ok, err) = tryApprove(expired, vendor, usd(50), nextNonce(), uint40(block.timestamp - 1));
+        assertFalse(ok, "an expired mandate with a stale deadline is refused");
+        assertEq(selectorOf(err), MandateManager.Expired.selector, "and the fault named is the mandate");
+
+        // The control. Same stale deadline, live mandate, so the deadline is the only thing
+        // wrong — and it is what the cosigner hears.
+        bytes32 live = grant(cosignParams());
+        (ok, err) = tryApprove(live, vendor, usd(50), nextNonce(), uint40(block.timestamp - 1));
+        assertFalse(ok, "a stale deadline on a live mandate is still refused");
+        assertEq(selectorOf(err), MandateManager.BadDeadline.selector, "and now the deadline is the fault");
+    }
+
     // ------------------------------------------- the spend must be legal
 
     function test_f17_approvingANonAllowlistedRecipient_isRefused() public {
