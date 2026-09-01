@@ -678,8 +678,8 @@ long the search ran. They partition exactly, which is more useful than the total
 already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; eleven in `af9df40` on
 2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; F3, F9,
 F10, F11 in #24 on 2026-08-30; F38, F39, F40 in `8487b5a` later the same day; and F43, F44, F45, F46
-in the working tree on 2026-08-31, uncommitted as this is written, under the rule the next paragraph
-states); **two were fixed in this document as it was being written** (F22 and F23, both missing trust
+in `9b701ee` on 2026-09-01, written on 2026-08-31 under the rule the paragraphs below record); **two
+were fixed in this document as it was being written** (F22 and F23, both missing trust
 boundaries — §2 gained its sixth and seventh in one day); **one has a fix that changes v2's
 behaviour** (F13); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F14,
 F21, F41 and F42 in the contract, F26 in the mocks — that last one is in `test/`, so it is free of the
@@ -707,15 +707,23 @@ status lines now name the commit like every other member of the bucket. The note
 weaker claim was made in writing, and a document that upgrades its own evidence without saying so
 is harder to audit than one that records when it did.
 
-**And it carries two statuses again, from 2026-08-31.** F43, F44, F45 and F46 are in the working tree
-with a test each, and none of it has been compiled or run — every Solidity build, `forge test`,
+**And it carried two statuses again, from 2026-08-31.** F43, F44, F45 and F46 sat in the working tree
+with a test each, and none of it had been compiled or run — every Solidity build, `forge test`,
 `forge lint` and mutation-gate run in this project happens on the author's machine rather than in the
 session that writes the code, so there is a window between a fix being written and a fix being
-evidenced, and each of the four status lines names that window instead of implying a green run. What
-is owed before they read like the rest of the bucket: a clean build, the suite passing with the four
-new tests in it, and a mutation-gate run over every guard the commit touches — which for these four
-is the whole point, since a removed guard no test notices is the failure mode all four findings are
-instances of.
+evidenced, and each of the four status lines named that window instead of implying a green run. What
+was owed before they could read like the rest of the bucket: a clean build, the suite passing with the
+four new tests in it, and a mutation-gate run over every guard the commit touches — which for these
+four is the whole point, since a removed guard no test notices is the failure mode all four findings
+are instances of.
+
+**CLOSED 2026-09-01.** All four landed in `9b701ee`, the suite came back at 243 passing with ten new
+tests in it, and the gate ran over both functions the commit touched: 29 removals and injections on
+`createMandate` and 27 on `approveCosignFor`, every one caught, plus ten hand-written cases of which
+nine were caught and one is registered as an equivalent mutant. The third item on that list earned
+its place — the gate's first pass over `createMandate` left one existing expiry test green with a
+guard deleted, which no amount of passing suite output would have shown, and the F45 entry below
+carries what that cost and what it taught. The note stays for the same reason the one above it does.
 
 **A whole bucket emptied on 2026-08-29, by this document's own rule.** The first bucket is a status
 and the rest are costs, so a finding moves into it when it lands — F19 was in "changes v2's
@@ -806,10 +814,24 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F35 `isCosignApproved` ignored the mandate's own death | **DONE in `af9df40`, 2026-08-29.** 1 conjunct + a factored `_isPermanentlyDead`, 2 Solidity tests. **Wrong on its first attempt** — it used `isLive`, which folded in `notBefore` and reported a live scheduled approval as dead; two tests caught it. No model surface, since the model has no pre-flight views | — |
 | ✅ F36 `isAllowedRecipient` disagreed with `spend` | **DONE in `af9df40`, 2026-08-29.** 3 guards, 2 Solidity tests, one of them shared with F29 so the two claims check each other. No model surface | — |
 | ✅ F37 the model minted mandates with a zero payer or spender | **DONE in `af9df40`, 2026-08-29.** 2 throws in `reference/policy.js`, asserted by the grant-time construction test. **Not named in that commit's message** — it was folded into the gate work; this document is where it gets named. Found by the JS mutation gate, which reported a survivor and turned out to be reporting a divergence | — |
-| ✅ F38 the two ERC-8004 registries were payable recipients | **DONE in the working tree, 2026-08-30, uncommitted.** No new error and no new guard — the two hand-written conditions and the view's `return false` became three calls to one new `_isUndebitable`, which is why widening the list from two addresses to four cost 1 helper and 0 new comparisons at the call sites. Mirrored in `reference/policy.js` by `undebitableAddrs`. 1 Solidity case extended from four rules to six, 1 new Solidity case on the approval path, 3 model tests. **Unreachable by either mutation gate** — the helper holds no refusal — so the six by-name assertions are the whole of the evidence | — |
-| ✅ F39 a reservation outliving its approval | **DONE in the working tree, 2026-08-30, uncommitted.** Not 1 condition — **2 conditions and a sweep**, plus `_cosignIsLive` so the two sites cannot answer the deadline question differently from the enforcer three lines below the first of them. The second site is the one the sweep that found this did not name: `approveCosignFor` carried the identical unconditional refusal, and fixing only `spend` would have left the co-signer unable to approve a replacement on a nonce their own lapsed approval had reserved. 3 Solidity tests, 4 model tests. **It also closes a rough edge the suite had already accepted in writing** — `withdrawCosign` with the wrong nonce left a reservation with no approval behind it, and F30's own test documented that as a known cost | — |
-| ✅ F40 the permanent half of the window cap | **DONE in the working tree, 2026-08-30, uncommitted.** 1 loop, at most `MAX_WINDOWS` cold reads, on the one path that had argued in a comment for leaving it out. The finding is inside a sentence rather than inside code: "an amount refused now can fit later" is true of `used + amount > cap` and false of `amount > cap`, and F17's own note carried it as a single recoverable condition for two revisions. 2 Solidity tests, 1 model refusal, 1 new gate mutant. **The repository already held both halves in two tests that never met** — `test_cosign_isCheckedAfterEveryCap` asserted the permanent refusal with `used` written as a literal zero, and `test_f17_approvingWhileAWindowIsFull_isAllowed`, 545 lines below it at `efe43a7`, asserted that approving against a full window was allowed | — |
+| ✅ F38 the two ERC-8004 registries were payable recipients | **DONE in `8487b5a`, 2026-08-30.** No new error and no new guard — the two hand-written conditions and the view's `return false` became three calls to one new `_isUndebitable`, which is why widening the list from two addresses to four cost 1 helper and 0 new comparisons at the call sites. Mirrored in `reference/policy.js` by `undebitableAddrs`. 1 Solidity case extended from four rules to six, 1 new Solidity case on the approval path, 3 model tests. **Unreachable by either mutation gate** — the helper holds no refusal — so the six by-name assertions are the whole of the evidence | — |
+| ✅ F39 a reservation outliving its approval | **DONE in `8487b5a`, 2026-08-30.** Not 1 condition — **2 conditions and a sweep**, plus `_cosignIsLive` so the two sites cannot answer the deadline question differently from the enforcer three lines below the first of them. The second site is the one the sweep that found this did not name: `approveCosignFor` carried the identical unconditional refusal, and fixing only `spend` would have left the co-signer unable to approve a replacement on a nonce their own lapsed approval had reserved. 3 Solidity tests, 4 model tests. **It also closes a rough edge the suite had already accepted in writing** — `withdrawCosign` with the wrong nonce left a reservation with no approval behind it, and F30's own test documented that as a known cost | — |
+| ✅ F40 the permanent half of the window cap | **DONE in `8487b5a`, 2026-08-30.** 1 loop, at most `MAX_WINDOWS` cold reads, on the one path that had argued in a comment for leaving it out. The finding is inside a sentence rather than inside code: "an amount refused now can fit later" is true of `used + amount > cap` and false of `amount > cap`, and F17's own note carried it as a single recoverable condition for two revisions. 2 Solidity tests, 1 model refusal, 1 new gate mutant. **The repository already held both halves in two tests that never met** — `test_cosign_isCheckedAfterEveryCap` asserted the permanent refusal with `used` written as a literal zero, and `test_f17_approvingWhileAWindowIsFull_isAllowed`, 545 lines below it at `efe43a7`, asserted that approving against a full window was allowed | — |
+| ✅ F41 a co-signature dying before the window room returns | **DOCUMENTED 2026-08-30, in `63a83f6`.** Four comments across the contract and `reference/policy.js`, 1 test, and no guard on either side. The finding is a bound the notes never computed: F40's surviving half says an amount refused now can fit later, and *later* is at least one window length away, which on a long window outlasts `MAX_COSIGN_TTL`. Scoping the sentence was the whole fix | — |
+| ✅ F42 gas and budget are one balance on Arc | **DOCUMENTED 2026-08-31, in `5b3b58e`.** Comment-only in the contract — 13 lines rewritten and not one of them a statement — plus §2's eighth trust boundary, a note in `IMMUTABILITY.md` and one in `README.md`. `spend` reads no balance, so a mandate can be spent down to where revoking it is unaffordable; what closes it is a published fee bound and a testnet receipt rather than a guard | — |
+| ✅ F43 the allowlist writer stored what the enforcer refuses | **DONE in `9b701ee`, 2026-09-01.** 1 condition with three disjuncts, 3 tests. The writer refused one address while `spend` refused six, and two earlier passes widened the enforcer's list without coming back to the writer | — |
+| ✅ F44 bit 7 of `flags` stored, returned, and enforced by nothing | **DONE in `9b701ee`, 2026-09-01.** 1 constant and 1 guard, 3 tests. Cheap to fix and expensive to leave, because this contract is immutable and its own comment promises bit 7 to a later version, so a mandate created today with the bit set would read to that version as carrying a check this one never applied | — |
+| ✅ F45 an expiry already past accepted at creation | **DONE in `9b701ee`, 2026-09-01.** 1 guard, 3 tests — and the one row here whose evidence had to be rebuilt, because the new guard sits under an older one that raises the same error and retired the older guard's test until the mutation gate caught it | — |
+| ✅ F46 the cosign deadline bound answered above the liveness pair | **DONE in `9b701ee`, 2026-09-01.** 3 lines moved, 1 test. No permission changes and no state differs, so the whole cost is a co-signer sent to fix the wrong field and charged gas a second time to learn the mandate was dead | — |
 | §5 coverage gaps | **1 test, 4 testnet transactions, later the same day on 2026-08-30.** Six tests landed in `test/Windows.t.sol` and four items came off together — the four-window maximum-cost spend and all three window geometries — which is the largest single drop this row has recorded, and the four fell to one commit because they shared one file and one harness. What remains is 1 spend through a `minResponse` between 1 and 99, which is a decision before it is a test, and F34's OPEN cell in this table holds that same question. **Three findings landed after this layer was written and the count stayed at 1**, because F38, F39 and F40 each arrived with the Solidity and model tests their fix needs, so none of them opened a gap of the kind this row counts. **F41 makes it four and the count still holds at 1**, and for a different reason worth separating: F41 changes no guard, so it owes no mutation either, and the test it brought closes a cell — the long-window arithmetic — that this row had never listed, so it cannot come off a tally it was never on. What the first three did open is four hand mutations, which are owed and are recorded in §5, and they sit outside this tally under the rule the next sentence states. The gas measurement the maximum-cost item asked for stays out of this count, for the reason the view-reaching mutation operator stays out: a measurement is not a test. The layer this replaces follows, reading as it did. **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
+
+**Three rows in this table said "uncommitted" for two days after the commit landed, and six findings
+had no row at all.** F38, F39 and F40 shipped in `8487b5a` on 2026-08-30 and their own status lines
+named it that day, while the cells above kept the weaker claim until 2026-09-01 — one status held in
+two places, drifting in the copy a reader meets first. F41 through F46 were absent for the plainer
+reason that a finding gets its section written and its row forgotten; F12 is the only finding
+deliberately outside the table, and the paragraph below says why. Both are repaired above, and F38
+said it first: a mirror that is a copy eventually falls out of step.
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list risks funds in
 the sense of letting a spend exceed a granted cap; the window search found no such case in 3.0M
@@ -3367,9 +3389,9 @@ the claim.
 ### F43 — The allowlist writer stored a `true` for five of the six addresses the enforcer refuses
 
 **Severity: low as exposure and medium as a footgun — nothing can be taken through a permission no
-spend honours, but the payer's grant is unusable and the salt that named it is spent · Status: fixed
-in the working tree, uncommitted and unrun as this is written · Confidence: certain; the writing set and
-the enforcing set are readable side by side in one file.**
+spend honours, but the payer's grant is unusable and the salt that named it is spent · Status: FIXED
+in `9b701ee` · Confidence: certain; the writing set and the enforcing set are readable side by side
+in one file.**
 
 `spend` and `isAllowedRecipient` refuse six recipients outright: the zero address, the payer, and
 the four `_isUndebitable` covers — this contract, the USDC token, and both ERC-8004 registries.
@@ -3409,9 +3431,8 @@ refuses everything.
 ### F44 — Bit 7 of `flags` was stored, returned and enforced by nothing, on a contract that has already promised that bit to a later version
 
 **Severity: informational for this contract and medium for the next one — nothing bit 7 does today
-can move money, and that is the whole problem · Status: fixed in the working tree, uncommitted and
-unrun as this is written · Confidence: certain; the bit is unread anywhere in the contract, which is
-a property of a single file.**
+can move money, and that is the whole problem · Status: FIXED in `9b701ee` · Confidence: certain; the
+bit is unread anywhere in the contract, which is a property of a single file.**
 
 `flags` is a `uint8` and this contract acts on bits 0 through 6. A payer could set bit 7 and
 `createMandate` would store it, `getMandate` would return it, and no check would read it. That is the
@@ -3445,9 +3466,10 @@ refused, and without that pair the mask's test could pass on a contract whose ma
 ### F45 — A mandate could be created with its expiry already in the past, which spends the salt to buy an authority that reverts on its first use
 
 **Severity: low as exposure and medium as a footgun, for the same reason F43 is: the loss is the
-grant and the salt, not the money · Status: fixed in the working tree, uncommitted and unrun as this
-is written · Confidence: certain; the guard order was walked and the existing expiry tests were
-re-read against it.**
+grant and the salt, not the money · Status: FIXED in `9b701ee` · Confidence: certain in the guard,
+and the justification for that confidence has changed — the guard order was walked before the fix
+landed and the reading drew the wrong conclusion from it, so what carries this now is a mutation-gate
+run over `createMandate` with every mutant caught. The dated note below has it.**
 
 `createMandate` already checked `expiresAt` twice — that it is not zero when `F_EXPIRY` is set, and
 that it sits after `notBefore`. Neither compares it to the clock. Both bounds can be satisfied by a
@@ -3477,6 +3499,22 @@ its own claim. `ArcParity.t.sol` was the other candidate, since its `ARC_EXPIRES
 2026-09-30 that the wall clock will pass within the month; it warps to a fixed `ARC_NOW` well before
 that date and never reads the wall clock, so F45 cannot fire there either.
 
+[**2026-09-01: both facts in the paragraph above are true and the conclusion drawn from them is
+not, which makes this the most useful entry in the section.** The ordering guard does run first and
+both refusals do raise `BadConfig`. Two guards raising the *same* error is precisely what stops that
+test proving its own claim: with F45 sitting directly below the ordering guard, the expectation held
+whether the ordering guard was present or not. The mutation gate showed it by deleting that guard,
+then watching `test_createMandate_expiryNotAfterNotBefore_reverts` stay green on a run where the
+other 28 mutants each failed a named test. The contract was never wrong; the evidence for one of its
+lines was. The repair set both bounds a day ahead of the clock, where the ordering guard is the only
+line in `createMandate` that reads `notBefore` at all, and added an acceptance half asserting that
+one second of window is granted. **The rule to carry: a new guard placed under an existing one that
+shares its error can retire the older guard's test without touching it, and reading the order will
+not reveal that — only removing the older guard and re-running will.** This is the shadow class §5
+describes, running the other way: there a new guard looked tested because an older one answered
+first; here a new guard retired an older one's test by answering first itself. Both were found by
+deleting a line rather than by reading one.]
+
 **Three tests, arranged so the guard cannot pass by being too broad.** The finding itself is
 `test_f45_expiryAlreadyPast_reverts`, which sets the expiry one second behind the clock on an
 otherwise valid grant. `test_f45_theBoundaryIsTheCurrentSecond` refuses an expiry of exactly
@@ -3489,9 +3527,8 @@ the past, and must be ignored because the flag says it means nothing.
 ### F46 — `approveCosignFor` stated a rule about which refusal a co-signer hears first, and then broke it for one of the three deadline bounds
 
 **Severity: low — no permission changes and no state differs; the cost is one wasted transaction and
-a co-signer sent to fix the wrong field · Status: fixed in the working tree, uncommitted and unrun as
-this is written · Confidence: certain; the move is three lines and nothing between the two positions
-reads the value.**
+a co-signer sent to fix the wrong field · Status: FIXED in `9b701ee` · Confidence: certain; the move
+is three lines and nothing between the two positions reads the value.**
 
 The comment at the head of `approveCosignFor` states the rule plainly: mandate liveness comes before
 the deadline bounds, because for a mandate that has already expired any legal `validUntil` is
