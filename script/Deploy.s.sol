@@ -24,20 +24,41 @@ import {MandateManager} from "../contracts/MandateManager.sol";
  *
  * WHAT IT CHECKS, in order.
  *
- * Before deploying, that the chain is one this file knows, and that whatever sits at
- * the pinned USDC address reports 6 decimals if it answers `decimals()` at all. Every
- * amount in this system is a 6-decimal `uint96`; against an 18-decimal token the same
- * numbers mean a millionth of the intended cap.
+ * Before deploying: that the chain is one this file knows; that whatever sits at the USDC
+ * address reports 6 decimals, and refuses to continue if it will not say; that neither
+ * registry address is non-zero yet codeless; and that no two of the three arguments name
+ * the same address. Every amount in this system is a 6-decimal `uint96`, so against an
+ * 18-decimal token the same numbers mean a millionth of the intended cap.
  *
- * After deploying, that the contract has code, and that all three immutables read back
- * as the addresses that went in. That last check is the point of the file. Constructor
- * arguments are ABI-encoded positionally, three addresses in a row, and nothing in
- * `forge create` or in a block explorer will tell you they went in the wrong order.
- * Reading them back does.
+ * After deploying: that the contract has code, that `DOMAIN` is the value v1 pinned, and
+ * that all three immutables read back as the addresses that went in.
+ *
+ * WHAT THE READ-BACK DOES NOT CATCH, since an earlier version of this comment claimed it
+ * did. Comparing `mm.usdc()` to the `usdc_` that was just handed to the constructor puts
+ * one value on both sides of the comparison, so it holds for every input, including a
+ * transposed one. Constructor arguments are ABI-encoded positionally, three addresses in a
+ * row, and neither `forge create` nor a block explorer will tell you they went in the wrong
+ * order — but neither will a read-back that compares an argument against itself. What
+ * catches transposition is comparing against a value that did not travel through the same
+ * call, which is why `run()` repeats the three comparisons against the pinned constants
+ * after `_deploy` returns. The checks inside `_deploy` remain, because they are the only
+ * ones `runWith` can have, and there they do catch a constructor that assigns in the wrong
+ * order rather than a caller that passes in the wrong order.
+ *
+ * That distinction is worth a sentence because the two mistakes have the same symptom.
+ * Swapping the USDC and identity arguments produces a deployment that verifies, answers
+ * `getMandate` and `isLive`, and reverts every spend: ERC-20 and ERC-721 both declare
+ * `transferFrom(address,address,uint256)` and therefore share selector `0x23b872dd`, so the
+ * call dispatches into the registry's ERC-721 method, which returns nothing, and solc 0.8.28
+ * reverts decoding a bool from empty return data.
  *
  * The registries are allowed to be zero and the constructor accepts that; only USDC is
  * refused at zero. A zero registry disables the ERC-8004 credential check rather than
- * breaking it, which is why it is a configuration and not a mistake.
+ * breaking it, which is why it is a configuration and not a mistake. A registry that is
+ * non-zero and codeless is the mistake, and it is refused: `_checkIdentity` and
+ * `_checkCredential` wrap their calls in `try`/`catch`, and a `STATICCALL` to a codeless
+ * address succeeds with empty return data, so the decode fails inside this frame where the
+ * `catch` cannot see it. The documented `IdentityNotHeld` denial becomes a bare revert.
  */
 contract Deploy is Script {
     /// The chain has no pinned argument set, so this script will not guess one.
@@ -48,6 +69,13 @@ contract Deploy is Script {
     error EmptyDeployment();
     /// The pinned USDC address answered `decimals()` with something other than 6.
     error UnexpectedDecimals(uint256 got);
+    /// The USDC address did not answer `decimals()` at all. See `_checkDecimals`.
+    error DecimalsUnavailable();
+    /// A non-zero registry address holds no code, so every check reading it would fail
+    /// undecodably rather than denying legibly.
+    error RegistryHasNoCode(address registry);
+    /// Two constructor arguments name the same address.
+    error DuplicateArgument(address repeated);
 
     // ---------------------------------------------------------------------
     // Pinned arguments. Every address below is commented with what it is and
@@ -101,6 +129,15 @@ contract Deploy is Script {
     function run() external returns (MandateManager mm) {
         if (block.chainid != ARC_TESTNET) revert UnknownChain(block.chainid);
         mm = _deploy(ARC_TESTNET_USDC, ARC_TESTNET_IDENTITY, ARC_TESTNET_VALIDATION);
+
+        // The comparisons that actually catch a transposed argument order, because the right
+        // hand side of each one did not travel through `_deploy`. Reading the immutables back
+        // inside `_deploy` compares each argument against itself; these compare against the
+        // constants at the top of this file. Repeating three lines is the price of that.
+        if (address(mm.usdc()) != ARC_TESTNET_USDC) revert WiringMismatch();
+        if (address(mm.identityRegistry()) != ARC_TESTNET_IDENTITY) revert WiringMismatch();
+        if (address(mm.validationRegistry()) != ARC_TESTNET_VALIDATION) revert WiringMismatch();
+        console.log("read back against the pinned constants, not against the arguments");
     }
 
     /**
@@ -115,8 +152,15 @@ contract Deploy is Script {
      * stray variable replace the pinned set above without appearing anywhere in the
      * output, which would make the pinning decorative. Typing them makes the choice
      * visible in shell history and in whatever log the run is teed to.
+     *
+     * It refuses any chain this file pins, so the safe path cannot be reached the unsafe way.
+     * Before that refusal existed, `runWith` was the whole of the file's protection turned
+     * off by one flag: no chain check, and a decimals probe that continued when the token
+     * said nothing. Announcing the bypass in a `console.log` is not a check — nothing reads
+     * it, and a deployment that has already happened cannot be talked out of.
      */
     function runWith(address usdc_, address identity_, address validation_) external returns (MandateManager mm) {
+        if (block.chainid == ARC_TESTNET) revert UnknownChain(block.chainid);
         console.log("runWith: pinned addresses bypassed, arguments taken from the command line");
         mm = _deploy(usdc_, identity_, validation_);
     }
@@ -132,6 +176,8 @@ contract Deploy is Script {
         console.log("validation      ", validation_);
 
         _checkDecimals(usdc_);
+        _checkRegistries(identity_, validation_);
+        _checkDistinct(usdc_, identity_, validation_);
 
         vm.startBroadcast();
         mm = new MandateManager(usdc_, identity_, validation_);
@@ -139,11 +185,25 @@ contract Deploy is Script {
 
         console.log("MandateManager  ", address(mm));
 
-        // These four checks run in the dry run too, because `forge script` executes the
-        // constructor against a fork whether or not `--broadcast` is passed. That is what
-        // makes the dry run worth doing: an argument order mistake is caught before any
-        // transaction is signed, on a chain state identical to the real one.
+        // These checks run in the dry run too, because `forge script` executes the constructor
+        // against a fork whether or not `--broadcast` is passed. That is what makes the dry run
+        // worth doing: a mistake is caught before any transaction is signed, on a chain state
+        // identical to the real one.
+        //
+        // The three read-backs below catch a constructor that assigns its arguments to the wrong
+        // immutables. They cannot catch a caller that passes them in the wrong order, because
+        // both sides of each comparison come from the same three locals. `run()` does that, by
+        // comparing against the pinned constants after this function returns.
         if (address(mm).code.length == 0) revert EmptyDeployment();
+
+        // A tripwire rather than a wiring check, and worth naming as such after the mistake
+        // above. `DOMAIN` is a compile-time constant in the source this script imports, so this
+        // comparison cannot fail for a deployment made from this tree. What it catches is a
+        // later edit to the separator: the contract's own header calls `DOMAIN`
+        // consensus-relevant, it is mixed into every mandate id and every co-signature hash,
+        // and changing it invalidates every id a client has stored with no error to announce
+        // the change. Whoever edits it has to edit this line too, which is the point.
+        if (mm.DOMAIN() != keccak256("Remit:v1")) revert WiringMismatch();
 
         if (address(mm.usdc()) != usdc_) revert WiringMismatch();
         if (address(mm.identityRegistry()) != identity_) revert WiringMismatch();
@@ -151,7 +211,7 @@ contract Deploy is Script {
 
         console.log("runtime bytes   ", address(mm).code.length);
         console.logBytes32(mm.DOMAIN());
-        console.log("^ DOMAIN, which must equal keccak256(\"Remit:v1\")");
+        console.log("^ DOMAIN, asserted equal to keccak256(\"Remit:v1\")");
         console.log("all three immutables read back as passed");
         console.log("");
         console.log("Next, publish the source so the explorer shows an ABI instead of");
@@ -169,29 +229,70 @@ contract Deploy is Script {
     }
 
     /**
-     * A 6-decimal check that fails closed on a wrong answer and stays quiet on no
-     * answer.
+     * A 6-decimal check that fails closed on a wrong answer and on no answer.
      *
-     * `decimals()` is not in the interface this contract uses, so it is called raw. If
-     * the target answers and says anything other than 6, that is a different token and
-     * the deployment stops: every cap, threshold and window budget in this system is a
-     * 6-decimal `uint96`, and against an 18-decimal token a 100 USDC per-transaction cap
-     * would be a hundred-millionth of a token.
+     * `decimals()` is not in the interface this contract uses, so it is called raw. If the
+     * target answers and says anything other than 6, that is a different token and the
+     * deployment stops: every cap, threshold and window budget in this system is a 6-decimal
+     * `uint96`, and against an 18-decimal token a 100 USDC per-transaction cap would be a
+     * hundred-millionth of a token.
      *
-     * If the call fails or returns nothing, the run continues with a warning. Arc's USDC
-     * is exposed at a fixed address rather than deployed as an ordinary contract, and
-     * its code length has never been measured from here, so a hard requirement on an
-     * answer could block a correct deployment for the wrong reason. The chain-id pin
-     * above is what actually prevents the catastrophic mistake; this is a second look.
+     * SILENCE USED TO BE ACCEPTED, AND IS NOT ANY MORE. The old reasoning was that Arc's USDC
+     * sits at a fixed address rather than being deployed as an ordinary contract, and that its
+     * behaviour from here had never been measured, so demanding an answer might block a correct
+     * deployment for the wrong reason. `evidence/arc-probe.log` settles it the other way: run
+     * against live Arc Testnet, the pinned address answered `decimals()` with 6 and `symbol()`
+     * with "USDC". A demand that the live chain already satisfies cannot block the deployment
+     * this file exists for, and Arc's own integration guidance is to always call `decimals()`.
+     * On any other chain, a USDC that will not name its own precision is the case to refuse.
+     *
+     * A CODE-LENGTH CHECK ON USDC IS DECLINED, and the asymmetry with `_checkRegistries` is a
+     * deliberate one. The probe measured what the token answers, not how much code backs it.
+     * Arc's USDC is precompile-backed, so it may well report a zero-length `code` while working
+     * perfectly, and a check that reads `usdc_.code.length` could refuse the one deployment
+     * this file is written for. The registries are ordinary contracts and the same probe
+     * measured 263 hex characters of code at each, so there the check is grounded.
      */
     function _checkDecimals(address usdc_) internal view {
         (bool ok, bytes memory ret) = usdc_.staticcall(abi.encodeWithSignature("decimals()"));
-        if (ok && ret.length == 32) {
-            uint256 d = abi.decode(ret, (uint256));
-            if (d != 6) revert UnexpectedDecimals(d);
-            console.log("usdc decimals    6, as expected");
-        } else {
-            console.log("WARNING: the USDC address did not answer decimals(). Verify it by hand.");
-        }
+        if (!ok || ret.length != 32) revert DecimalsUnavailable();
+        uint256 d = abi.decode(ret, (uint256));
+        if (d != 6) revert UnexpectedDecimals(d);
+        console.log("usdc decimals    6, as expected");
+    }
+
+    /**
+     * A non-zero registry must hold code, because the contract's denial depends on it.
+     *
+     * Zero is a configuration: it disables the ERC-8004 gate that reads it, and the
+     * constructor accepts it on purpose. Non-zero and codeless is the mistake, and the
+     * failure it produces is quiet. `_checkIdentity` wraps `ownerOf` in `try`/`catch` and
+     * documents the catch as producing a legible denial; a `STATICCALL` to a codeless address
+     * succeeds and returns nothing, so the ABI decode of the success branch fails in the
+     * caller's own frame, where that `catch` cannot reach it. The mandate then fails with
+     * empty return data instead of `IdentityNotHeld`, which tells an operator nothing.
+     *
+     * Checked before the broadcast rather than after, because the point is not to deploy.
+     */
+    function _checkRegistries(address identity_, address validation_) internal view {
+        if (identity_ != address(0) && identity_.code.length == 0) revert RegistryHasNoCode(identity_);
+        if (validation_ != address(0) && validation_.code.length == 0) revert RegistryHasNoCode(validation_);
+        console.log("registries       non-zero addresses hold code");
+    }
+
+    /**
+     * No two arguments may name the same address.
+     *
+     * Nothing in the constructor requires the three to differ, and one of the collisions does
+     * harm without looking wrong. `_isUndebitable` refuses four recipients — this contract, the
+     * token, and both registries — so passing the same address twice collapses four entries
+     * into three and widens the set of recipients a spend will accept, with no error anywhere
+     * to say so. Two zero registries are the exception and stay legal, since zero means the
+     * check is off and both may be off at once.
+     */
+    function _checkDistinct(address usdc_, address identity_, address validation_) internal pure {
+        if (usdc_ == identity_) revert DuplicateArgument(usdc_);
+        if (usdc_ == validation_) revert DuplicateArgument(usdc_);
+        if (identity_ == validation_ && identity_ != address(0)) revert DuplicateArgument(identity_);
     }
 }
