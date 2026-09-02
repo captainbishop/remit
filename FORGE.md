@@ -153,7 +153,7 @@ forge test --match-path 'test/Windows.t.sol'
 forge test --match-test 'test_ATTACK'
 forge test --gas-report           # run 2026-08-24; see DESIGN.md for the table
 FOUNDRY_PROFILE=deep forge test   # 20k fuzz runs, 2000 invariant runs, depth 256
-forge lint                        # run 2026-08-30; expect 0 — see the section below
+forge lint                        # run 2026-09-02; expect 0 — see the section below
 ```
 
 The default profile is tuned to finish while you watch it. The deep profile is the
@@ -373,7 +373,7 @@ attempt in a low-level call and tallies refusals in `handler.refusals()`, so a p
 denial is counted rather than propagated. Non-vacuity is established separately, by the
 two guard tests named under "Running".
 
-## What `forge lint` found, and why 91 warnings became six annotations
+## What `forge lint` found, and why 91 warnings became seven annotations
 
 `forge build` had been ending with *"Compiler run successful with warnings"* since the
 first compile, and the warnings were left alone on the reasonable-sounding grounds that
@@ -389,9 +389,10 @@ The decision that got it there is written down below rather than left as a habit
 working `*.log` captures from that session are gitignored and local; the numbers that
 matter are in this document.)
 
-**The contract's six are annotated individually, in place.** The 2026-08-24 run produced
-five of them and v2 added the sixth. They are three `unsafe-typecast` and three
-`block-timestamp`, each with a `// forge-lint: disable-next-line(...)` pragma sitting under
+**The contract's seven are annotated individually, in place.** The 2026-08-24 run produced
+five of them, v2 added the sixth, and F45's past-expiry guard added the seventh. They are
+three `unsafe-typecast` and four `block-timestamp`, each with a
+`// forge-lint: disable-next-line(...)` pragma sitting under
 a comment that gives the actual reason:
 
 The two `uint96(amount)` casts — one in `spend`, one in `approveCosignFor` — cannot truncate
@@ -405,17 +406,24 @@ The `uint64(nowTs / w.subLength)` cast in `_checkAndCommitWindows` is bounded ab
 `block.timestamp` itself, since `subLength` is at least 1; `uint64` saturates around
 584 billion years.
 
-The three `block.timestamp` reads get the longest justification, because the lint's
+The four `block.timestamp` reads get the longest justification, because the lint's
 objection — a proposer can nudge the clock — is answered structurally rather than
-avoided. They sit in `isCosignApproved`, `_isPermanentlyDead` and `isLive`; v1 carried two
-and both were inside `isLive`, so a reader working from an older copy of this section will
-look in the wrong place. Nothing in any of the three *grants* capacity from a timestamp:
-window accounting deliberately has no upper bound on bucket index, so a clock moved forward
-cannot age out live history and refill a cap (that was a real bug, and it is now a named
-regression test), and a clock moved backwards can only make `isLive` return false, which
-refuses spends. The payer's actual remedy, `revoke`, never consults the clock at all.
+avoided. They sit in `createMandate`, `isCosignApproved`, `_isPermanentlyDead` and `isLive`;
+v1 carried two and both were inside `isLive`, so a reader working from an older copy of this
+section will look in the wrong place. Nothing in any of the four *grants* capacity from a
+timestamp: window accounting deliberately has no upper bound on bucket index, so a clock
+moved forward cannot age out live history and refill a cap (that was a real bug, and it is
+now a named regression test), and a clock moved backwards can only make `isLive` return
+false, which refuses spends. The payer's actual remedy, `revoke`, never consults the clock
+at all.
 
-Those six are the first questions an auditor asks, and this is a contract that is meant
+The fourth, F45's `p.expiresAt <= block.timestamp` in `createMandate`, decides which refusal
+the payer reads rather than whether a spend can happen. A clock a few seconds behind lets a
+born-dead grant be written, and `spend` then refuses it on the same field; a clock a few
+seconds ahead refuses a grant with a moment of life left, and the payer re-issues under
+another salt.
+
+Those seven are the first questions an auditor asks, and this is a contract that is meant
 to hold real money, so the answers belong beside the code.
 
 **The 86 in `test/` are excluded as a class**, via `[lint] ignore = ["**/*.t.sol"]` in
@@ -568,6 +576,29 @@ declaration block would then follow two naming schemes while
 `screaming-snake-case-immutable` still fired on `usdc`. What remains is 21 contract lines and
 3 call sites edited in a contract that moves money, for an `info`-severity style note with no
 security effect, so the rename is declined as of 2026-08-30.
+
+### The 2026-09-02 re-run, and how long a clean result stays true
+
+The next `forge lint` after that one happened four commits later, and it reported a
+warning: `block-timestamp` on `p.expiresAt <= block.timestamp` inside `createMandate`.
+The line arrived with F45 in `9b701ee` on 2026-09-01 as the contract's seventh
+`block.timestamp` comparison, and it was the only one of the seven with no
+`disable-next-line` pragma beside it. It now has one, with its reason written above it in
+the form the other six use, and the default-severity result is clean again.
+
+Nothing about the 2026-08-30 method was wrong, and the logs from that session hold up: the
+probe control fired, the warm-cache run proved linting runs independently of compiling, and
+`lint-final.log`'s single line was a real clean tree rather than a lost stream — the sibling
+captures in that same session carry full `warning[...]` blocks, so stderr was being read all
+along, and what went stale was the result rather than the method. Three commits between
+`9b701ee` and `6b1e4d7` each ran the tests and the formatter without running the linter, so a
+warning introduced on 2026-09-01 first appeared in a log on 2026-09-02.
+
+The rule that follows is worth more than the annotation: a clean checker log dates from the
+run, and a code change after it revives every question that run answered. The four
+`forge lint` captures in this repo that hold one line each are all older than `9b701ee`, so
+each was accurate when written. Run the linter in the same paste as the tests, and a
+comparison of counts against this section will catch the next one on the day it lands.
 
 ## What the first compile was predicted to find
 

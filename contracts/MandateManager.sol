@@ -844,6 +844,13 @@ contract MandateManager {
         //
         // This is the same rule F17 applies to a co-signature: an object no later call could
         // ever accept is refused at the point it would be created, not at the point it fails.
+        //
+        // The clock read is deliberate: a validator shifting it changes which refusal the payer
+        // reads and nothing more. A few seconds early writes a born-dead grant, which then
+        // refuses every spend because `spend` re-reads the clock against the same field; a few
+        // seconds late refuses a grant with a moment of life left, and the payer re-issues under
+        // another salt.
+        // forge-lint: disable-next-line(block-timestamp)
         if (flags & F_EXPIRY != 0 && p.expiresAt <= block.timestamp) revert BadConfig();
         // The mirror of the two lines above, and the last field in the struct that could lie.
         // With F_EXPIRY unset, v1 accepted any `expiresAt`, wrote it to storage and

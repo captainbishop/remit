@@ -455,9 +455,8 @@ contract GatesTest is Base {
         bytes32 credGate = mmCredential.createMandate(bytes32("f49-credential"), p);
 
         vm.prank(agent);
-        (ok, err) = address(mmCredential).call(
-            abi.encodeCall(MandateManager.spend, (credGate, vendor, usd(10), REF, nextNonce()))
-        );
+        (ok, err) = address(mmCredential)
+            .call(abi.encodeCall(MandateManager.spend, (credGate, vendor, usd(10), REF, nextNonce())));
         assertFalse(ok);
         assertEq(err.length, 0, "F49: and the six-field tuple decodes no better than the address");
     }

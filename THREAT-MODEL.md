@@ -3868,6 +3868,19 @@ still be hiding there.
   `MockRegistries.sol`. Every one is a naming or file-layout convention rather than a defect,
   each judged in `FORGE.md`'s lint section.
 
+  **Re-opened and closed again on 2026-09-02, by a warning rather than by a doubt.** The next
+  `forge lint` after the 2026-08-30 one ran four commits later and reported
+  `block-timestamp` on `p.expiresAt <= block.timestamp` in `createMandate` — F45's guard,
+  added in `9b701ee` on 2026-09-01 as the seventh `block.timestamp` comparison and the only
+  one of the seven carrying no pragma. Annotated now, with the reason above the line in the
+  form the other six use, so the default-severity result is clean again and the contract's
+  in-place count is seven. The 2026-08-30 evidence still stands: the sibling captures from
+  that session hold full `warning[...]` blocks, so `lint-final.log`'s single line recorded a
+  clean tree and not a dropped stream. A clean checker log dates from its run, and the three
+  commits between `9b701ee` and `6b1e4d7` each ran the tests and the formatter while the
+  linter sat idle, which is how a warning introduced on one day first showed up in a log on
+  the next.
+
   **The immutable rename was then measured, and it is declined.** Two costs expected of it
   turn out to be absent. No interface in the repo declares `usdc()`, `identityRegistry()` or
   `validationRegistry()`, and each getter has exactly one call site, all three in
@@ -3891,6 +3904,8 @@ still be hiding there.
   Correcting the record on the way through: the contract carries **six** in-place
   suppressions, three `unsafe-typecast` and three `block-timestamp`, where both
   `foundry.toml` and `FORGE.md` had described v1's five. Fixed in `5653bcb`.
+  F45's past-expiry guard made it seven on 2026-09-01 and it was annotated on 2026-09-02, so
+  the current split lives in `FORGE.md` and in `foundry.toml`'s lint comment.
 - **Three co-signature behaviours `test/Cosign.t.sol` never runs**, enumerated against the
   file rather than sampled, and all three are F17's: approving on a **revoked** mandate;
   approving on an **expired** one, or letting a live approval outlive the mandate's
