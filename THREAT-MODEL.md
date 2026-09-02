@@ -640,6 +640,7 @@ setters, no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade
 | Property | Enforced by |
 | :--- | :--- |
 | Only the named spender can spend | `spend`: `msg.sender != m.spender` → `WrongSpender` |
+| The named spender is an address that can call | **Row added 2026-09-02.** `createMandate` refuses `spender == address(this)`, because no path in this contract calls `spend`, so such a mandate answers `WrongSpender` for its whole life while holding its `(payer, salt)` slot permanently. Same argument as F45's expiry-in-the-past refusal, applied to the other side of the mandate. Deliberately narrower than `_isUndebitable`: USDC on Arc is a precompile and cannot originate a call, while either ERC-8004 registry sits behind an upgradeable proxy whose implementation could one day call `spend`, so refusing those three as spenders would refuse a configuration that could work |
 | Every spend moves value to somebody other than the payer | `spend`: `recipient == address(0)` → `ZeroRecipient`, and #28/F19: `recipient == m.payer` → `SelfPayment`. Both are refused ahead of the allowlist on purpose — shape before policy, so a malformed request is not answered with a configuration error. The pair is what makes `Spend` events reconcilable at all: Arc's system emitter writes no log for a self-transfer, so before F19 a spend could consume every cap, emit `Spend`, and leave nothing for a reconciler to match against. Mirrored in `approveCosignFor`, since `m.payer` has one write site and no mutator, so an approval naming the payer could never be consumed |
 | Every spend moves value somewhere it can move again | **Row added 2026-08-29 — F29.** `spend`: `recipient == address(this) \|\| recipient == address(usdc)` → `UnrecoverableRecipient`, mirrored in `approveCosignFor`. This contract calls exactly one balance-moving token function, the `transferFrom` in `spend`, and that always pays a third party, so USDC credited to `address(this)` has no exit and no upgrade path can add one. Refused in code rather than left to `F_ALLOWLIST`, because the allowlist is optional and this hazard is not |
 | A mandate id is unique to one payer forever | id = `keccak256(DOMAIN, chainid, this, msg.sender, salt)`; `payer != address(0)` → `MandateExists`. `payer` is never cleared, so an id is single-use permanently and no revoked mandate's storage can be reinterpreted |
@@ -658,7 +659,7 @@ setters, no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade
 | A compromised agent can shut itself off | `revoke` also accepts the spender |
 | Caps hold even if the token misbehaves | see F7 — this is stronger than the source claims |
 | Authority follows the ERC-8004 agent identity, and dies when the identity moves | **Row added 2026-08-28; its absence is F27's other half.** `spend` at `:725` calls `_checkIdentity`, which reads `ownerOf(agentId)` live and refuses `IdentityNotHeld` unless the caller still holds it — so selling or burning a transferable identity NFT kills the mandate rather than transferring authority with the token. Read at **spend** time, not grant time, which is the whole value of the gate. The second guard on the next line, `expectedOwner`, adds nothing to this and can only subtract — which is why, since 2026-08-29, `createMandate` accepts it only as zero or the spender. See **F27** for the finding and **F33** for the guard |
-| A gate a payer configures can actually open | **Row added 2026-08-29 — F33 and F34.** `createMandate` refuses four configurations that would make every spend revert for the life of the mandate: `identity.agentId == 0`, an `expectedOwner` naming anyone but the spender, `credential.minResponse > 100`, and `credential.requestHash == 0`. Each reads at the call site like extra strictness and is a brick. The mandate is checked for openability at the one moment it can still be edited, which is the same argument #22's `Unbounded` refusal makes about caps |
+| A gate a payer configures can actually open | **Row added 2026-08-29 — F33 and F34; the fourth item's reading corrected 2026-09-02.** `createMandate` refuses four configurations that would make every spend revert for the life of the mandate: `identity.agentId == 0`, an `expectedOwner` naming anyone but the spender, `credential.minResponse > 100`, and `credential.requestHash == 0`. The first three read at the call site like extra strictness and are bricks. The fourth is a brick in the ordinary case and worse in one reachable case: zero is an occupied key on Arc Testnet, so a mandate keyed there reads a stranger's record and can pass a failed attestation rather than only reverting — see F34 for the four settings that combination needs. The mandate is checked for openability at the one moment it can still be edited, which is the same argument #22's `Unbounded` refusal makes about caps |
 | A freshness requirement can measure the age of what it accepts | **Row added 2026-08-29 — F31.** `_checkCredential` refuses `lastUpdate > nowTs` outright rather than treating it as fresh. The condition it replaced existed to stop an unsigned subtraction underflowing and did so by exempting future-dated attestations from `maxStaleness` altogether, so one stamp ahead of the chain clock bought a credential that never went stale. The underflow is still impossible, by short-circuit rather than by the old conjunct |
 | A pre-flight view agrees with the spend path, or says which question it answered | **Row added 2026-08-29 — F35 and F36.** `isAllowedRecipient` now applies every recipient rule `spend` applies and answers `false` for an unknown mandate; `isCosignApproved` now folds in `_isPermanentlyDead`, so a revoked or expired mandate no longer reports its stored approvals as honourable. Both are scoped in their own docstrings to what they do **not** cover, because these views are used as pre-flight checks and a `true` the contract then refuses is the display-versus-enforcement gap this document is mostly about. Not reachable by the mutation gate — it rewrites `revert` statements and a view has none, which is why both were found by reading the views against `spend`. **F38 tested the claim a day later and it held for the wrong reason**: `isAllowedRecipient` did apply every rule `spend` applied, and two of those rules were short by the same two addresses, so the agreement was real and the shared list was wrong. Since the fix, the view and both refusals read one helper, which makes the agreement structural rather than something a reader has to re-check |
 | A gated mandate stops working when a named validator stops vouching for the agent | `spend` at `:726` calls `_checkCredential`, which refuses unless the ERC-8004 `getValidationStatus` tuple shows the payer's **named validator** answering about the payer's **named agent** with `response >= minResponse`, fresh within `maxStaleness`. Checking the tuple rather than `response` alone is what makes it a gate at all, since the registry is keyed on `requestHash` and anyone may file under any hash. Also spend-time: a lapsed attestation stops the mandate with no action from the payer, and re-attesting revives it. Both gates are independent and both must pass; neither implies the other. Bounded by **F13** (the registries are still not consulted until spend time — F33 and F34 validate the gate's *configuration* at grant time, which is a different claim and does not read the registry), **F23** (the registries are an unnameable trust boundary) and the documented weakening in `test/Gates.t.sol`'s `test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent` |
@@ -823,6 +824,10 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F44 bit 7 of `flags` stored, returned, and enforced by nothing | **DONE in `9b701ee`, 2026-09-01.** 1 constant and 1 guard, 3 tests. Cheap to fix and expensive to leave, because this contract is immutable and its own comment promises bit 7 to a later version, so a mandate created today with the bit set would read to that version as carrying a check this one never applied | — |
 | ✅ F45 an expiry already past accepted at creation | **DONE in `9b701ee`, 2026-09-01.** 1 guard, 3 tests — and the one row here whose evidence had to be rebuilt, because the new guard sits under an older one that raises the same error and retired the older guard's test until the mutation gate caught it | — |
 | ✅ F46 the cosign deadline bound answered above the liveness pair | **DONE in `9b701ee`, 2026-09-01.** 3 lines moved, 1 test. No permission changes and no state differs, so the whole cost is a co-signer sent to fix the wrong field and charged gas a second time to learn the mandate was dead | — |
+| ✅ F47 a nonce a co-signer could lock and the payer could not free | **DONE 2026-09-02, in the commit that added F47 through F50.** 1 new function (`clearReservation`, payer-only, 3 guards and a conditional emit), 1 new event, and no new error — `NotAuthorised` names authority rather than a role, so the `26 + 4 + 9 = 39` arithmetic holds. Plus 3 comment blocks: the reason the reservation check stays above the threshold comparison, the co-signer's half that has no fix in code, and a scoped sentence in `revoke` that no longer promises two roles at every site. **Tests and the `reference/policy.js` counterpart are owed**, and F30's row is the precedent that a release belongs in the model | **DECIDED 2026-09-02: the payer gets the release, and the delegate never does.** Moving the reservation check below the threshold branch was the report's suggestion and is refused — `_usedNonce` is written for every passing spend, so a one-cent payment would burn a nonce and void a live co-signature |
+| ✅ F48 a mandate naming this contract as its own spender | **DONE 2026-09-02, in the commit that added F47 through F50.** 1 guard and 1 invariant row in §3, carrying F45's reasoning onto a second field. Deliberately narrower than `_isUndebitable`: that helper asks whether money can come back, this asks whether the address can originate a call, and the two answers separate for three of the four addresses. **1 test owed** | — |
+| ✅ F49 a successful answer that will not decode escapes the `catch` | **DONE 2026-09-02, in the commit that added F47 through F50.** 1 new error `RegistryHasNoCode(address)` and 2 constructor guards, which close F24's guard half at the place the addresses are set rather than where they are read, since both are `immutable`. Plus a comment at each `try` stating what the arm covers, and a third comment recording the `_usdc` guard that was left out on purpose. **2 tests owed**, one per half, each the control for the other | **OPEN, and only Arc can answer it: whether `EXTCODESIZE` on the USDC precompile returns non-zero.** If it does, the symmetrical third constructor guard becomes available; if it returns zero, that guard would refuse this contract's own production deployment. One `cast code` settles it and §5 now carries it |
+| ✅ F50 two checks no view returned, and a third view that understated itself | **DONE 2026-09-02, in the commit that added F47 through F50.** 2 views, `getIdentityGate` and `getCredentialGate`, plus the enforced-span derivation added to `getWindow`. The views read unambiguously only because F32, F33 and F34 refuse the configurations that would give a zeroed struct a second meaning, so this row rests on three earlier fixes. **Tests owed** | **`MandateCreated`'s missing `cosigner` and `cosignThreshold` are held out deliberately** — adding fields changes `topic0`, which is cheap only while v2 is unreleased, so it is a decision and it is tracked on its own |
 | §5 coverage gaps | **1 test, 4 testnet transactions, later the same day on 2026-08-30.** Six tests landed in `test/Windows.t.sol` and four items came off together — the four-window maximum-cost spend and all three window geometries — which is the largest single drop this row has recorded, and the four fell to one commit because they shared one file and one harness. What remains is 1 spend through a `minResponse` between 1 and 99, which is a decision before it is a test, and F34's OPEN cell in this table holds that same question. **Three findings landed after this layer was written and the count stayed at 1**, because F38, F39 and F40 each arrived with the Solidity and model tests their fix needs, so none of them opened a gap of the kind this row counts. **F41 makes it four and the count still holds at 1**, and for a different reason worth separating: F41 changes no guard, so it owes no mutation either, and the test it brought closes a cell — the long-window arithmetic — that this row had never listed, so it cannot come off a tally it was never on. What the first three did open is four hand mutations, which are owed and are recorded in §5, and they sit outside this tally under the rule the next sentence states. The gas measurement the maximum-cost item asked for stays out of this count, for the reason the view-reaching mutation operator stays out: a measurement is not a test. The layer this replaces follows, reading as it did. **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
 
 **Three rows in this table said "uncommitted" for two days after the commit landed, and six findings
@@ -831,7 +836,9 @@ named it that day, while the cells above kept the weaker claim until 2026-09-01 
 two places, drifting in the copy a reader meets first. F41 through F46 were absent for the plainer
 reason that a finding gets its section written and its row forgotten; F12 is the only finding
 deliberately outside the table, and the paragraph below says why. Both are repaired above, and F38
-said it first: a mirror that is a copy eventually falls out of step.
+said it first: a mirror that is a copy eventually falls out of step. **F47 through F50 arrived with
+their rows on 2026-09-02**, written in the same change as their sections, which is the practice this
+paragraph exists to establish.
 
 F12 is a design consequence rather than a defect and needs nothing. Nothing on this list risks funds in
 the sense of letting a spend exceed a granted cap; the window search found no such case in 3.0M
@@ -2232,7 +2239,12 @@ other four do not, and that folds into F18's documentation pass.
 
 ### F24 — The grant-time registry guard is an address check, not a code check
 
-**Severity: low · Status: open, and one of its two possible answers is not something this pass can settle · Confidence: certain about the guard, explicitly unresolved about the consequence.**
+**Severity: low · Status: the guard half is FIXED — the constructor now refuses a non-zero registry
+with no code and raises `RegistryHasNoCode` — and the consequence half is DOCUMENTED as F49, where
+the reasoning is stated and the empirical test is still owed. The status line below the fix read
+"open, and one of its two possible answers is not something this pass can settle", which was true of
+the whole finding until 2026-09-02 · Confidence: certain about the guard, resolved by argument and
+not yet by execution about the consequence.**
 
 `createMandate` refuses a flag whose registry is missing — `v2:447` for `F_CREDENTIAL`,
 `v2:448` for `F_IDENTITY`, both `BadConfig` — and `test_createMandate_gateWithoutRegistry_reverts`
@@ -2256,12 +2268,17 @@ selector. **No test covers it**, because `Base.t.sol`'s `setUp` constructs the m
 live mocks and the one inside `test_createMandate_gateWithoutRegistry_reverts` is the only
 other construction, using zero.
 
-The test that settles it is four lines and belongs in #23:
-`new MandateManager(address(token), address(0xdead), address(0xdead))`, grant a mandate with a
-registry flag set (which now succeeds, since `0xdead != address(0)`), spend, and assert
-whichever revert actually comes back. Note the same class applies to `_usdc`, which `v2:359`
-zero-checks and does not code-check — a codeless non-zero USDC makes every spend fail at
-`v2:713` instead.
+The test that settles it is four lines and belongs in #23, and the fix changed its shape.
+`new MandateManager(address(token), address(0xdead), address(0xdead))` reverts at construction now, so
+that call becomes `vm.expectRevert(RegistryHasNoCode.selector)` and proves the guard. Settling what
+`catch` does needs the other half: a stub registry that holds code and answers with zero bytes,
+reached through a mandate with a registry flag set, then a spend, asserting whichever revert comes back.
+F49 states the expected answer and the two routes that remain reachable. Note the same class
+applies to `_usdc`, which `v2:359` zero-checks and does not code-check — a codeless non-zero USDC
+makes every spend fail at `v2:713` instead — and the constructor deliberately leaves that third check
+out: Arc's USDC is the precompile at 0x3600...0000, whose `EXTCODESIZE` answer is a property of Arc's
+client rather than of this repository, and a guard that is wrong there would refuse the one deployment
+that matters. Reading that code size on Arc Testnet is owed in §5.
 
 **Why this is only low severity, and why it is recorded anyway.** It is a deployment error
 rather than an attack, and one that shows up on the first spend that consults a registry, yet
@@ -2870,7 +2887,7 @@ refuses a brick rather than a use.
 
 ### F34 — Two credential settings did the same thing, and the fix for one of them leaves a decision open
 
-**Severity: medium for the defects, and the open decision below is the reason this entry matters after the fix. Both settings produce a mandate whose every spend reverts, and the revert reads like strictness working · Status: FIXED in `af9df40`, with one bound deliberately left loose and named here · Confidence: certain for both defects; the open question turns on ERC-8004's scoring semantics rather than on this contract.**
+**Severity: medium for the defects, and the open decision below is the reason this entry matters after the fix. The threshold above 100 produces a mandate whose every spend reverts, and the revert reads like strictness working; the zero hash usually does the same and, under the four settings named below, passes a failed attestation instead · Status: FIXED in `af9df40`, with one bound deliberately left loose and named here; the zero-hash reasoning corrected 2026-09-02 · Confidence: certain for both defects; the open question turns on ERC-8004's scoring semantics rather than on this contract.**
 
 `Params.credential.minResponse` is a `uint8`, documented at `:337` as `ERC-8004: 100 == passed`. Two
 values could not be met.
@@ -2879,10 +2896,23 @@ values could not be met.
 `minResponse = 101` refuses every attestation the standard can produce. The mandate is born dead and,
 at the call site, indistinguishable from a payer asking for something stricter than usual.
 
-**A zero request hash.** `requestHash` is the whole registry lookup key. `getValidationStatus(0)` names
-no request, so it answers with an empty record, the zero-validator check refuses it, and
-`CredentialMissing` is the only outcome that mandate can reach. This is the credential twin of F33's
-zero agent id.
+**A zero request hash.** `requestHash` is the whole registry lookup key, and zero is the value a caller
+reaches by leaving the field alone. The reason recorded here when this was fixed pointed the wrong way:
+it read that `getValidationStatus(0)` names no request, so it answers with an empty record, the
+zero-validator check refuses it, and `CredentialMissing` is the only outcome that mandate can reach.
+**Corrected 2026-09-02**, from evidence this repository already held. The live probe of 2026-08-24 found
+a real record filed under `bytes32(0)` — validator `0xB152c3B6436318aD340153f1d30C9BBb8634681A`, agentId
+`16330`, response `1`, tag `"verified"` — which `test/mocks/MockRegistries.sol:68-72` keeps and
+`DESIGN.md` reads as a failed attestation carrying a passing label.
+
+Zero is therefore an occupied key, and a mandate keyed there reads whatever a stranger filed. Usually the
+filed validator differs from the one the payer named, so the reachable outcome is
+`CredentialWrongValidator` rather than `CredentialMissing`, and the mandate is still born dead. The case
+the old reason ruled out is the one worth naming: four settings, two of them defaults — the validator
+above copied from an explorer, `minResponse` of 1, no agent binding, and no freshness rule — pass a
+failed attestation about an agent the mandate never named. The guard is unchanged and was always
+pointing the right way; what changes is what it is understood to protect against. This is the credential
+twin of F33's zero agent id.
 
 ```solidity
 if (p.credential.minResponse > 100) revert BadConfig();   // :906
@@ -3569,6 +3599,170 @@ which of two errors arrives, and only the returned selector can say which one th
 
 
 
+### F47 — A co-signer could lock one nonce for thirty days, and the payer had no route to release it
+
+**Severity: low, and bounded — one nonce per reservation, at most `MAX_COSIGN_TTL`, and it bites only
+a payer whose nonces are derived rather than random · Status: FIXED, `clearReservation` added
+· Confidence: certain; the mechanism is three existing lines and the missing route is visible in the
+function list.**
+
+F30 gave every approval a reserved nonce so that no other spend could burn a nonce a co-signer had
+already put their signature behind. The reservation is read in `spend` before the amount is compared
+to `cosignThreshold`, so while an approval is live that nonce is refused for a spend of any size,
+including one far below the threshold. That ordering is deliberate and it stays: `spend` marks
+`_usedNonce` for every payment that passes the check, so reading the threshold first would let a
+one-cent payment burn a nonce and void a live human decision. The delegate is the party this
+contract trusts least, and that is the party the alternative ordering would hand the power to.
+
+**What was missing is a route, not a condition.** Three parties can be affected by a reservation and
+only two could end one. `withdrawCosign` serves the co-signer, F39's sweep clears a reservation whose
+approval has lapsed, and the payer — who owns the funds and the mandate — had nothing. The gap has a
+reachable shape because F17 mirrors only the PERMANENT refusals, and leaves out `notBefore`, the
+recoverable half of a window cap and the two ERC-8004 checks on purpose, each of them being a refusal
+that can come good later. A co-signer can therefore put a signature behind a request whose spend is
+refused, and two of those three can stay refused for the approval's whole life: F41 returns window
+room only after `lengthSeconds + subLength`, so a window at or past `MAX_COSIGN_TTL` never gives it
+back inside an approval's thirty days, and a credential that is never filed never comes good at all.
+Throughout, the reserved nonce refuses every spend that names it, sub-threshold ones included.
+
+`clearReservation(mandateId, nonce)` is the fix, payer-only, and it deletes the reservation while
+leaving `_cosignApproved` untouched. The asymmetry with `withdrawCosign` is the point: the co-signer
+answers *this approval was wrong* and takes the authority back, while the payer answers *this nonce
+is stuck* and frees the key without touching anyone's authority. It raises `NotAuthorised` rather
+than adding a fortieth error, because that error names authority instead of a role and carries no
+claim about which role would have had it; `revoke`'s NatSpec was scoped so it no longer reads as a
+promise that two roles hold every site.
+
+**Releasing a reservation grants nothing directly and does grant something indirectly**, which is
+why the guard is the payer alone. A reservation is a refusal, so removing one adds no authority; what
+it does is let a later sub-threshold spend consume that nonce, which can leave the co-signer's
+approved hash unspendable. The payer may do that because `revoke` already takes every approval on the
+mandate at once, so this is a strictly smaller power in the same hands. For the delegate it would be
+a new one, and F47 exists to keep it out of those hands.
+
+**The other half has no fix in code, and it is documented at the guard instead.** Any spend that
+succeeds consumes its nonce, so between the moment a co-signer picks a nonce and the moment
+`approveCosignFor` is mined the delegate can take that nonce with an ordinary small payment. The
+co-signer meets `NonceAlreadyUsed` and the remedy is a fresh nonce at the price of one more
+signature, with `isNonceUsed` available before the signature is produced. Dropping that pre-check to
+let the approval through would store an approval no spend can consume, which is the exact shape F17
+exists to refuse, so the refusal stays and its cost is now written beside it.
+
+---
+
+### F48 — A mandate could name this contract as its own spender, buying an authority no caller can exercise
+
+**Severity: low — self-inflicted and refused on the first attempt to use it; the loss is the salt
+· Status: FIXED, one guard in `createMandate` · Confidence: certain; `spend` compares `msg.sender`
+against `m.spender` and no path in this contract calls `spend`.**
+
+F45 refused an expiry already in the past on the reasoning that a payer should not be able to pay for
+authority that reverts on its first use while permanently consuming the `(payer, salt)` slot. The same
+reasoning reaches one more field. `spend` requires `msg.sender == m.spender`, and this contract calls
+`spend` from nowhere, so a mandate whose spender is `address(this)` answers `WrongSpender` for its
+whole life. `revoke` never frees the identifier, so the salt is spent as well as the grant.
+
+**Why the guard is narrower than `_isUndebitable`.** The recipient test asks whether money sent to an
+address can come back out, and it refuses four addresses on that ground. The spender test asks a
+different question — whether the address can originate a call — and the two answers separate. USDC on
+Arc is a precompile and cannot call anything, so it would fail both tests; either ERC-8004 registry
+sits behind an upgradeable proxy whose implementation could one day call `spend`, so refusing those as
+spenders would refuse a configuration that could work. Only this contract is refused, and only
+because its own code is fixed and contains no such call. §3 carries the invariant row, deliberately
+worded as *the named spender is an address that can call* rather than as a copy of the recipient rule.
+
+**What this does not claim.** A payer can still name an address they do not control, an address with
+no code, or a contract that will never call `spend`, and all three are legal. The rule this contract
+can enforce is the one it can decide from its own bytecode, and every wider version would require
+guessing at a stranger's intent.
+
+---
+
+### F49 — A registry that answers successfully with data that will not decode reverts past the `catch` arm
+
+**Severity: low — every outcome is a refusal, and the difference is which revert the payer reads
+· Status: half FIXED in the constructor, half DOCUMENTED at both call sites, and the empirical test
+is still owed · Confidence: high on the mechanism, which is stated Solidity behaviour; the owed test
+is what turns high into certain.**
+
+Both ERC-8004 reads sit inside `try`/`catch`, and the arm covers less than it appears to. Solidity
+enters `catch` when the call itself returns false, so a call that succeeds and returns data which
+cannot be decoded into the declared types raises its revert while decoding, inside this contract's own
+frame, past the arm. `_checkIdentity` declares one `address`, which needs a full clean word;
+`_checkCredential` declares a six-component tuple containing a dynamic `string`, which additionally
+needs offsets inside the returned data and a length no larger than what follows it. Any answer that
+misses those requirements reverts with empty return data in place of `IdentityNotHeld` or
+`CredentialMissing`.
+
+**This is F24's unresolved consequence, and one of its two halves is now closed.** F24 recorded that
+`createMandate` compares a registry against `address(0)` and never against its code size, so a
+non-zero codeless address passes, and that a `STATICCALL` to such an address succeeds while returning
+nothing. The constructor now refuses a non-zero registry with no code and raises
+`RegistryHasNoCode(address)`, which places the check where the addresses are set rather than where
+they are used — they are `immutable`, so past that line the only remedy is a fresh deployment.
+`script/Deploy.s.sol` already ran the same test, and a script protects only deployments that use it.
+
+**What stays open is a registry that keeps its code and changes its answer.** The plainest route is
+the one this repository already records: `test/mocks/MockRegistries.sol` documents the live registries
+sitting behind ERC-1967 proxies, and a proxy pointed at a codeless implementation returns zero bytes
+while holding code of its own, so the constructor's check would have passed at deployment. A contract
+with an unrelated ABI at a plausible-looking address does the same. The result is a spend refused with
+no selector, which costs the payer gas and reads as a chain fault rather than as a policy answer; the
+mandate can be revoked and the allowance withdrawn, and no funds move either way.
+
+**Manual decoding was considered at both sites and declined.** Replacing the typed return with a
+low-level call plus a hand-written bounds check would let each site answer in its own error, and it
+would also move the type check from the compiler into this file. On the credential path the dynamic
+`string` makes that check the same work the decoder already performs correctly, and an error in it
+would read a value from the wrong offset rather than reverting — turning a refusal into a wrong
+answer, which is the one outcome worse than an opaque revert. The declared tuples stay and the limit
+is stated beside each of them.
+
+**The owed test is F24's, with its shape changed by the fix.** Constructing a manager with
+`address(0xdead)` for either registry now reverts at construction, so the test becomes
+`vm.expectRevert(RegistryHasNoCode.selector)` for that half, plus a stub registry that holds code and
+returns zero bytes for the half that settles what `catch` does. Both belong in the same file, since
+each is the control for the other.
+
+---
+
+### F50 — Two of the checks a mandate carries were returned by no view, and a third view understated what it enforces
+
+**Severity: low — no funds at risk; what it costs is the ability to audit a mandate from the chain
+· Status: FIXED, two views added and one comment corrected · Confidence: certain; the two mappings
+were read in exactly one place each.**
+
+`_identity` and `_credential` are written by `createMandate` and read inside `_checkIdentity` and
+`_checkCredential`, and nothing returned them. `MandateCreated` carries `flags`, which says that an
+identity check applies, and not the agent id it applies to, so the only way to recover the settings a
+payer chose was to decode the calldata of the transaction that granted them. Remit is granted to
+strangers and read by third parties who did not send that transaction, and a check no reader can reach
+is a check no reader can rely on. `getIdentityGate` and `getCredentialGate` return the structs as
+granted.
+
+**The zeroed return is unambiguous, and it is three earlier findings that make it so.** A mandate
+without `F_IDENTITY` returns a zeroed `IdentityGate`, which could otherwise mean either *no check* or
+*a check on agent zero*. F32 refuses identity data supplied without its flag, F33 refuses `agentId ==
+0` with the flag set, and F34 refuses `requestHash == 0` on the credential side, so within this
+contract zero means no check and can mean nothing else. The two views are readable because those three
+guards exist; on a contract without them the same views would return a value with two readings.
+
+**The third part is `getWindow`, which returned the payer's own numbers back without saying what is
+enforced.** The ring holds `buckets + 1` counters and sums all of them, so the cap applies over
+`lengthSeconds + subLength` and sustained throughput settles at `buckets / (buckets + 1)` of `cap`.
+The direction is toward refusing — the cap is never exceeded over any window of the stated length —
+and the proportion is widest at `buckets == 1`, where the enforced span is twice the stated length and
+throughput is half the stated cap. F41 already used that same bound in a different argument. The
+numbers needed to compute it were in the returned struct all along, and no reader was told to compute
+them; the view's documentation now derives it.
+
+**One part is deliberately left out of this finding.** `MandateCreated` omits `cosigner` and
+`cosignThreshold`, which is the same class of defect and a different cost to fix: adding fields to an
+existing event changes its `topic0` and breaks any indexer already written against it. That is cheap
+only while v2 is unreleased, so it is a decision rather than an edit, and it is tracked separately.
+
+---
+
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
 
 Two kinds of gap are listed together because a reader deciding how much weight to put on
@@ -3988,11 +4182,24 @@ still be hiding there.
   `0x3600…0000` for whatever blocklist view it exposes, plus one `spend` attempt from a blocked
   delegate if the faucet will produce one, settles it.
 
+- **Whether Arc's USDC precompile answers `EXTCODESIZE` with anything.** Added 2026-09-02 with F49.
+  The constructor refuses a non-zero ERC-8004 registry with no code, and it deliberately leaves
+  `_usdc` unchecked, because on Arc that address is the precompile at `0x3600…0000` and its ERC-20
+  surface comes from the node rather than from deployed bytecode. If the code size reads zero, the
+  symmetrical third guard would refuse this contract's own production deployment, which is why it
+  was left out on the safe side rather than added for consistency. One `cast code 0x3600…0000`
+  against Arc Testnet answers it, and the answer decides whether that guard is available at all.
+
 **That makes four testnet transactions owed, and they are the four named above**: the
 self-transfer `Transfer` emit, the precompile `transferFrom` against a logging recipient, the
 unanswered `validationRequest` plus its `cast call`, and the spender-leg blocklist question. The
 first three are each a single observation that turns a documented argument into a measurement; the
 fourth may not be reachable on a faucet-funded account, and if it is not, it stays on this list.
+
+**A fifth item joined the list on 2026-09-02 and it is a read rather than a transaction**: the
+`cast code` above. It is grouped here because it shares the property that makes the other four
+unanswerable in this repository — only Arc can answer it — and separated in the count because it
+sends nothing and costs no gas.
 
 **One thing this pass looked for and did not find bounds how much the gaps above can be
 hiding.** The ten test files were swept for *vacuity* rather than for adversary surface,

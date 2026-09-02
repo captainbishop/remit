@@ -127,3 +127,30 @@ contract MockValidationRegistry {
         return (s.validator, s.agentId, s.response, s.responseHash, s.tag, s.lastUpdate);
     }
 }
+
+/**
+ * A registry that holds code and answers every call with zero bytes.
+ *
+ * NEW IN v2 (F49). This is the case Solidity's `catch` does NOT cover, and the mock exists so the
+ * claim is demonstrated rather than argued. `catch` runs when the call failed; here the call
+ * SUCCEEDS and returns nothing, so the revert happens while ABI decoding the empty answer into the
+ * declared return type — an `address` for the identity check, a six-field tuple for the credential
+ * check — inside MandateManager's own frame, past the catch arm. What reaches the caller is a
+ * revert with no selector at all, rather than `IdentityNotHeld` or `CredentialMissing`.
+ *
+ * The constructor's `RegistryHasNoCode` guard closes the version of this a deployer can reach by
+ * mistake, which is an address with no code behind it: EXTCODESIZE is zero, every call to it
+ * succeeds with empty returndata, and every spend on a mandate carrying one of these checks dies
+ * undecodably. This mock keeps code of its own, so that guard does not reach it, and covering
+ * what is left would mean replacing both typed calls with a raw STATICCALL and a length check on
+ * the answer. That is declined — the case left over needs a registry upgraded into returning the
+ * wrong shape, and the spend is refused either way, so the whole cost is legibility, which
+ * `MandateManager`'s comments record.
+ *
+ * A bare `fallback` is what makes one mock serve both registry positions: no function selector
+ * matches, control lands here, and an empty body returns empty returndata for whatever was asked.
+ */
+contract SilentRegistry {
+    fallback() external {}
+}
+

@@ -30,6 +30,10 @@ const {
   // NEW IN v2 (F30). The model gained a withdrawal because the nonce reservation needs a release
   // path; without one, a fix for one denial-of-service would have introduced another.
   withdrawCosign,
+  // NEW IN v2 (F47), the second release and the first one the payer can reach.
+  // `withdrawCosign` answers to the cosigner, so a nonce a cosigner chose to hold was held
+  // against the party whose funds the mandate spends.
+  clearReservation,
   MAX_AMOUNT,
   // NEW IN v2 (F3). The uint32 counter ceiling, imported beside MAX_AMOUNT because the two
   // tests that use them are twins and both assert one base unit either side of the boundary.
@@ -1161,6 +1165,7 @@ test('F30: withdrawing the approval releases the nonce, so the fix does not stra
   );
 
   // The Map entry can still be cleared outright, two ways, and neither needs the payer.
+  // F47 adds a third, `clearReservation`, and that one is the payer's alone.
   // Repeating the withdrawal with the right nonce frees it.
   assert.equal(withdrawCosign(m, BOSS, otherHash, other.nonce), false, 'nothing left to cancel');
   assert.equal(m.cosignReservedNonces.has(other.nonce), false, 'but the nonce is free');
@@ -1182,6 +1187,12 @@ test('F30: only the cosigner may withdraw, and withdrawing nothing is not an err
   const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
   const r = req(usdc('50'));
   const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  // The unknown-mandate guard, asserted on 2026-09-02 because it had no test. F47 taught the
+  // mutation gate a fourth spelling, which let `withdrawCosign` be run as a target for the first
+  // time, and this line was the survivor: neutering it left the model dereferencing null instead
+  // of naming the mistake, and the suite stayed green because no test ever called this with a
+  // mandate that was absent. The sibling guard one line below was already covered.
+  assert.throws(() => withdrawCosign(null, BOSS, hash, r.nonce), /unknown mandate/);
   for (const stranger of [AGENT, PAYER, OTHER]) {
     assert.throws(() => withdrawCosign(m, stranger, hash, r.nonce), /only the cosigner/);
   }
@@ -1254,6 +1265,89 @@ test('F30: re-approving the SAME request is allowed, so extending a deadline nee
   assert.equal(m.cosignApprovals.get(hash), BigInt(2 * DAY), 'the later deadline replaced it');
   assert.equal(m.cosignReservedNonces.get(r.nonce), hash);
   assert.equal(evaluate(m, r, { now: DAY + 1, ...DEPLOY }).allowed, true, 'past the old deadline');
+});
+
+test('F47: the payer can free a nonce the cosigner is holding, and the approval survives', () => {
+  // The release the reservation Map was missing. F30 gave the cosigner one and F39 sweeps a
+  // reservation whose approval has lapsed, which left the payer — the party whose funds and
+  // mandate these are — with no route at all.
+  //
+  // The setup is the shape F17 deliberately allows, and the test below at 'what must NOT be
+  // refused' is its other half: the mandate has not started, so the spend this approval names is
+  // refused while the approval itself is live and legal. A cosigner can therefore write one and
+  // hold the nonce for as long as it lives, up to `MAX_COSIGN_TTL`.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS, notBefore: 2 * DAY });
+  const held = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...held, validUntil: 3 * DAY }, { now: 1, ...DEPLOY });
+  assert.equal(m.cosignReservedNonces.get(held.nonce), hash, 'held from the moment it was written');
+  // While the mandate sleeps `evaluate` names the earlier refusal, and the reservation sits in
+  // the Map behind it either way.
+  assert.equal(evaluate(m, held, { now: 1, ...DEPLOY }).reason, Denial.NOT_YET_VALID);
+
+  // Once the mandate is live the reservation is what answers, and the amount does not enter into
+  // it: 5 USDC is far below the threshold, so the signature has no authority over that payment.
+  const small = { ...held, amount: usdc('5'), recipient: OTHER };
+  assert.equal(evaluate(m, small, { now: 2 * DAY, ...DEPLOY }).reason, Denial.NONCE_RESERVED);
+
+  // The payer frees the nonce. The approval stays in the Map with its deadline untouched, so the
+  // cosigner keeps every bit of authority they were granted.
+  assert.equal(clearReservation(m, PAYER, held.nonce), true, 'a reservation was there');
+  assert.equal(m.cosignReservedNonces.has(held.nonce), false);
+  assert.equal(m.cosignApprovals.get(hash), BigInt(3 * DAY), 'the approval is intact');
+  assert.equal(spend(m, small, { now: 2 * DAY, ...DEPLOY }).allowed, true);
+
+  // And the reason the caller must be the payer. The sub-threshold spend above consumed the
+  // nonce, so the cosigner's own approved request can no longer be paid — releasing a reservation
+  // grants nothing directly and does hand someone that indirectly. The payer may do it because
+  // `revoke` already takes every approval on the mandate at once, so this is a smaller power in
+  // the same hands; for the delegate it would be a new one.
+  assert.equal(evaluate(m, held, { now: 2 * DAY, ...DEPLOY }).reason, Denial.NONCE_ALREADY_USED);
+  assert.equal(m.cosignApprovals.has(hash), true, 'and the approval outlives its nonce');
+});
+
+test('F47: only the payer may clear a reservation, and without a cosigner there is none to clear', () => {
+  // Three guards in the contract's order: unknown mandate, then configuration, then authority.
+  // The middle one earns its place the way `approveCosignFor`'s does — a mandate with no cosign
+  // requirement holds no reservations, so an answer about the caller's identity would send them
+  // to fix the wrong thing.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  const hash = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+
+  assert.throws(() => clearReservation(null, PAYER, r.nonce), /unknown mandate/);
+  // The cosigner is refused here and served by `withdrawCosign`, which takes the approval with
+  // it. The two releases answer to different parties and remove different things.
+  assert.throws(() => clearReservation(m, BOSS, r.nonce), /only the payer/);
+  assert.throws(() => clearReservation(m, AGENT, r.nonce), /only the payer/);
+  assert.throws(() => clearReservation(m, OTHER, r.nonce), /only the payer/);
+  assert.equal(m.cosignReservedNonces.get(r.nonce), hash, 'and none of them moved it');
+
+  assert.throws(
+    () => clearReservation(simpleMandate(), PAYER, r.nonce),
+    (err) => {
+      assert.equal(err.code, ApprovalRefusal.BAD_CONFIG, err.message);
+      return true;
+    },
+  );
+});
+
+test('F47: clearing a nonce that holds no reservation is a no-op rather than a revert', () => {
+  // Matching `withdrawCosign` and the contract: the post-state the caller asked for is the
+  // post-state they get. The contract emits `ReservationCleared` only when one was there, so the
+  // boolean here carries the same fact the log does.
+  const m = simpleMandate({ cosignThreshold: usdc('25'), cosigner: BOSS });
+  const r = req(usdc('50'));
+  assert.equal(clearReservation(m, PAYER, r.nonce), false, 'nothing was reserved');
+
+  approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  assert.equal(clearReservation(m, PAYER, r.nonce), true);
+  assert.equal(clearReservation(m, PAYER, r.nonce), false, 'and a second call changes nothing');
+
+  // The nonce is free for the cosigner as well: re-approving the same request writes the
+  // reservation back, so the payer's release costs one signature rather than the request.
+  const again = approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1, ...DEPLOY });
+  assert.equal(m.cosignReservedNonces.get(r.nonce), again);
+  assert.equal(spend(m, r, { now: 1, ...DEPLOY }).allowed, true, 'and it still pays');
 });
 
 test('F39: a lapsed approval stops holding its nonce, and a live one still holds it', () => {

@@ -291,6 +291,18 @@ const NEUTERINGS = [
   ['throw refuse(', 'void refuse('],
   ['return deny(', 'void deny('],
   ['throw new Error(', 'void new Error('],
+  // THE FOURTH SPELLING WAS ADDED ON 2026-09-02 WITH F47, AND IT REACHES TWO MORE FUNCTIONS THIS
+  // SCRIPT HAD NEVER TOUCHED. A coded refusal outside `approveCosignFor` has no local `refuse`
+  // helper to call, so `withdrawCosign` and `clearReservation` build the error across three lines
+  // and end on a bare `throw err;`. None of the three markers above appears on any of those
+  // lines, so both guards sat here unmutated while reading like every other refusal in the file —
+  // `withdrawCosign`'s since 2026-08-28. `void err;` is a valid expression statement and removes
+  // only the transfer of control, exactly like the other three.
+  //
+  // The code this refusal carries sits on the line ABOVE the marker instead of after it, so the
+  // label search has to look backwards for this spelling alone; `lookBack` says so, and the other
+  // three keep the forward-only search that already names them correctly.
+  ['throw err;', 'void err;', { lookBack: true }],
 ];
 
 const removalTargets = [];
@@ -323,9 +335,12 @@ if (removalTargets.length === 0) {
 // matches `'([^']*)'` earlier than the real message does and wins. That was luck rather than
 // design in the two-spelling version: every `refuse(`/`deny(` call sits on a line of its own with
 // no prose around it.
-function labelFor(blob, from) {
+function labelFor(blob, from, opts) {
   const at = blob.indexOf(from);
-  const tail = at === -1 ? blob : blob.slice(at + from.length);
+  // `lookBack` searches the whole blob rather than the part after the marker, because the three
+  // -line coded refusal puts its code and its message above the `throw`. Only the fourth spelling
+  // asks for it, so the labels the other three already print are unchanged.
+  const tail = opts && opts.lookBack ? blob : at === -1 ? blob : blob.slice(at + from.length);
   const code = /(ApprovalRefusal|Denial)\.[A-Z_]+/.exec(tail);
   if (code) return code[0];
   const msg = /'([^']*)'|"([^"]*)"|`([^`]*)`/.exec(tail);
@@ -336,9 +351,9 @@ function labelFor(blob, from) {
   return text.length > 56 ? `${text.slice(0, 56)}…` : text;
 }
 
-for (const [ln, [from, to]] of removalTargets) {
-  const blob = original.slice(ln - 1, ln + 2).join(' ');
-  const code = labelFor(blob, from);
+for (const [ln, [from, to, opts]] of removalTargets) {
+  const blob = original.slice(opts && opts.lookBack ? ln - 3 : ln - 1, ln + 2).join(' ');
+  const code = labelFor(blob, from, opts);
   const mutated = original.slice();
   mutated[ln - 1] = mutated[ln - 1].replace(from, to);
   results.push({ kind: 'removed', label: `${code} (line ${ln})`, ...runAgainst(mutated) });

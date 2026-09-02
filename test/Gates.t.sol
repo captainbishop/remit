@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {Base} from "./Base.t.sol";
 import {MandateManager} from "../contracts/MandateManager.sol";
+import {SilentRegistry} from "./mocks/MockRegistries.sol";
 
 /**
  * The two ERC-8004 checks: does the spender still hold the agent identity the payer
@@ -398,5 +399,66 @@ contract GatesTest is Base {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.clear(KYC_HASH);
         payReverts(id, usd(5000), MandateManager.CredentialMissing.selector);
+    }
+
+    // ============================== F49: what try/catch covers, and what it does not
+
+    /**
+     * F49, and the reason the constructor now refuses a codeless registry.
+     *
+     * Every other test in this file relies on `catch` turning a registry failure into a legible
+     * denial. `catch` runs when the CALL failed. A registry that answers successfully with data
+     * that will not decode into the declared return type fails somewhere else entirely: the revert
+     * is raised while decoding, inside MandateManager's own frame, so the catch arm never runs and
+     * what reaches the agent carries no selector at all.
+     *
+     * The mock holds code and returns zero bytes for whatever is asked, which is what an address
+     * with no code does as well — every call to it succeeds with empty returndata. That is the
+     * version a deployer reaches by mistake, by pasting an address from the wrong chain, and the
+     * constructor's `RegistryHasNoCode` guard refuses it before the deployment exists. This mock is
+     * past that guard by having code, which is why it is a contract rather than an EOA address:
+     * it stands for the case the guard cannot reach, a registry upgraded into returning the wrong
+     * shape.
+     *
+     * That residual case is documented rather than handled. Covering it means replacing both typed
+     * calls with a raw STATICCALL and validating the answer's length by hand, and the spend is
+     * refused either way, so the whole difference is legibility. What this test buys is that the
+     * claim is demonstrated: anyone who later reads the try/catch as covering decode failure has a
+     * failing assertion to read instead.
+     */
+    function test_f49_aRegistryThatAnswersUndecodably_revertsPastTheCatch() public {
+        SilentRegistry silent = new SilentRegistry();
+        assertTrue(address(silent).code.length > 0, "past the constructor guard, which is the point");
+
+        // The identity path decodes an address, so 32 bytes are needed and none arrive.
+        MandateManager mmIdentity = new MandateManager(address(token), address(silent), address(validation));
+        vm.prank(payer);
+        token.approve(address(mmIdentity), type(uint256).max);
+        MandateManager.MandateParams memory idParams = withIdentity(simpleParams(), AGENT_ID, agent);
+        vm.prank(payer);
+        bytes32 idGate = mmIdentity.createMandate(bytes32("f49-identity"), idParams);
+
+        vm.prank(agent);
+        (bool ok, bytes memory err) =
+            address(mmIdentity).call(abi.encodeCall(MandateManager.spend, (idGate, vendor, usd(10), REF, nextNonce())));
+        assertFalse(ok, "the spend is refused, which is the half that was never in doubt");
+        assertEq(err.length, 0, "F49: a decode failure carries no selector, so `catch` did not run");
+
+        // The credential path decodes six fields including a dynamic string, so it needs at
+        // least 192 bytes, and the empty answer fails it the same way. Both paths are
+        // asserted because the two calls sit in different helpers.
+        MandateManager mmCredential = new MandateManager(address(token), address(identity), address(silent));
+        vm.prank(payer);
+        token.approve(address(mmCredential), type(uint256).max);
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
+        vm.prank(payer);
+        bytes32 credGate = mmCredential.createMandate(bytes32("f49-credential"), p);
+
+        vm.prank(agent);
+        (ok, err) = address(mmCredential).call(
+            abi.encodeCall(MandateManager.spend, (credGate, vendor, usd(10), REF, nextNonce()))
+        );
+        assertFalse(ok);
+        assertEq(err.length, 0, "F49: and the six-field tuple decodes no better than the address");
     }
 }

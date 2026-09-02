@@ -489,8 +489,26 @@ contract MandateManager {
     ///
     /// @param mandateId The mandate.
     /// @param spendHash The spend that is not approved after this call.
-    /// @param cosigner The caller, which is the co-signer alone — the payer cannot withdraw.
+    /// @param cosigner The caller, which is the co-signer alone. The payer has no route to an
+    /// approval and never had one; what v2 gives the payer is `clearReservation`, which releases
+    /// a nonce and leaves the approval standing. The two events are separate so an indexer can
+    /// tell an authority that was taken back from a nonce that was freed.
     event CosignWithdrawn(bytes32 indexed mandateId, bytes32 indexed spendHash, address indexed cosigner);
+
+    /// @notice A reserved nonce was released by the payer.
+    ///
+    /// NEW IN v2 (F47). `approveCosignFor` reserves the nonce it is given so that no other spend
+    /// can burn it while the approval is live, and before this the reservation could only end
+    /// through the co-signer or through the approval expiring. Emitted only when a reservation
+    /// was actually there, in the style of `CosignWithdrawn` above, so it reads as proof that
+    /// one existed. The approval it belonged to is untouched, which is the whole difference
+    /// between this event and the one above it.
+    ///
+    /// @param mandateId The mandate.
+    /// @param nonce The nonce that is free after this call.
+    /// @param spendHash The hash the reservation was holding it for, so the co-signer whose
+    /// approval is affected can find it from the log alone.
+    event ReservationCleared(bytes32 indexed mandateId, bytes32 indexed nonce, bytes32 spendHash);
 
     // ---------------------------------------------------------------------
     // Errors.
@@ -500,15 +518,16 @@ contract MandateManager {
     // reasons and all 4 of its `ApprovalRefusal` codes have an error below with the
     // same name — that is the direction that matters, because a denial the contract
     // could not express would be a real divergence. The reverse does not hold:
-    // eight of the errors below have no model counterpart of any kind, because the
+    // nine of the errors below have no model counterpart of any kind, because the
     // model reports those conditions by THROWING rather than by naming a code. They
     // are MandateExists, Unbounded, BadWindow, NotAuthorised, MixedPayers,
     // DuplicateMandate and TooManyMandates — all caller or grant-time mistakes
     // rather than policy outcomes — plus TransferFailed, which the model cannot have
-    // an opinion about because it has no token.
-    // 26 + 4 + 8 = 38, which is the number of `error` declarations below. Derived from
-    // both files on 2026-08-30 by mapping each code to its PascalCase name, not counted
-    // by eye.
+    // an opinion about because it has no token, and RegistryHasNoCode, which belongs
+    // to a deployment step the model never performs.
+    // 26 + 4 + 9 = 39, which is the number of `error` declarations below. Derived from
+    // both files on 2026-08-30, and the ninth term added on 2026-09-02, by mapping each
+    // code to its PascalCase name rather than counting by eye.
     //
     // SpendCountCeiling is the newest of the 26, and the one whose mirror took an
     // argument to settle: JavaScript has no uint32, and the condition sits 2^32 spends
@@ -641,6 +660,11 @@ contract MandateManager {
     error Unbounded();
     error BadWindow();
     error BadConfig();
+    /// NEW IN v2, raised only by the constructor. A registry address that is non-zero and
+    /// holds no code is a different mistake from a zero one and `BadConfig()` could not
+    /// separate them, so this names the address instead: all three wiring arguments are
+    /// immutable, which makes the diagnosis worth more than a shared selector.
+    error RegistryHasNoCode(address registry);
     error NotAuthorised();
     error NotCosigner();
     error AmountTooLarge();
@@ -667,6 +691,11 @@ contract MandateManager {
      * later — so a missing registry cannot produce a mandate that grants cleanly and then
      * refuses every spend.
      *
+     * A registry that is non-zero and holds no code is the opposite mistake and is refused
+     * here, for F24's reason. USDC is deliberately not code-checked, and
+     * `script/Deploy.s.sol` records at length why: Arc's USDC is a precompile, so a code
+     * length of zero there is the expected reading rather than a wiring error.
+     *
      * @param _usdc The ERC-20 a spend moves. Every cap in this contract is denominated in
      * its smallest unit, not in whole tokens.
      * @param _identityRegistry ERC-8004 IdentityRegistry, read by the `F_IDENTITY` gate.
@@ -674,6 +703,35 @@ contract MandateManager {
      */
     constructor(address _usdc, address _identityRegistry, address _validationRegistry) {
         if (_usdc == address(0)) revert BadConfig();
+        // F24, and the contract half of the same check `script/Deploy.s.sol` already runs.
+        // Zero says the ERC-8004 lookups are unavailable, and `createMandate` refuses every
+        // flag that needs one. Non-zero with no code says the opposite while meaning the
+        // same: the grant succeeds, and the first spend reaches a STATICCALL that returns
+        // zero bytes. Solidity's `catch` covers a call that reverted, so it does not cover a
+        // success whose return data will not decode into the declared tuple — that revert is
+        // raised while decoding, inside this contract's own frame, past the catch arm. The
+        // spend is refused either way, and the difference is `IdentityNotHeld` or
+        // `CredentialMissing` against a revert carrying no selector at all.
+        //
+        // Refused at construction rather than at grant time because these addresses are
+        // immutable: past this line the only remedy is a fresh deployment, and the script's
+        // copy of this test protects only deployments that use the script.
+        if (_identityRegistry != address(0) && _identityRegistry.code.length == 0) {
+            revert RegistryHasNoCode(_identityRegistry);
+        }
+        if (_validationRegistry != address(0) && _validationRegistry.code.length == 0) {
+            revert RegistryHasNoCode(_validationRegistry);
+        }
+        // The third address deliberately gets no code check, and the omission is the safe
+        // branch rather than an oversight. F24 names `_usdc` in the same class as the two
+        // registries, and on Arc it is the precompile at 0x3600...0000, where the ERC-20
+        // surface is provided by the node rather than by deployed bytecode. Whether
+        // `EXTCODESIZE` on that address answers non-zero is a property of Arc's client that no
+        // reading of this repository settles, and a guard that is wrong here refuses the one
+        // deployment that matters: this contract against real USDC, on the chain it was written
+        // for. A codeless `_usdc` fails on the first `transferFrom` instead, before any funds
+        // move. Do not add the third guard on symmetry alone; a testnet deployment that reads
+        // the code size and prints it is what would settle it.
         usdc = IERC20(_usdc);
         identityRegistry = IIdentityRegistry(_identityRegistry);
         validationRegistry = IValidationRegistry(_validationRegistry);
@@ -720,6 +778,20 @@ contract MandateManager {
         mandateId = keccak256(abi.encode(DOMAIN, block.chainid, address(this), msg.sender, salt));
         if (_mandates[mandateId].payer != address(0)) revert MandateExists();
         if (p.spender == address(0)) revert BadConfig();
+        // F45's rule carried onto the spender field. `spend` requires `msg.sender ==
+        // m.spender` and no path in this contract calls `spend`, so a mandate naming this
+        // address as its spender answers `WrongSpender` on every attempt for its whole life
+        // while consuming the (payer, salt) slot permanently. Refused for the same reason an
+        // expiry already in the past is: the payer pays for authority no caller can exercise,
+        // and `revoke` never frees the salt for a second attempt under the same value.
+        //
+        // Narrow on purpose. The other three addresses `_isUndebitable` refuses as recipients
+        // stay legal here, because that test asks whether money sent somewhere can come back,
+        // which is a different question. USDC on Arc is a precompile and cannot originate a
+        // call at all, while either ERC-8004 registry sits behind an upgradeable proxy that
+        // could one day hold an implementation calling `spend` — so refusing those three as
+        // spenders would refuse a configuration that could work.
+        if (p.spender == address(this)) revert BadConfig();
 
         uint8 flags = p.flags;
         // F44. A flags word carrying a bit this contract does not act on is refused before any
@@ -785,6 +857,22 @@ contract MandateManager {
         // `notBefore` needs no such rule and that asymmetry is deliberate: it is
         // enforced unconditionally, in both `spend` and `isLive`, with no flag at
         // all, so it cannot be displayed-but-dead.
+        //
+        // A SECOND asymmetry sits beside that one and is also deliberate. F45 bounds
+        // `expiresAt` against the clock, and nothing bounds `notBefore` from above, so a
+        // start date at any distance the field can hold is accepted. F45's bound needs no
+        // constant, because a mandate whose expiry has already passed is dead for certain.
+        // A far start date is only probably a mistake, and the horizon that separates a
+        // subscription beginning next year from a mistyped timestamp is a number this
+        // contract cannot derive — picking one would refuse grants a payer meant, in a
+        // deployment with no way to revise the choice.
+        //
+        // Two facts narrow what is left. With `F_EXPIRY` set the first line of this block
+        // orders `notBefore` ahead of `expiresAt`, so a far start has to be declared twice and
+        // cannot hide behind an ordinary-looking expiry. The field is also `uint40`, which runs
+        // out near the year 36,800, so the common shape of the mistake — a millisecond
+        // timestamp read from a JavaScript clock — is refused by the ABI decoder before this
+        // function is entered.
         if (flags & F_EXPIRY == 0 && p.expiresAt != 0) revert BadConfig();
         if (flags & F_CREDENTIAL != 0 && address(validationRegistry) == address(0)) revert BadConfig();
         if (flags & F_IDENTITY != 0 && address(identityRegistry) == address(0)) revert BadConfig();
@@ -966,10 +1054,27 @@ contract MandateManager {
             // loosens in one direction: the bound can be tightened before deployment and never
             // after, so it is called out in THREAT-MODEL.md rather than left to a reader.
             if (p.credential.minResponse > 100) revert BadConfig();
-            // A zero request hash is the credential twin of a zero agent id.
-            // `getValidationStatus(0)` names no request, so it answers with an empty record,
-            // the zero-validator check refuses it, and `CredentialMissing` is the only outcome
-            // this mandate can ever reach.
+            // A zero request hash is the credential twin of a zero agent id, refused because
+            // zero is an occupied key on this chain rather than an empty one. This
+            // repository's probe of the live Arc Testnet registry on 2026-08-24 found a real
+            // record filed under `bytes32(0)`: validator
+            // 0xB152c3B6436318aD340153f1d30C9BBb8634681A, agentId 16330, response 1, tag
+            // "verified". `test/mocks/MockRegistries.sol` keeps the evidence and DESIGN.md
+            // records what it means — under the convention Arc's own tutorial states, 100 is a
+            // pass and 1 is a failure, so that record is a failed attestation carrying the
+            // label "verified".
+            //
+            // Zero is also the value a caller reaches by omission, being the struct field's
+            // default, and the one key a stranger can be sure to have occupied. Keyed on it,
+            // `_checkCredential` reads whatever that stranger filed. Usually the filed
+            // validator differs from the one the payer named, every spend answers
+            // `CredentialWrongValidator`, and the mandate is born dead in the sense F34 and the
+            // agent-id rule above both refuse. The worse case needs four settings, two of them
+            // defaults: the validator above copied from an explorer, `minResponse` of 1, no
+            // agent binding, and no freshness rule. Together they pass a failed attestation
+            // about an agent this mandate never named. The no-agent-binding half is a gap
+            // `_checkCredential` documents and keeps; this line closes the half that lets a
+            // stranger choose the record being read.
             if (p.credential.requestHash == 0) revert BadConfig();
             _credential[mandateId] = p.credential;
         }
@@ -1169,6 +1274,25 @@ contract MandateManager {
         // `cosignThreshold` — spends their signature has no authority over — because this check
         // sits above the branch that reads the threshold. A dead reservation is now swept and
         // the payment continues. The live case is untouched, so F30 holds exactly as written.
+        //
+        // F47 is what remains, and it is a route rather than a condition. While the approval is
+        // LIVE this refuses a spend of any size, a sub-threshold one included, and that ordering
+        // is deliberate: `_usedNonce[mandateId][nonce] = true` below runs for every spend that
+        // passes here, so reading the threshold first would let a one-cent payment burn the
+        // nonce and void a live human decision. No party should hold that capability, and the
+        // delegate least of all, so the refusal stays and F47 adds the release the mapping was
+        // missing. Three routes now end a reservation: `withdrawCosign` for the co-signer,
+        // `clearReservation` for the payer, and the sweep in the branch below once the approval
+        // lapses, at most `MAX_COSIGN_TTL` after it was written. The payer route earns its place
+        // on F17's deliberate omission: an approval may be written against `notBefore`, against
+        // the recoverable half of a window cap, and against an ERC-8004 check, because each of
+        // those can come good later. A co-signer can therefore reserve a nonce behind a request
+        // whose spend is refused, and two of the three can stay refused for the approval's whole
+        // life — F41's bound returns window room only after `lengthSeconds + subLength`, so a
+        // window that long never gives it back inside thirty days, and a credential that is
+        // never filed never comes good at all. Through all of it that nonce refuses every spend,
+        // sub-threshold ones included, and the co-signer held the only release while the payer,
+        // who owns the funds, held none.
         bytes32 reservedHash = _cosignReservedNonce[mandateId][nonce];
         if (reservedHash != 0 && reservedHash != hash) {
             if (_cosignIsLive(mandateId, reservedHash, nowTs)) revert NonceReserved(reservedHash);
@@ -1321,6 +1445,22 @@ contract MandateManager {
 
         // ownerOf reverts for a nonexistent or burned tokenId rather than
         // returning address(0), so catch it and produce a legible denial.
+        //
+        // F49, and the catch arm covers a failed call and reaches no further. Solidity enters it
+        // when the call itself returns false, so a call that SUCCEEDS and answers with data
+        // that cannot be decoded as one `address` reverts inside this frame, with empty return
+        // data and none of this contract's errors. Two answers do that: fewer than 32 bytes,
+        // and a full word with any of its top twelve bytes set, which the decoder refuses for
+        // an `address`. The constructor closes the plainest route by refusing a registry with
+        // no code, since a STATICCALL to a codeless address succeeds and returns nothing. A
+        // registry that keeps its code and changes its answer stays open:
+        // `test/mocks/MockRegistries.sol` records the live identity registry behind an
+        // ERC-1967 proxy, and a proxy pointed at a codeless implementation returns zero bytes
+        // while holding code of its own. The result is a spend that reverts without
+        // `IdentityNotHeld`, which refuses in the safe direction and costs the payer only gas;
+        // a payer who sees it can revoke. Decoding the word by hand would let this check answer
+        // in its own words, at the price of dropping the type check the compiler performs
+        // here, and F49 records that trade rather than taking it.
         address owner;
         try identityRegistry.ownerOf(g.agentId) returns (address o) {
             owner = o;
@@ -1347,6 +1487,19 @@ contract MandateManager {
         uint8 response;
         uint256 lastUpdate;
 
+        // F49, the wider half. This decodes six values including a dynamic `string`, so the ways
+        // an answer can fail to decode reach past a short word: an offset pointing outside the
+        // returned data, a length field larger than what follows it, or any answer shorter than
+        // the six head words the tuple needs. `catch` reads the call's success flag, so none of
+        // those arrives at the arm below, and each one reverts in this frame with empty return
+        // data in place of `CredentialMissing`. The arm reads as though it covered every
+        // failure, and the class it covers is a call that reverts or exhausts the gas it was
+        // given.
+        //
+        // Decoding by hand was considered and declined here: the `string` makes a written bounds
+        // check exactly the work the decoder already does correctly, and an error in that work
+        // would read a value from the wrong offset rather than reverting, turning a refusal into
+        // a wrong answer. The shape stays and F49 states the limit.
         try validationRegistry.getValidationStatus(c.requestHash) returns (
             address v, uint256 aid, uint8 resp, bytes32, string memory, uint256 lu
         ) {
@@ -1407,7 +1560,10 @@ contract MandateManager {
      * The spender may also revoke. Giving up your own authority can never harm
      * the payer, and it lets a compromised agent shut itself off.
      *
-     * The error is named for authority rather than for a role, because two roles hold it.
+     * The error is named for authority rather than for a role, because two roles hold this
+     * one. v2 raises the same error in `clearReservation`, where the payer alone is
+     * authorised, and the name still fits: it reports that the caller lacks authority for the
+     * call they made, without claiming which role would have had it.
      * v1 called it NotPayer() and said so in four places while keeping the name, on the
      * grounds that it was already in a deployed ABI. That reason expired with the tag
      * v1.0.0-arc-testnet: v1's ABI is pinned at v1's address and this is a different
@@ -1626,6 +1782,16 @@ contract MandateManager {
         // approval could only ever meet `NonceAlreadyUsed`. Checked HERE, ahead of the caps, because
         // that is where `spend` checks it — this position is not arbitrary, and moving it would
         // break the error parity claimed above with nothing in the compiler or the ABI to flag it.
+        //
+        // F47's other half, read from the co-signer's side, and it has no fix in code. Any spend
+        // that succeeds consumes its nonce, a sub-threshold one included, so between the moment a
+        // co-signer picks a nonce and the moment this approval is written the delegate can take
+        // that nonce with an ordinary small payment. The co-signer meets `NonceAlreadyUsed` on
+        // this line and the remedy is a fresh nonce, at the price of one more signature;
+        // `isNonceUsed` answers the same question before the signature is produced. Dropping
+        // this pre-check to let the approval through would store an approval no spend can ever
+        // consume, which is the shape F17 exists to refuse, so the early refusal is kept and its
+        // one cost is recorded here instead.
         if (_usedNonce[mandateId][nonce]) revert NonceAlreadyUsed();
 
         // `perTxCap` is fixed at creation. `totalSpent` only ever grows, so headroom only ever
@@ -1778,6 +1944,53 @@ contract MandateManager {
         if (hadApproval || freesNonce) emit CosignWithdrawn(mandateId, hash, msg.sender);
     }
 
+    /// @notice Release the nonce a co-signature reserved, so an ordinary spend can use it again.
+    /// Payer only.
+    ///
+    /// NEW IN v2 (F47). `approveCosignFor` reserves the nonce it is handed, and `spend` refuses
+    /// every other hash on that nonce while the approval is live. That is F30's rule and it is
+    /// right: a one-cent payment must not burn a nonce a second human has already committed to.
+    /// The routes out of a reservation were `withdrawCosign`, which answers to the co-signer, and
+    /// the approval lapsing, at most `MAX_COSIGN_TTL` after it was written. The payer, who owns
+    /// the money and nominated the co-signer, had none.
+    ///
+    /// A reservation is a refusal rather than an authority, so releasing one grants nothing. What
+    /// it does allow is a later sub-threshold spend consuming the nonce, which would leave the
+    /// co-signer's approved hash unspendable, and that is why this is the payer's call and not
+    /// the spender's. The payer can already `revoke` the mandate and take every approval on it,
+    /// so this is a smaller power than one they hold; for the delegate it would be a new one,
+    /// aimed at the single decision this contract asks a second human to make.
+    ///
+    /// The approval is left alone. `_cosignApproved` still holds it and the approved spend can
+    /// still be made, which keeps this function the size of the problem: it answers "this nonce
+    /// is stuck", where `withdrawCosign` answers "this approval was wrong".
+    ///
+    /// Silent on a no-op, following `revoke` (F11) and `withdrawCosign`: a nonce with nothing
+    /// reserved emits nothing, rather than recording a release that released nothing. Past the
+    /// three checks below this function cannot revert, for the reason `withdrawCosign` gives —
+    /// clearing a refusal must never be blocked, so an atomic batch cannot lose the entries it
+    /// needed to a stale one beside them.
+    ///
+    /// Deliberately not reachable on an unknown mandate or on one without `F_COSIGN`, which
+    /// mirrors `withdrawCosign` rather than accepting the call and doing nothing: no reservation
+    /// can exist in either case, so a caller who reached here has the wrong mandate id and is
+    /// better told.
+    ///
+    /// @param mandateId The mandate whose reservation is being released.
+    /// @param nonce The reserved nonce. One with no reservation is accepted and changes nothing.
+    function clearReservation(bytes32 mandateId, bytes32 nonce) external {
+        Mandate storage m = _mandates[mandateId];
+        if (m.payer == address(0)) revert UnknownMandate();
+        if (m.flags & F_COSIGN == 0) revert BadConfig();
+        if (msg.sender != m.payer) revert NotAuthorised();
+
+        bytes32 reserved = _cosignReservedNonce[mandateId][nonce];
+        if (reserved != 0) {
+            delete _cosignReservedNonce[mandateId][nonce];
+            emit ReservationCleared(mandateId, nonce, reserved);
+        }
+    }
+
     // =====================================================================
     // Views — pre-flight checks so an agent does not waste gas on a doomed call
     // =====================================================================
@@ -1836,11 +2049,61 @@ contract MandateManager {
     /// `getMandate(mandateId).windowCount`. This returns the policy, not the consumption;
     /// `windowRemaining` answers how much of the window is left.
     ///
+    /// `lengthSeconds` is the length the payer asked for, and the enforcement is wider by one
+    /// sub-period (F50). The ring holds `buckets + 1` counters and sums all of them, so the span
+    /// the cap is actually applied over is `lengthSeconds + subLength`, and sustained throughput
+    /// settles at `buckets / (buckets + 1)` of `cap` per `lengthSeconds` rather than at `cap`.
+    /// The derivation is in `_checkAndCommitWindows` and F41 uses the same bound; the direction
+    /// is toward refusing, since the cap is never exceeded over any window of the stated length.
+    /// It is widest in proportion at `buckets == 1`, where `subLength` is `lengthSeconds`
+    /// exactly, so the enforced span is twice the stated length and sustained throughput is half
+    /// the stated cap. It narrows as the bucket count rises — about 92% at 12 buckets and 96% at
+    /// 24. `subLength` is derived at grant time as `lengthSeconds / buckets` rather than
+    /// supplied, so the two fields this view returns are enough to compute what is enforced.
+    ///
     /// @param mandateId The mandate.
     /// @param index Window position, from 0 to `windowCount - 1`.
     /// @return The window's length, sub-period length, cap and bucket count.
     function getWindow(bytes32 mandateId, uint256 index) external view returns (WindowSpec memory) {
         return _windows[mandateId][index];
+    }
+
+    /// @notice The ERC-8004 identity check a mandate was granted with.
+    ///
+    /// NEW IN v2 (F50). `createMandate` stores this struct and `spend` reads it on every
+    /// payment, and no view returned it, so the two settings a payer chose were unreadable from
+    /// the chain except by decoding the calldata of the transaction that granted them.
+    /// `MandateCreated` carries `flags`, which says an identity check applies, and not the
+    /// `agentId` it applies to.
+    ///
+    /// A mandate without `F_IDENTITY` returns a zeroed struct, and that reads unambiguously
+    /// rather than by luck: F32's biconditional refuses identity data without the flag, and
+    /// `createMandate` refuses `agentId == 0` with it, so zero here means no check rather than a
+    /// check on agent zero. Read it beside `getMandate(mandateId).flags`, the way `getWindow` is
+    /// read beside `windowCount`.
+    ///
+    /// @param mandateId The mandate.
+    /// @return The agent id the spender must own at spend time, and the owner the payer pinned
+    /// if they pinned one. `expectedOwner` is zero or the spender, which F33 enforces.
+    function getIdentityGate(bytes32 mandateId) external view returns (IdentityGate memory) {
+        return _identity[mandateId];
+    }
+
+    /// @notice The ERC-8004 credential check a mandate was granted with.
+    ///
+    /// NEW IN v2 (F50), for the reason `getIdentityGate` above gives. This struct decides which
+    /// validator, which agent, which freshness bound and which response score every spend is
+    /// measured against, and none of the five fields was readable.
+    ///
+    /// A mandate without `F_CREDENTIAL` returns a zeroed struct, unambiguous for the same reason:
+    /// `requestHash == 0` is refused when the flag is set, so a zero hash means no check.
+    ///
+    /// @param mandateId The mandate.
+    /// @return The `CredentialGate` as granted. `agentId` may be zero, which falls back to the
+    /// identity check's id and, when that is zero too, leaves the attestation bound to a request
+    /// rather than to an agent — the documented gap `_checkCredential` names.
+    function getCredentialGate(bytes32 mandateId) external view returns (CredentialGate memory) {
+        return _credential[mandateId];
     }
 
     /// @notice Whether a nonce has already been spent on this mandate.

@@ -1411,6 +1411,53 @@ function withdrawCosign(mandate, caller, hash, nonce) {
 }
 
 /**
+ * Release a reserved nonce. Only the payer may call it, and the approval it belonged to stays.
+ *
+ * NEW IN v2 (F47), and it is here for the reason `withdrawCosign` above is here: a reservation
+ * with no release path is a nonce held against the mandate. F30 gave the cosigner a release and
+ * F39's sweep clears one whose approval has lapsed, which left the payer — the party whose funds
+ * and mandate these are — with no route at all. The gap is reachable because `approveCosignFor`
+ * mirrors only the permanent refusals: `notBefore`, the recoverable half of a window cap and the
+ * two ERC-8004 checks are left out, each being a refusal that can come good later. So a cosigner
+ * can reserve a nonce behind a request the spend path refuses, and hold it for up to
+ * `MAX_COSIGN_TTL` while every spend naming that nonce is refused, sub-threshold ones included.
+ *
+ * The asymmetry with `withdrawCosign` is deliberate on both sides. That one deletes the approval
+ * and releases the nonce only when the pair matches; this one deletes the reservation and leaves
+ * the approval in the Map, so the cosigner keeps whatever authority they were granted. Releasing a
+ * reservation therefore adds no authority to anyone, and it does let a later sub-threshold spend
+ * consume the nonce, which is why the caller must be the payer: the payer can already `revoke` the
+ * mandate and take every approval at once, so this is a smaller power in the same hands and would
+ * be a new one in the delegate's.
+ *
+ * @param {object} mandate
+ * @param {string} caller
+ * @param {string} nonce  the nonce to free
+ * @returns {boolean} whether a reservation was actually present and removed
+ */
+function clearReservation(mandate, caller, nonce) {
+  if (!mandate) throw new Error('clearReservation(): unknown mandate');
+  // Configuration before authorisation, in the contract's order and for `approveCosignFor`'s
+  // reason: a mandate with no cosign requirement holds no reservations at all, so answering the
+  // caller with a fact about who they are would send them looking for a key that decides nothing.
+  // This one carries a code where the guard below does not, and the split follows the contract:
+  // `BadConfig` belongs to the cosign family, while `NotAuthorised` is the authority error
+  // `revoke` also raises, and `revoke` throws plain here too.
+  if (!mandate.cosigner) {
+    const err = new Error('clearReservation(): mandate has no cosigner');
+    err.code = ApprovalRefusal.BAD_CONFIG;
+    throw err;
+  }
+  if (normalizeAddr(caller) !== mandate.payer) {
+    throw new Error('clearReservation(): only the payer may clear a reservation');
+  }
+  // Clearing a nonce that holds no reservation is not an error, matching the contract and
+  // `withdrawCosign` above: the post-state the caller asked for is the post-state they get. The
+  // contract emits its event only when one was there, so the return value carries the same fact.
+  return mandate.cosignReservedNonces.delete(nonce);
+}
+
+/**
  * Remaining headroom on every axis — what a dashboard or an agent's pre-flight
  * check should read. This function is pure and does not mutate the mandate.
  */
@@ -1580,6 +1627,7 @@ module.exports = {
   revoke,
   approveCosignFor,
   withdrawCosign,
+  clearReservation,
   headroom,
   headroomAcross,
 };

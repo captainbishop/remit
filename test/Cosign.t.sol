@@ -884,6 +884,163 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(vendor), 1, "F39: a reservation with no approval behind it holds nothing");
     }
 
+    // ------------------------------------------- F47: the payer's own release for a held nonce
+
+    /**
+     * F47, and it is a missing route rather than a missing rule.
+     *
+     * Three parties can be affected by a reservation and only two could end one. `withdrawCosign`
+     * serves the co-signer, F39's sweep clears a reservation whose approval has lapsed, and the
+     * payer — who owns the funds and nominated the co-signer — had nothing.
+     *
+     * The gap is reachable because F17 mirrors only the PERMANENT refusals onto the approval path.
+     * `notBefore`, the recoverable half of a window cap and the two ERC-8004 checks are left out
+     * on purpose, each being a refusal that can come good later, so a co-signer can put a
+     * signature behind a request the spend path refuses. Two of those three can stay refused for
+     * the approval's whole life: F41 returns window room only after `lengthSeconds + subLength`,
+     * so a window at or past `MAX_COSIGN_TTL` never gives it back inside thirty days, and a
+     * credential that no validator ever files stays refused for good. Throughout, that nonce
+     * refuses every spend naming it, sub-threshold ones included, because the reservation check
+     * sits above the branch that reads the threshold.
+     *
+     * The setup below is the shape `test_f17_approvingBeforeTheMandateStarts_isAllowed` proves is
+     * legal, used here for the opposite purpose: there it is a wait that ends, here it is what
+     * makes the reservation observable while the spend behind it is refused for another reason.
+     */
+    function test_f47_thePayerCanFreeANonceTheCosignerIsHolding() public {
+        MandateManager.MandateParams memory p = cosignParams();
+        p.notBefore = uint40(block.timestamp + DAY);
+        bytes32 id = grant(p);
+        bytes32 nonce = nextNonce();
+
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + 3 * DAY));
+
+        // Once the mandate starts, the reservation is what answers, and the amount does not enter
+        // into it: one base unit is far below the threshold, so this signature has no authority
+        // over that payment and blocks it anyway.
+        vm.warp(uint256(p.notBefore));
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, hash));
+        mm.spend(id, vendor, 1, REF, nonce);
+
+        // The payer frees it, and the event carries the hash that was holding the nonce so an
+        // indexer can join the release to the approval it belonged to.
+        vm.expectEmit(true, true, true, true, address(mm));
+        emit MandateManager.ReservationCleared(id, nonce, hash);
+        vm.prank(payer);
+        mm.clearReservation(id, nonce);
+
+        // The approval is left alone, deadline and all, so the co-signer keeps every bit of
+        // authority they were granted.
+        assertEq(mm.cosignApprovalDeadline(id, hash), uint40(p.notBefore + 2 * DAY), "the approval is intact");
+        assertTrue(mm.isCosignApproved(id, hash), "and it is still live");
+
+        payWithNonce(id, vendor, 1, nonce);
+        assertEq(token.balanceOf(vendor), 1, "F47: the nonce is spendable again");
+    }
+
+    /// The consequence that decides who may call this, asserted rather than left in a comment.
+    ///
+    /// Releasing a reservation grants nothing directly, and it does let a later sub-threshold
+    /// spend consume the nonce, which leaves the co-signer's approved hash unspendable. The payer
+    /// may do that because `revoke` already takes every approval on the mandate at once, so this
+    /// is a smaller power in the same hands. For the delegate it would be a new one, aimed at the
+    /// single decision this contract asks a second human to make.
+    function test_f47_releasingAReservationCanStrandTheApprovedSpend() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.prank(payer);
+        mm.clearReservation(id, nonce);
+
+        // The delegate burns the nonce on a payment the co-signer never agreed to.
+        payWithNonce(id, vendor, 1, nonce);
+
+        // So the 50 USDC that was signed for can no longer move, while the approval itself is
+        // still sitting in storage reporting as live.
+        vm.prank(agent);
+        vm.expectRevert(MandateManager.NonceAlreadyUsed.selector);
+        mm.spend(id, vendor, usd(50), REF, nonce);
+        assertTrue(mm.isCosignApproved(id, hash), "the approval outlives its nonce");
+    }
+
+    /// Only the payer. The co-signer has `withdrawCosign` and the delegate has no business here,
+    /// so all three of the other parties are refused and the reservation is unmoved afterwards.
+    function test_f47_onlyThePayerMayClearAReservation() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+        vm.prank(boss);
+        bytes32 hash = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        address[3] memory strangers = [boss, agent, other];
+        for (uint256 i = 0; i < strangers.length; i++) {
+            vm.prank(strangers[i]);
+            vm.expectRevert(MandateManager.NotAuthorised.selector);
+            mm.clearReservation(id, nonce);
+        }
+
+        // Unmoved, which the reservation's own refusal is what proves — the mapping is private.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.NonceReserved.selector, hash));
+        mm.spend(id, vendor, 1, REF, nonce);
+    }
+
+    /// The two configuration guards, in the contract's order and ahead of the authority check.
+    /// Both mirror `withdrawCosign` rather than accepting the call and doing nothing: no
+    /// reservation can exist on either mandate, so a caller who reached here has the wrong id and
+    /// is better told.
+    function test_f47_clearingOnAnUnknownMandateOrWithoutTheCosignFlag_reverts() public {
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.UnknownMandate.selector);
+        mm.clearReservation(bytes32("no such mandate"), nextNonce());
+
+        // A real mandate with no co-signing on it. `BadConfig` comes before the authority test, so
+        // the payer sees the configuration error too — being told who they are would send them
+        // looking for a key that decides nothing here.
+        bytes32 id = grant(simpleParams());
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.clearReservation(id, nextNonce());
+
+        vm.prank(other);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.clearReservation(id, nextNonce());
+    }
+
+    /// Clearing a nonce that holds no reservation changes nothing and announces nothing, which
+    /// follows `revoke` (F11) and `withdrawCosign`. Past the three checks this function cannot
+    /// revert, for the reason `withdrawCosign` gives: clearing a refusal must never be blocked, so
+    /// an atomic batch cannot lose the entries it needed to a stale one beside it.
+    function test_f47_clearingANonceThatHoldsNothing_isANoOpAndEmitsNothing() public {
+        bytes32 id = grant(cosignParams());
+        bytes32 nonce = nextNonce();
+
+        vm.startPrank(payer);
+        vm.recordLogs();
+        mm.clearReservation(id, nonce);
+        assertEq(vm.getRecordedLogs().length, 0, "nothing was held, so nothing is announced");
+        vm.stopPrank();
+
+        vm.prank(boss);
+        mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
+
+        vm.startPrank(payer);
+        mm.clearReservation(id, nonce);
+
+        // And the repeat is silent again, so a second call is a gas refund rather than a second
+        // release. Zero must not read as a reservation, which is the `reserved != 0` half.
+        vm.recordLogs();
+        mm.clearReservation(id, nonce);
+        assertEq(vm.getRecordedLogs().length, 0, "the repeat released nothing");
+        vm.stopPrank();
+
+        payWithNonce(id, vendor, 1, nonce);
+        assertEq(token.balanceOf(vendor), 1, "one release was enough");
+    }
+
     // --------------------------------------- F35: the liveness view tells the truth
 
     /// An approval against a revoked mandate can never be consumed, and the DELEGATE can produce

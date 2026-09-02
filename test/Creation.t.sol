@@ -287,6 +287,44 @@ contract CreationTest is Base {
     }
 
     /**
+     * F48. This contract as its own spender, refused for the reason the guard above is refused
+     * and the reason F45 refuses an expiry already in the past: the payer would be buying
+     * authority no caller can ever exercise, and paying a permanent cost for it.
+     *
+     * `spend` requires `msg.sender == m.spender` and no path in this contract calls `spend`, so
+     * such a mandate answers `WrongSpender` on every attempt for its whole life. The permanent
+     * part is the salt: `mandateId` is derived from (payer, salt), `revoke` never frees it, and
+     * `MandateExists` refuses a second grant under the same value — so the payer cannot even
+     * retry with a corrected spender under the salt they meant to use.
+     *
+     * Narrow on purpose, and the second half of this test is what pins that. The other three
+     * addresses `_isUndebitable` refuses as RECIPIENTS stay legal as spenders, because that test
+     * asks whether money sent somewhere can come back, which is a different question. Either
+     * ERC-8004 registry sits behind an upgradeable proxy that could one day hold an
+     * implementation calling `spend`, so refusing them here would refuse a configuration that
+     * could work.
+     */
+    function test_f48_theContractAsItsOwnSpender_reverts() public {
+        MandateManager.MandateParams memory p = simpleParams();
+        p.spender = address(mm);
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("z3"), p);
+
+        // And the guard reaches exactly one address. The token and both registries are accepted
+        // here, which is the same set `test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses`
+        // shows being refused on the recipient side.
+        address[3] memory stillLegal = [address(token), address(identity), address(validation)];
+        for (uint256 i = 0; i < stillLegal.length; i++) {
+            MandateManager.MandateParams memory q = simpleParams();
+            q.spender = stillLegal[i];
+            vm.prank(payer);
+            bytes32 id = mm.createMandate(bytes32(uint256(0xf48) + i), q);
+            assertEq(mm.getMandate(id).spender, stillLegal[i], "refused as a recipient, legal as a spender");
+        }
+    }
+
+    /**
      * Each flag must agree with the value it describes, in BOTH directions. A flag
      * set with a zero value would be a bound that never binds; a value set with no
      * flag would be a limit that is never read. Both are the failure mode this
@@ -617,8 +655,10 @@ contract CreationTest is Base {
         assertTrue(mm.isLive(id));
     }
 
-    /// F34. `getValidationStatus(0)` names no request, so it answers with an empty record and
-    /// the zero-validator check refuses it — `CredentialMissing`, on every spend, forever.
+    /// F34. Zero is an occupied key on Arc Testnet, not an empty one: the live probe recorded in
+    /// `mocks/MockRegistries.sol` found a real record filed under `bytes32(0)`. A mandate keyed
+    /// there reads whatever a stranger filed, which is `CredentialWrongValidator` on every spend
+    /// in the ordinary case and a failed attestation about an unnamed agent in the worst one.
     function test_createMandate_credentialWithZeroRequestHash_reverts() public {
         MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 0);
         p.credential.requestHash = bytes32(0);
@@ -705,6 +745,64 @@ contract CreationTest is Base {
     function test_constructor_zeroUsdc_reverts() public {
         vm.expectRevert(MandateManager.BadConfig.selector);
         new MandateManager(address(0), address(identity), address(validation));
+    }
+
+    /**
+     * F49. A registry address that holds no code is refused at construction, in both positions.
+     *
+     * Zero and non-zero-with-no-code look alike and mean opposite things. Zero says the ERC-8004
+     * lookups are unavailable, and `createMandate` refuses every flag that needs one — the case
+     * `test_createMandate_gateWithoutRegistry_reverts` above covers. Non-zero with no code says the
+     * opposite while meaning the same thing: the grant succeeds, and the first spend reaches a
+     * STATICCALL that returns zero bytes.
+     *
+     * Refusing it early matters because `catch` does not cover it. Solidity's `catch`
+     * runs when the call itself failed; here the call SUCCEEDS and the revert happens while ABI
+     * decoding zero bytes into the declared return type, inside this contract's own frame and past
+     * the catch arm. So the spend is refused either way, and the difference is `IdentityNotHeld` or
+     * `CredentialMissing` against a revert carrying no selector at all — nothing an agent can read.
+     *
+     * At construction rather than at grant time because these addresses are immutable: past the
+     * constructor the only remedy is a fresh deployment. `script/Deploy.s.sol` runs the same
+     * check, and that copy protects only deployments that use the script.
+     */
+    function test_f49_aRegistryWithNoCode_isRefusedAtConstruction() public {
+        address codeless = makeAddr("codeless registry");
+        assertEq(codeless.code.length, 0, "the premise of this test");
+
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.RegistryHasNoCode.selector, codeless));
+        new MandateManager(address(token), codeless, address(validation));
+
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.RegistryHasNoCode.selector, codeless));
+        new MandateManager(address(token), address(identity), codeless);
+
+        // Both guards are separate statements, so a deployment with two codeless addresses is
+        // named by the first one. Asserted because the error carries the address, and an operator
+        // reading it needs to know it names one of possibly two mistakes.
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.RegistryHasNoCode.selector, codeless));
+        new MandateManager(address(token), codeless, makeAddr("also codeless"));
+    }
+
+    /// The other two branches of the same pair of guards, so neither is over-broad: zero passes,
+    /// because it is how a deployer says the lookups are unavailable, and a real contract passes.
+    /// Without this half, a guard rewritten as `!= address(0)` alone would still look tested.
+    function test_f49_zeroAndRealRegistriesAreBothAccepted() public {
+        MandateManager bare = new MandateManager(address(token), address(0), address(0));
+        assertEq(address(bare.identityRegistry()), address(0), "zero is a legal deployment");
+        assertEq(address(bare.validationRegistry()), address(0));
+
+        MandateManager full = new MandateManager(address(token), address(identity), address(validation));
+        assertEq(address(full.identityRegistry()), address(identity));
+        assertEq(address(full.validationRegistry()), address(validation));
+
+        // And the third address gets no code check at all, which is the omission the constructor
+        // argues for rather than an oversight: on Arc the token is the precompile at
+        // 0x3600...0000, where the ERC-20 surface comes from the node instead of from deployed
+        // bytecode, so a code test there could refuse the one deployment that matters. A codeless
+        // token fails on the first `transferFrom` instead, before any funds move.
+        address codelessToken = makeAddr("codeless token");
+        MandateManager loose = new MandateManager(codelessToken, address(identity), address(validation));
+        assertEq(address(loose.usdc()), codelessToken, "F24: deliberately not checked here");
     }
 
     // ------------------------------------------------------- window shape
