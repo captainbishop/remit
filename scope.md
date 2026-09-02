@@ -38,12 +38,12 @@ self-contained and can be read start to finish without following a dependency.
 
 ## Out of scope
 
-- `test/` — 11 `.t.sol` files, 225 tests.
+- `test/` — 11 `.t.sol` files, 254 tests.
 - `lib/forge-std/` — forge-std 1.9.6, vendored as 53 tracked files. Test-only;
   `grep -rc forge-std contracts/` returns 0. It is vendored rather than submoduled, so
   no upstream SHA is recorded and byte-equality against the v1.9.6 tag has never been
   checked. An auditor who cares should fetch the tag and diff the 53 files themselves.
-- `reference/` — a JavaScript model of the policy (`policy.js`), its 94-test suite, and
+- `reference/` — a JavaScript model of the policy (`policy.js`), its 102-test suite, and
   two mutation-testing scripts. The model exists to cross-check the contract, and the
   two have disagreed twice in ways that mattered, so it is useful context. It is not
   deployed and it holds nothing.

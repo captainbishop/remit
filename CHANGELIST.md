@@ -363,7 +363,7 @@ trail with no error, which is worse than a cliff no caller can reach.
 **How it went missing.** This is one of three "documented soft spots" that the real-money
 decision of 2026-08-24 turned from curiosities into real decisions. The other two — the
 unreachable cosign requirement and the misleading `NotPayer()` — are both above. This one is
-recorded in `README.md:474`, `FORGE.md:251` and the test's own header, and was named in the
+recorded in `README.md:477`, `FORGE.md:257` and the test's own header, and was named in the
 same breath as the other two when the decision was made, and it still reached this file's
 "changelist" section in none of them. All three were documented and two of the three were
 listed. **A list assembled by remembering what belongs on it will be short by about a
@@ -450,13 +450,13 @@ derived by running it rather than counted by hand: `node --test policy.test.js` 
 `# tests 57 / # pass 57 / # fail 0`. **That 57 is the figure as of #22 and is left as history, not
 updated in place** — it reached **76** on 2026-08-28, having gained F16's and F17's cosign
 tests, F19's four refusals, and the four the `evaluate` mutation gate demanded, and stands at
-**94** today. F1 gets no mirror because the model has no `getMandate`
+**102** today. F1 gets no mirror because the model has no `getMandate`
 and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
 would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
 functions by static count across eleven files at #22, up two net — a static count, not a
 `forge test` count, and therefore **unverified** then, because forge did not run in the
-environment these edits were made in, and `forge test` reports **225** today.
+environment these edits were made in, and `forge test` reports **254** today.
 
 **What it broke.** `DESIGN.md`'s flagship worked example and the narrative `THREAT-MODEL.md`
 F2 is built on are now un-creatable for a *second and independent* reason:
