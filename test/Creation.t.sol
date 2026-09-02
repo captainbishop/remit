@@ -83,8 +83,7 @@ contract CreationTest is Base {
 
     function test_createMandate_emitsMandateCreated() public {
         MandateManager.MandateParams memory p = simpleParams();
-        bytes32 expectedId =
-            keccak256(abi.encode(mm.DOMAIN(), block.chainid, address(mm), payer, bytes32(uint256(1))));
+        bytes32 expectedId = keccak256(abi.encode(mm.DOMAIN(), block.chainid, address(mm), payer, bytes32(uint256(1))));
 
         vm.expectEmit(true, true, true, true, address(mm));
         emit MandateManager.MandateCreated(expectedId, payer, agent, usd(100), 0, 0, FAR, F_PER_TX | F_EXPIRY, 1);

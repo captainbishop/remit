@@ -216,8 +216,7 @@ contract ArcParitySpendTest is ArcParityBase {
         assertEq(token.allowance(payer, address(mm)), ARC_TOTAL, "allowance is the exact budget, untouched");
         assertEq(token.balanceOf(ARC_RECIPIENT), 0, "recipient starts empty, as it does on Arc");
 
-        bytes memory cd =
-            abi.encodeCall(MandateManager.spend, (arcId, ARC_RECIPIENT, ARC_AMOUNT, ARC_REF, ARC_NONCE));
+        bytes memory cd = abi.encodeCall(MandateManager.spend, (arcId, ARC_RECIPIENT, ARC_AMOUNT, ARC_REF, ARC_NONCE));
         vm.prank(agent);
         uint256 g = gasleft();
         mm.spend(arcId, ARC_RECIPIENT, ARC_AMOUNT, ARC_REF, ARC_NONCE);

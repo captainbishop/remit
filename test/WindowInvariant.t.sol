@@ -133,11 +133,12 @@ contract WindowHandler {
         // A low-level call rather than try/catch, matching Base.trySpend: the revert
         // data is needed to classify the refusal, and a refusal must not abort the
         // handler.
-        (bool ok, bytes memory err) = address(mm).call(
-            abi.encodeCall(
-                MandateManager.spend, (mandateId, recipient, uint256(amount), bytes32("invariant"), nonce)
-            )
-        );
+        (bool ok, bytes memory err) = address(mm)
+            .call(
+                abi.encodeCall(
+                    MandateManager.spend, (mandateId, recipient, uint256(amount), bytes32("invariant"), nonce)
+                )
+            );
 
         if (ok) {
             _ts.push(uint64(block.timestamp));

@@ -950,6 +950,8 @@ contract MandateManager {
             if (w.buckets == 0 || w.buckets > MAX_BUCKETS) revert BadWindow();
             if (w.lengthSeconds % w.buckets != 0) revert BadWindow();
             if (w.cap < minWindowCap) minWindowCap = w.cap;
+            // The derived `subLength` keeps its own line so F41's window arithmetic stays readable.
+            // forgefmt: disable-next-item
             _windows[mandateId][i] = WindowSpec({
                 lengthSeconds: w.lengthSeconds,
                 subLength: w.lengthSeconds / w.buckets,
@@ -1021,11 +1023,11 @@ contract MandateManager {
         }
         if (
             flags & F_CREDENTIAL == 0
-                && (
-                    p.credential.requestHash != 0 || p.credential.agentId != 0
-                        || p.credential.validator != address(0) || p.credential.maxStaleness != 0
-                        || p.credential.minResponse != 0
-                )
+                && (p.credential.requestHash != 0
+                    || p.credential.agentId != 0
+                    || p.credential.validator != address(0)
+                    || p.credential.maxStaleness != 0
+                    || p.credential.minResponse != 0)
         ) {
             revert BadConfig();
         }
@@ -1087,7 +1089,15 @@ contract MandateManager {
         }
 
         emit MandateCreated(
-            mandateId, msg.sender, p.spender, p.perTxCap, p.totalCap, p.notBefore, p.expiresAt, flags, uint8(p.windows.length)
+            mandateId,
+            msg.sender,
+            p.spender,
+            p.perTxCap,
+            p.totalCap,
+            p.notBefore,
+            p.expiresAt,
+            flags,
+            uint8(p.windows.length)
         );
     }
 

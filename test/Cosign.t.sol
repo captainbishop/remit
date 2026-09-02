@@ -437,9 +437,7 @@ contract CosignTest is Base {
         assertEq(
             mm.spendHash(id, vendor, usd(50), REF, nonce),
             keccak256(
-                abi.encode(
-                    mm.DOMAIN(), block.chainid, address(mm), id, agent, vendor, uint256(usd(50)), REF, nonce
-                )
+                abi.encode(mm.DOMAIN(), block.chainid, address(mm), id, agent, vendor, uint256(usd(50)), REF, nonce)
             )
         );
     }
@@ -481,8 +479,7 @@ contract CosignTest is Base {
         vm.prank(payer);
         bytes32 otherId = mm.createMandate(bytes32("other-spender"), p);
         assertTrue(
-            approved != mm.spendHash(otherId, vendor, usd(50), REF, nonce),
-            "the spender is still inside the preimage"
+            approved != mm.spendHash(otherId, vendor, usd(50), REF, nonce), "the spender is still inside the preimage"
         );
 
         // The real spend still goes through, so the narrowing cost nothing functional.
@@ -744,9 +741,7 @@ contract CosignTest is Base {
         vm.prank(boss);
         bytes32 first = mm.approveCosignFor(id, vendor, usd(50), REF, nonce, uint40(block.timestamp + DAY));
 
-        approveReverts(
-            id, vendor, usd(60), nonce, abi.encodeWithSelector(MandateManager.NonceReserved.selector, first)
-        );
+        approveReverts(id, vendor, usd(60), nonce, abi.encodeWithSelector(MandateManager.NonceReserved.selector, first));
 
         // Withdraw, then the replacement is accepted — the refusal is a sequencing rule, not a
         // one-approval-per-nonce-forever rule.
@@ -1209,9 +1204,8 @@ contract CosignTest is Base {
         returns (bool ok, bytes memory err)
     {
         vm.prank(boss);
-        (ok, err) = address(mm).call(
-            abi.encodeCall(MandateManager.approveCosignFor, (id, to, amount, REF, nonce, validUntil))
-        );
+        (ok, err) =
+            address(mm).call(abi.encodeCall(MandateManager.approveCosignFor, (id, to, amount, REF, nonce, validUntil)));
     }
 
     /// Expect an approval to be refused with exactly this revert data. Prank before
@@ -1339,9 +1333,7 @@ contract CosignTest is Base {
 
         approveReverts(id, address(0), usd(50), nextNonce(), MandateManager.ZeroRecipient.selector);
         approveReverts(id, vendor, 0, nextNonce(), MandateManager.ZeroAmount.selector);
-        approveReverts(
-            id, vendor, uint256(type(uint96).max) + 1, nextNonce(), MandateManager.AmountTooLarge.selector
-        );
+        approveReverts(id, vendor, uint256(type(uint96).max) + 1, nextNonce(), MandateManager.AmountTooLarge.selector);
     }
 
     /// This test mirrors F19, and it is here because of F17's rule rather than as an
@@ -1625,9 +1617,7 @@ contract CosignTest is Base {
         // Exactly at the threshold. `spend` uses a strict `>`, so 10 needs no signature, and
         // `test_atTheThreshold_noSignatureRequired` at the top of this file proves it does not.
         vm.prank(boss);
-        vm.expectRevert(
-            abi.encodeWithSelector(MandateManager.CosignNotRequired.selector, uint256(usd(10)), usd(10))
-        );
+        vm.expectRevert(abi.encodeWithSelector(MandateManager.CosignNotRequired.selector, uint256(usd(10)), usd(10)));
         mm.approveCosignFor(id, vendor, usd(10), REF, n1, validUntil);
 
         vm.prank(boss);
