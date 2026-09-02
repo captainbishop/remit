@@ -413,13 +413,13 @@ contract MandateManager {
     );
 
     /// @notice One payment that cleared. This is the reconcilable record: it names the
-    /// business reference the payer supplied alongside the money that moved, so a ledger can
-    /// be rebuilt from logs alone without decoding calldata.
+    /// business reference the spender supplied alongside the money that moved, so a ledger
+    /// can be rebuilt from logs alone without decoding calldata.
     /// @param mandateId The mandate the payment was made under.
     /// @param spender The delegate that called `spend`.
     /// @param recipient Who received the USDC.
     /// @param amount How much moved, in USDC base units.
-    /// @param ref The payer's own business reference, never interpreted by this contract.
+    /// @param ref The spender's business reference, never interpreted by this contract.
     /// @param nonce The idempotency key, now permanently consumed on this mandate.
     /// @param spendHash The hash a co-signature would have bound, logged whether or not one
     /// was required, so every payment is addressable by the same identifier.
@@ -1006,9 +1006,9 @@ contract MandateManager {
      * on the list.
      * @param amount In USDC base units. Strictly above `cosignThreshold` the spend also
      * needs a live co-signature, which is the last thing checked.
-     * @param ref The payer's own business reference — an invoice id, a job id. Never read
-     * by this contract, only logged, and it is bound into the spend hash so a co-signature
-     * approves the reference too.
+     * @param ref The spender's business reference — an invoice id, a job id. The spender
+     * chooses it, not the payer, so a ledger rebuilt from logs carries the delegate's label.
+     * Never read here, only logged, and bound into the spend hash so a co-signature covers it.
      * @param nonce The idempotency key, unique per mandate, so a retried transaction
      * cannot pay twice.
      * @return hash The spend hash, computed by calling `spendHash` rather than re-encoding,
@@ -1047,11 +1047,12 @@ contract MandateManager {
         // and can never send it: this contract has no token-moving function other than the
         // `transferFrom` below, which always pays a third party, Circle's token holds no
         // recovery path for a balance credited to itself, and the two ERC-8004 registries are
-        // read-only dependencies whose interfaces carry no transfer at all. All four are
-        // permanent properties of deployed code, so a spend to any of them destroys the payer's
-        // money for good while the caps, the nonce and the `Spend` event all record a successful
-        // payment. Refused here rather than left to the payer's allowlist, because F_ALLOWLIST
-        // is optional and this hazard is not.
+        // read-only dependencies whose interfaces carry no transfer at all. Only this contract's
+        // half of that argument rests on code that cannot change; `_isUndebitable` records why
+        // the other three are a conservative ban rather than a certainty. A spend to any of the
+        // four destroys the payer's money for good while the caps, the nonce and the `Spend`
+        // event all record a successful payment. Refused here rather than left to the payer's
+        // allowlist, because F_ALLOWLIST is optional and this hazard is not.
         //
         // F38 added the two registries. They were legal recipients for the whole of v1 and the
         // first half of v2, because the list was written out by hand in three places and the
@@ -1470,8 +1471,8 @@ contract MandateManager {
      * @param recipient The payee this approval covers, and only this one.
      * @param amount The exact amount, in USDC base units. Not a ceiling: a spend of one unit
      * less has a different hash and is not approved.
-     * @param ref The payer's business reference for the payment, so the approval covers what
-     * the spend claims to be for.
+     * @param ref The reference the spend will carry, chosen by the spender rather than the
+     * payer, so the approval covers what the spend claims to be for.
      * @param nonce The idempotency key the spend will carry. Checked for prior use here as
      * well, because a nonce already consumed can never be consumed again.
      * @param validUntil The timestamp this approval dies AT, exclusive. The co-signer's
@@ -1798,7 +1799,7 @@ contract MandateManager {
     /// @param recipient The payee the hash commits to.
     /// @param amount The exact amount, in USDC base units. A co-signature approves one
     /// amount, not a ceiling.
-    /// @param ref The payer's business reference, bound in so the approval covers it too.
+    /// @param ref The spender's business reference, bound in so the approval covers it too.
     /// @param nonce The idempotency key the spend will carry.
     /// @return The hash, over `DOMAIN`, `block.chainid`, this contract, and the six fields
     /// above — so it cannot be replayed onto another chain or another deployment.
@@ -1957,8 +1958,14 @@ contract MandateManager {
     /// function other than the `transferFrom` in `spend`, which always pays a third party;
     /// Circle's token holds no recovery path for a balance credited to itself; and both ERC-8004
     /// registries are contracts this one only ever reads, whose interfaces carry no transfer of
-    /// any kind. All four are permanent properties of deployed code, so none of the four can
-    /// stop holding.
+    /// any kind. Of the four, only this contract rests on code that cannot change, because it is
+    /// immutable and has no upgrade path. USDC has an upgradeable implementation, and the live
+    /// ValidationRegistry was found behind an ERC-1967 proxy on 2026-08-24, so for those three
+    /// the ban is a conservative choice rather than a derived certainty; F23 in
+    /// `THREAT-MODEL.md` carries the proxy evidence and `test/mocks/MockRegistries.sol` records
+    /// the probe. Banning too much is the safe direction, since the cost is refusing a
+    /// recipient that might later have been able to send funds back, while `F_ALLOWLIST` is
+    /// what actually decides who may be paid.
     ///
     /// Factored rather than copied, because the same list is read by `spend`, by
     /// `approveCosignFor` under F17's mirror rule, and by `isAllowedRecipient`. F29 wrote the
@@ -2197,6 +2204,15 @@ contract MandateManager {
     /// real total exceeds this. It is not a promise either: like `spendable`, it is blind
     /// to the allowlist, the cosign threshold, both ERC-8004 gates and the per-call nonce —
     /// see `policyHeadroom` for why those are absent.
+    ///
+    /// ARC NOTE, the same two as `spendable` and for the same reasons, because this view ends in
+    /// the same `allowance` and `balanceOf` clamps. The balance is the 6-decimal ERC-20 view of
+    /// an 18-decimal native balance, so it truncates downward: this total can under-report by up
+    /// to 1e-6 USDC, never over-report, and the error does not compound with the number of
+    /// mandates because the balance is read once for the whole set. It also reserves nothing for
+    /// gas — on Arc the payer pays fees from that same balance, so delegates that between them
+    /// move the whole of this number leave the payer unable to afford `revoke` (F42). That is
+    /// the sharper form of F42: no single delegate has to take everything for it to happen.
     ///
     /// WHY EACH TERM IS CLAMPED AT type(uint96).max. The clamp is the same correction
     /// the co-signature threshold needed, for the same reason: `policyHeadroom` returns
