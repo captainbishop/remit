@@ -537,6 +537,66 @@ contract ViewsTest is Base {
         assertFalse(mm.isNonceUsed(bytes32("nope"), bytes32("n")));
         assertFalse(mm.isCosignApproved(bytes32("nope"), bytes32("h")));
         assertEq(mm.cosignApprovalDeadline(bytes32("nope"), bytes32("h")), 0, "zero means absent");
+
+        MandateManager.IdentityGate memory ig = mm.getIdentityGate(bytes32("nope"));
+        assertEq(ig.agentId, 0, "F50: an absent identity gate reads as no check");
+        assertEq(ig.expectedOwner, address(0));
+
+        MandateManager.CredentialGate memory cg = mm.getCredentialGate(bytes32("nope"));
+        assertEq(cg.requestHash, bytes32(0), "F50: requestHash == 0 means no check");
+        assertEq(cg.validator, address(0));
+    }
+
+    // ------------------------------------- the two ERC-8004 gate views (NEW IN v2, F50)
+
+    /// F50. `createMandate` stored the identity gate and `spend` read it on every payment, and
+    /// no view returned it, so the agent id a payer pinned was recoverable only by decoding the
+    /// calldata of the transaction that granted it. `MandateCreated` carries `flags`, which says
+    /// an identity check applies and not what it applies to.
+    ///
+    /// A mandate without the flag is asserted in the same test, because zero is how a caller
+    /// tells "no check" from "a check on agent zero", and that reading holds only because F32
+    /// refuses identity data without the flag and `createMandate` refuses `agentId == 0` with it.
+    function test_getIdentityGate_returnsTheGateAsGranted() public {
+        bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, agent));
+        MandateManager.IdentityGate memory g = mm.getIdentityGate(id);
+        assertEq(g.agentId, AGENT_ID, "the id the spender must own at spend time");
+        assertEq(g.expectedOwner, agent, "the owner the payer pinned");
+
+        // Pinning is optional, and an unpinned identity gate still reports the id it checks.
+        bytes32 unpinnedId = grant(withIdentity(simpleParams(), AGENT_ID, address(0)));
+        MandateManager.IdentityGate memory unpinned = mm.getIdentityGate(unpinnedId);
+        assertEq(unpinned.agentId, AGENT_ID);
+        assertEq(unpinned.expectedOwner, address(0), "zero means do not pin the owner");
+
+        bytes32 plainId = grant(simpleParams());
+        MandateManager.IdentityGate memory none = mm.getIdentityGate(plainId);
+        assertEq(none.agentId, 0, "no flag, no data");
+        assertEq(none.expectedOwner, address(0));
+    }
+
+    /// F50, for the reason above. Five fields decide which validator, which agent, which
+    /// freshness bound and which score every spend is measured against, and none of them was
+    /// readable. All five are asserted: a getter that returned four correctly and dropped the
+    /// fifth would still leave a payer unable to see what they agreed to.
+    function test_getCredentialGate_returnsAllFiveFieldsAsGranted() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        MandateManager.CredentialGate memory g = mm.getCredentialGate(id);
+        assertEq(g.requestHash, KYC_HASH, "which attestation");
+        assertEq(g.agentId, AGENT_ID, "which agent");
+        assertEq(g.validator, boss, "which validator");
+        assertEq(g.maxStaleness, 1 days, "how fresh the answer must be");
+        assertEq(g.minResponse, 100, "ERC-8004: 100 == passed");
+
+        // `requestHash == 0` is refused when the flag is set, so a zero hash here means no
+        // credential check rather than a check on request zero.
+        bytes32 plainId = grant(simpleParams());
+        MandateManager.CredentialGate memory none = mm.getCredentialGate(plainId);
+        assertEq(none.requestHash, bytes32(0), "no flag, no data");
+        assertEq(none.agentId, 0);
+        assertEq(none.validator, address(0));
+        assertEq(none.maxStaleness, 0);
+        assertEq(none.minResponse, 0);
     }
 
     /// `spendHash` is the ONE view that reverts on an unknown mandate rather than reading as
