@@ -1066,13 +1066,13 @@ would accept a failed attestation. The contract therefore already refuses one cr
 configuration that could never fire, which is the same principle the unreachable-cosign-threshold
 guard applies, so v2 extended an existing pattern rather than inventing one, and that precedent
 is what made the new guard straightforward to justify. (That guard was written here and in
-`CHANGELIST.md` as `perTxCap < cosignThreshold`, which is off by one: line 492 is strict, so
-equality is dead too, as this document goes on to demonstrate with a live receipt further below.
-**v2 implements it as `effectiveMax <= cosignThreshold` where
+`CHANGELIST.md` as `perTxCap < cosignThreshold`, which is off by one: `MandateManager.sol:492`
+is strict, so equality is dead too, as this document goes on to demonstrate with a live receipt
+further below. **v2 implements it as `effectiveMax <= cosignThreshold` where
 `effectiveMax = min(2^96 - 1, perTxCap, totalCap, every window cap)`**, and the boundary is
-pinned one base unit either side in
-`test/Creation.t.sol`. Implementing it also turned up two dead configurations that
-neither this document nor `CHANGELIST.md` had listed — see the README.)
+pinned one base unit either side in `test/Creation.t.sol`. Implementing it also turned up two
+dead configurations that neither this document nor
+`CHANGELIST.md` had listed — see the README.)
 
 One further assumption confirmed rather than discovered: `ownerOf` on a nonexistent token
 reverts with `ERC721NonexistentToken(uint256)` (`0x7e273289`), so Arc's identity registry is

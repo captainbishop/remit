@@ -992,7 +992,7 @@ what remains for #26 is #11's reachability guard.
 
 `m.spendCount += 1` at `v2:697` is the only checked arithmetic site in the contract with
 no guard in front of it, and `spendCount` is `uint32`. At 2^32 spends it raises
-Panic 0x11 rather than a named error. `CHANGELIST.md:294` already notes this and
+Panic 0x11 rather than a named error. `CHANGELIST.md:318-319` already notes this and
 dismisses it as "a genuine difference in reachability rather than a convenience
 excuse", which is true in isolation and wrong as a comparison.
 
@@ -1043,7 +1043,7 @@ used, per the layout comment `12 + 5 + 5 + 4 + 1 + 1 + 1 = 29`, since restored.
 **Fix — and the three options are not independent.** Widening `spendCount` to `uint56`
 would consume all three spare bytes exactly (`12 + 5 + 5 + 7 + 1 + 1 + 1 = 32`), and
 `uint40` would consume one. Those are **the same three bytes** that
-`CHANGELIST.md:298` reserves for the declined `totalSpent` → `uint120` option, so
+`CHANGELIST.md:322-323` reserves for the declined `totalSpent` → `uint120` option, so
 taking them here forecloses that option permanently, and any widening past the three
 spills `Mandate` into a fifth slot — which would add an SLOAD to every read path,
 including the 139-cold-SLOAD budget that `MAX_JOINT = 8` was sized against.

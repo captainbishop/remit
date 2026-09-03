@@ -551,7 +551,7 @@ the contract. See PRIVACY.md for the full four-layer argument, including why it
 must not be named `F_PRIVATE`. Bit 7 is the last free bit in `uint8 flags`;
 widening to `uint16` fits in slot 3's three spare bytes but would invalidate the
 packing measurements. It needs grant-time validation beside the existing
-invariant at line 363, a new branch in `spend`, and its own tests.
+invariant at `MandateManager.sol:363`, a new branch in `spend`, and its own tests.
 
 **~~Certain, free, and confirmed live on 2026-08-25.~~ DONE in v2.** Rename `NotPayer()` to
 `NotAuthorised()`. The error is thrown by `revoke` at line 704, whose check is
@@ -983,7 +983,7 @@ by passing** — the useful question at a surviving mutant is not "which test is
 previously read "nothing that hides amounts or recipients," which was wrong, and
 the reasoning behind the correction is in PRIVACY.md. Amounts and recipients
 can be hidden, though not by this contract: `createMandate` sets
-`payer: msg.sender` (line 371), so any contract that can hold an
+`payer: msg.sender` (`MandateManager.sol:371`), so any contract that can hold an
 allowance can be a Remit payer, and a shielded vault composes *above* Remit
 without touching it. Privacy is a payer, not a flag. That is what keeps it out
 of this changelist rather than an argument that it should not exist.
