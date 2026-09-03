@@ -34,11 +34,11 @@ self-contained and can be read start to finish without following a dependency.
 |---|---|
 | `test/mocks/MockUSDC.sol` (132 lines) | Stands in for Arc's native USDC. It reproduces failure modes rather than idealising them, so what it does and does not model is part of what the suite proves. |
 | `test/mocks/MockRegistries.sol` (129 lines) | Stands in for the two ERC-8004 registries. `ownerOf` reverts for a nonexistent id, matching ERC-721, which is the behaviour the credential gate is written against. |
-| `script/Deploy.s.sol` | Pins the three constructor arguments per chain and reads all three back after deploying. Not deployed code, but a mistake here becomes immutable. |
+| `script/Deploy.s.sol` | Pins the three constructor arguments per chain and reads all three back after deploying. Not deployed code, but a mistake here becomes immutable. `test/Deploy.t.sol` exercises every check it makes. |
 
 ## Out of scope
 
-- `test/` — 11 `.t.sol` files, 254 tests.
+- `test/` — 12 `.t.sol` files, 276 tests.
 - `lib/forge-std/` — forge-std 1.9.6, vendored as 53 tracked files. Test-only;
   `grep -rc forge-std contracts/` returns 0. It is vendored rather than submoduled, so
   no upstream SHA is recorded and byte-equality against the v1.9.6 tag has never been

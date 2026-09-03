@@ -3846,7 +3846,7 @@ still be hiding there.
   a throwaway `contracts/LintProbe.sol` carrying four deliberate violations made the same
   bare invocation report two warnings, and a second run against a warm cache printed
   `No files changed, compilation skipped` *together with* both warnings, so linting does not
-  depend on compiling. `FORGE.md:504-548` carries the method and the numbers.
+  depend on compiling. `FORGE.md:517-559` carries the method and the numbers.
 
   The commenting asymmetry is real and the reason for it is not established. Both casts have
   the same shape — `uint64` of a `uint256` divided by a `uint32` `subLength` — and only the

@@ -58,12 +58,12 @@ CASE_DECL = re.compile(r"function\s+(?:test|invariant_)\w*")
 def suites(code: str):
     """Count the concrete contracts in one file that declare cases.
 
-    Forge reports "Ran N test suites" where a suite is a CONTRACT, not a file, and
-    the two counts differ here: ArcParity.t.sol holds four one-case contracts over
-    a shared abstract base, and WindowInvariant.t.sol holds a handler with none. So
-    eleven files, thirteen suites and 225 cases are all correct simultaneously.
-    This is derived rather than typed because the hand-typed version of this number
-    was the one figure in the last threat-model pass that came out wrong.
+    Forge reports "Ran N test suites" where a suite is a CONTRACT, not a file, and the
+    two counts differ here: ArcParity.t.sol holds four one-case contracts over a shared
+    abstract base, WindowInvariant.t.sol holds a handler with none, and Deploy.t.sol two
+    helpers with none. So twelve files, fourteen suites and 276 cases are all correct
+    simultaneously. This is derived rather than typed because the hand-typed version of
+    this number was the one figure in the last threat-model pass that came out wrong.
     """
     marks = [(m.start(), m.group(1)) for m in CONTRACT_DECL.finditer(code)]
     found = []

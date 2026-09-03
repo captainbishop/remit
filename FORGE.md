@@ -1,15 +1,15 @@
 # Running the Forge suite
 
-254 tests across eleven files — which `forge test` reports as **13 suites**, for reasons
+276 tests across twelve files — which `forge test` reports as **14 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
 is the port of `reference/policy.test.js`, which has 102 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 254 pass; `forge lint` at default severity is clean on the v2 tree.** First
+**Status: all 276 pass; `forge lint` at default severity is clean on the v2 tree.** First
 compiled and first run on 2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at
-200 runs, in about twelve seconds; the last timed run was 12.43 seconds at 254. That covers
+200 runs, in about twelve seconds; the last timed run was 10.92 seconds at 276. That covers
 2,048 fuzz runs across the four property tests and 49,152 calls across the three invariants.
 What the first compile and the first run each cost is recorded below, because a suite's
 first green is the only time you learn whether it was testing anything.
@@ -161,7 +161,7 @@ pre-audit setting and takes minutes.
 
 **The deep profile was run on 2026-08-25 at 140 tests: 140 passed, 0 failed, 0 skipped,
 exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence/deep.log`.
-The suite is 254 tests now, so the deep profile has not been run against its current form.
+The suite is 276 tests now, so the deep profile has not been run against its current form.
 What that run bought, in calls rather than runs: each of the three `invariant_` functions in
 `WindowInvariant.t.sol` ran 2,000 sequences of 256 handler calls, so 512,000 calls apiece
 and 1,536,000 in total, against 16,384 apiece under the default profile. Each of the four
@@ -213,26 +213,31 @@ test/Views.t.sol           28  the pre-flight views an agent decides on
 test/WindowFuzz.t.sol       4  exact-ledger property tests, bounded loops
 test/WindowInvariant.t.sol  5  the same property, with the fuzzer choosing the sequence
 test/ArcParity.t.sol        4  matched local control for the real Arc Testnet transactions
+test/Deploy.t.sol          22  script/Deploy.s.sol: the chain pin, the probes, a bad wiring
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-The column sums to 254, which is the check worth running on it: a suite count swept in the
+The column sums to 276, which is the check worth running on it: a suite count swept in the
 prose above and not here leaves a table that disagrees with its own headline. On 2026-09-02
 this file still said 225 throughout, table included, so the column agreed with the headline
 while both were stale against the suite, which is the version of the problem that reads as
-correct. Reaching 254 took three cells: `Creation` 44, `Gates` 24, `Cosign` 53.
+correct. Getting from 225 to 254 moved four cells: `Creation` 44 → 56, `Cosign` 53 → 66,
+`Gates` 24 → 26, `Views` 26 → 28. Reaching 276 took a whole row instead, added when the
+deploy script stopped being the one file in the repository with no coverage at all.
 
-Ten of the 254 are named attack simulations (`test_ATTACK_*`), one is a regression for
-a bug that shipped into the model (`test_REGRESSION_*`), and three pin behaviour that is
-deliberately weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
+Twelve of the 276 are named attack simulations (`test_ATTACK_*`), three are regressions
+(`test_REGRESSION_*`) — one for a bug that shipped into the model, two for the self-comparing
+read-back that shipped in the deploy script — and three pin behaviour that is deliberately
+weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
-**`forge test` prints `Ran 13 test suites`, and the arithmetic reconciling that count with
-eleven files is as follows.** Forge counts *contracts with test functions*, not files.
-Eleven files hold fourteen non-abstract contracts; `ArcParity.t.sol` alone declares four,
-one per measured transaction, because each needs cold storage. Subtract `WindowHandler` —
-non-abstract but a fuzzing handler with no test functions of its own — and you get 13.
-`Base.t.sol` and `ArcParityBase` are `abstract` and contribute nothing. In total: 11 files,
-13 suites, 254 tests, and all three numbers are correct at the same time.
+**`forge test` prints `Ran 14 test suites`, and the arithmetic reconciling that count with
+twelve files is as follows.** Forge counts *contracts with test functions*, not files.
+Twelve files hold seventeen non-abstract contracts; `ArcParity.t.sol` alone declares four,
+one per measured transaction, because each needs cold storage. Subtract the three that
+declare no test functions of their own — `WindowHandler`, a fuzzing handler, and
+`Token18` and `TransposedRun` in `Deploy.t.sol` — and you get 14. `Base.t.sol` and
+`ArcParityBase` are `abstract` and contribute nothing. In total: 12 files, 14 suites, 276
+tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
 
