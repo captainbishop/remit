@@ -21,7 +21,7 @@ broadcast/
 #
 # Cost of this choice, stated honestly: `forge update` will fight it, and the diff on any
 # future forge-std bump will be large. Bump deliberately, in its own commit, and re-run
-# the full suite plus `forge test --profile deep` afterwards.
+# the full suite plus `FOUNDRY_PROFILE=deep forge test` afterwards.
 
 # Node
 node_modules/

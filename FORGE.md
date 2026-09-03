@@ -106,7 +106,7 @@ tying one to "the current tree" guarantees it expires without anyone noticing.
 
 The cost, stated plainly: `forge update` will fight this, and the diff on any future
 forge-std bump will be large. Bump deliberately, in its own commit, and re-run the full
-suite plus `forge test --profile deep` afterwards.
+suite plus `FOUNDRY_PROFILE=deep forge test` afterwards.
 
 **The same reasoning governs every line number in this repo.** Sixty `line NNN`
 references across `DESIGN.md`, `CHANGELIST.md`, `L3-VAULT.md`, `PRIVACY.md`,
@@ -178,10 +178,13 @@ was found — no counterexample, no shrink, no revert that the policy did not in
 only line in the log matching `panic` is the name of a test that asserts a panic.
 
 Note the invocation. It is written above as `FOUNDRY_PROFILE=deep forge test` rather than
-`forge test --profile deep`, and the reason is a failure mode this repo has already been
-bitten by twice: a flag or glob that Foundry does not accept can fail with no error,
-leaving you reading a run that used the default settings while looking like success. The
-env-var form is the one guaranteed across versions. Whichever you use, put `forge config`
+`forge test --profile deep`, and the reason is a failure mode this repo has now been bitten
+by three times. Twice it was silent: a flag or glob that Foundry does not accept can fail
+with no error, leaving you reading a run that used the default settings while looking like
+success. The third time, on 2026-09-03, it was this flag — the installed Foundry answers
+`error: unexpected argument '--profile' found` and runs nothing at all, which inside a
+multi-line paste is indistinguishable from a command that printed no output. The env-var
+form is the one guaranteed across versions. Whichever you use, put `forge config`
 in front of it and check that `runs = 20000` and `depth = 256` actually come back — that
 dump is the first thing in `evidence/deep.log` for exactly this reason. Do not infer that
 the deep profile was live from the fact that the run took a long time.

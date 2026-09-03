@@ -84,7 +84,7 @@ them and the ring-bucket state has to be rebuilt from scratch.
 The live investigation against this deployment finishes first. Cut v2 when the
 ERC-8004 verification work (#32) is done, the 53,114 question (#31) is settled, and the
 docs are corrected (#33) — then make every change below in one pass, re-run the
-full suite plus `forge test --profile deep`, redeploy, and re-measure.
+full suite plus `FOUNDRY_PROFILE=deep forge test`, redeploy, and re-measure.
 
 *Status, 2026-08-25:* #32, #33, #44 and #45 are all done, so the live
 investigation against this deployment is complete — all five state-changing
@@ -363,7 +363,7 @@ trail with no error, which is worse than a cliff no caller can reach.
 **How it went missing.** This is one of three "documented soft spots" that the real-money
 decision of 2026-08-24 turned from curiosities into real decisions. The other two — the
 unreachable cosign requirement and the misleading `NotPayer()` — are both above. This one is
-recorded in `README.md:480`, `FORGE.md:270` and the test's own header, and was named in the
+recorded in `README.md:480`, `FORGE.md:273` and the test's own header, and was named in the
 same breath as the other two when the decision was made, and it still reached this file's
 "changelist" section in none of them. All three were documented and two of the three were
 listed. **A list assembled by remembering what belongs on it will be short by about a

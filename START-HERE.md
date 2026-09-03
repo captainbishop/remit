@@ -85,7 +85,7 @@ to skip it, and I would tell someone with five years of Solidity behind them exa
 same thing — contracts that move other people's money get attacked by people who do this
 full time, and they do not grade on a curve for a first project.
 
-Before that audit, the suite gets run at `--profile deep`: 20,000 fuzz runs instead of
+Before that audit, the suite gets run with `FOUNDRY_PROFILE=deep`: 20,000 fuzz runs instead of
 512, and 2,000 invariant runs at four times the depth. It takes minutes rather than
 seconds. The default profile is tuned to finish while you watch it, which is the right
 setting for development and the wrong one for the last run before an audit.

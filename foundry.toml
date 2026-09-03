@@ -73,7 +73,7 @@ depth = 64
 fail_on_revert = false
 shrink_run_limit = 5000
 
-# `forge test --profile deep` before an audit. Minutes, not seconds.
+# `FOUNDRY_PROFILE=deep forge test` before an audit. Minutes, not seconds.
 [profile.deep]
 src = "contracts"
 test = "test"

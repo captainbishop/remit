@@ -831,7 +831,7 @@ Two Arc behaviours remain asserted from documentation rather than observed: sub-
 blocks sharing a timestamp, and the CallFrom precompile. Whether an EIP-7702-delegated EOA
 counts as an EOA for the Memo path is also unresolved and matters for smart-account agents.
 
-Before this is trusted with money: run the suite at `--profile deep`, exercise the untouched
+Before this is trusted with money: run the suite with `FOUNDRY_PROFILE=deep`, exercise the untouched
 paths on testnet, resolve the three documented soft spots as decisions, and get it audited.
 Three of those four have since happened — the deep profile has been run, the live phase is
 closed at 31 receipts covering all five state-changing functions, and all three soft spots

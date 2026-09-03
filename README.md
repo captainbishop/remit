@@ -543,8 +543,8 @@ that sweep is the expensive part, not the two lines of Solidity.
 
 This is a blocker rather than a disclaimer: Remit is intended to hold real money, not to
 be a testnet demonstration. That intent is what makes the audit a scheduled line item and
-what makes `forge test --profile deep` (20,000 fuzz runs, 2,000 invariant runs at depth
-256) the bar to clear before it, rather than the default profile used during development.
+what makes `FOUNDRY_PROFILE=deep forge test` (20,000 fuzz runs, 2,000 invariant runs at
+depth 256) the bar to clear before it, rather than the default profile used during development.
 It is also what reopened the three soft spots listed above as decisions rather than
 curiosities, and what settled each of them the strict way — the dead co-signature branch
 in particular, which had been left legal on the reasoning that a merely useless
@@ -580,7 +580,7 @@ caveat that nearly made this look like a 40% improvement.
 What remains, in order:
 
 Four items that used to head this list are done and are struck from it rather than deleted,
-since the order they came off in is itself a record. `forge test --profile deep` — 20,000
+since the order they came off in is itself a record. `FOUNDRY_PROFILE=deep forge test` — 20,000
 fuzz runs, 2,000 invariant runs at depth 256 — has been run as the bar to clear before the
 audit. The three soft spots have been resolved as decisions, all three the strict way, and
 the third one uncovered two more. The live exercises are closed: a cosigned spend and a
