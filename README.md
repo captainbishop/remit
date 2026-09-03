@@ -146,7 +146,7 @@ demo/playground.html       browser simulation with 7 scripted attacks
 evidence/                  the testnet logs every gas and receipt figure is quoted from
 scope.md                   what an auditor is being asked to read, and what they are not
 DESIGN.md                  rationale, worked examples, verification worksheet
-THREAT-MODEL.md            the adversarial review: assets, boundaries, 40 findings
+THREAT-MODEL.md            the adversarial review: assets, boundaries, 50 findings
 IMMUTABILITY.md            what "no upgrade path" means for a payer, and the migration runbook
 PRIVACY.md                 what a mandate leaks, and the layers that could stop it
 CONFIDENTIAL-USDC.md       the unanswered question underneath them, and who owns it

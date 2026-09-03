@@ -4506,7 +4506,7 @@ had been written for `approveCosignFor` and scanned for `throw refuse(` while `e
 with `return deny(`. A mutation gate that covers half a file reports a clean sweep in exactly the
 same words as one that covers all of it.
 
-**Where the 41 findings actually came from, since §4 now promises this accounting in writing.**
+**Where the 50 findings actually came from, since §4 now promises this accounting in writing.**
 Sorted by what produced them rather than by what they are:
 
 - **Reading source against something else — 32.** F1–F26, plus F29, F30, F32, F34, F35 and F36.
@@ -4516,9 +4516,14 @@ Sorted by what produced them rather than by what they are:
   twice on its first run.
 - **A mutation gate — 3.** F27 and F28 on 2026-08-28 from extending `reference/mutation-gate.js` to
   `evaluate`, and F37 on 2026-08-29 from the same mutation gate over `createMandate`.
-- **A twelve-agent parallel sweep — 4.** F38, F39, F40 and F41, all reported on 2026-08-30, from
+- **A twelve-agent parallel sweep — 9.** F38, F39, F40 and F41, all reported on 2026-08-30, from
   twelve readers run at once over one bundle of the whole in-scope source, each carrying a single
-  specialty and a rule that a claim without a concrete trace is a lead rather than a finding.
+  specialty and a rule that a claim without a concrete trace is a lead rather than a finding. F42
+  is the same run's eighth and last report, read a day later. F47 through F50 come from a second
+  run of the instrument, over the tree at `d4d2fb5`, and landed on 2026-09-02.
+- **A sweep lead worked afterwards — 4.** F43, F44, F45 and F46, all on 2026-09-01. A lead is a
+  claim its reader could not carry to a trace, so the first run returned leads alongside its
+  findings, and four of the leads became entries once the missing proof was worked out by hand.
 - **This document's own coverage list — 1.** F31. §5 had carried a bullet asking for a test that
   stages a future-dated `lastUpdate`; writing it found the arithmetic underneath.
 - **Another finding's fix — 1.** F33, whose second half is the grant-time validation F27 asked
@@ -4527,14 +4532,14 @@ Sorted by what produced them rather than by what they are:
 **The sweep is reading, and putting it in its own bucket is a claim about how much the parallelism
 mattered rather than about a new class of instrument.** Twelve of the thirty-two above came from one
 reader asking one question at a time, and the same reader had been over `spend` and
-`approveCosignFor` repeatedly by 2026-08-30 without seeing any of these four. What the twelve had
-that the one did not is a fixed narrow brief each: the finding that became F40 is a comparison
+`approveCosignFor` repeatedly by 2026-08-30 without seeing any of F38 through F41. What the twelve
+had that the one did not is a fixed narrow brief each: the finding that became F40 is a comparison
 between a comment's justification and the code two functions away, which is a question no one asks
 while working through a file in order. **The honest summary is that the same method run twelve ways
 found four things it had missed four times running**, and that is a statement about coverage, not
 about cleverness.
 
-**The yield is four entries out of eight reports, and the other four are the calibration.** The
+**The yield is five entries out of eight reports, and the other three are the calibration.** The
 sweep returned eight findings. Three became F38, F39 and F40 as written. One became F41 at a lower
 severity than it was filed at, because the fix it proposed — refusing long windows alongside
 `F_COSIGN` at grant time — costs a payer more than the defect does. One was reversed: the guard it
@@ -4542,9 +4547,11 @@ attacked was right and the comment above it was wrong, so it landed as the scopi
 against F31 rather than as an entry of its own. Two were rejected on the code, and both rejections
 are recorded where a reader will meet the claim: the lifetime-cap version of F41 inside F41, and a
 proposal to widen `isNonceUsed` to report live reservations, which would make a delegate that
-crashed mid-spend read an unmade payment as made and skip it; the eighth is still unread. **So a
-report count is not a finding count**, and the four that did not become entries took longer to
-adjudicate than the three that were accepted outright.
+crashed mid-spend read an unmade payment as made and skip it. The eighth was unread when this
+paragraph was written and became F42 on 2026-08-31, at low severity and as a trust boundary that
+had never been written down rather than a defect in a guard. **So a report count is not a finding
+count**, and the three that did not become entries took longer to adjudicate than the three the
+first run accepted outright.
 
 **One of the three accepted outright arrived incomplete, and the gap is the same one this document
 keeps recording.**
@@ -4554,6 +4561,17 @@ identical refusal; F38's registries were reported against the guard in `spend` w
 the same way four fix sketches before it did** — the fifth, sixth and seventh instances of the
 pattern §4 tracks, and the first three not produced by a single reader.
 
+**A second run of the same instrument, over a tree it had already swept once, returned ten reports
+and four entries.** F47 through F50, landed together in `6b1e4d7` on 2026-09-02. Of the other six,
+three were defects in `script/Deploy.s.sol` rather than in the contract and landed in `15915d1`,
+two were documentation corrections and landed in `b423723`, and one proposes the mitigation F42
+never weighed — a second authorised revoker who pays their own gas — which is open as of
+2026-09-03. **F47 sits inside the first run's own repair.** F39 came out of that run, and the fix
+for it added a second route for clearing a stale reservation while leaving the payer, who owns the
+funds, without one. So a second pass over an already-swept tree paid for itself on what the first
+pass had changed, which is an argument for re-running a sweep once its findings are fixed rather
+than only once the code has grown.
+
 **Three of the four single-source findings share a shape, and it is not the shape a tool is supposed
 to have.** In each of F27, F37 and F31 the artefact reported nothing wrong. The gate said a mutant
 survived — which by its own header means *a test is missing* — and the divergence was found by
@@ -4562,30 +4580,37 @@ missing*, and the arithmetic error was found by writing it. **Neither instrument
 found a silence, and the defect was underneath it.** That is a cheaper thing to build than a bug
 finder and it is the thing worth building next.
 
-**The 32-to-8 split should not be read as reading winning.** The two verification instruments have
-existed for three days between them, one covers a single function of a JavaScript model and the other
-rewrites `revert` statements only, so it cannot see a view at all — §5 records that as the largest
-known hole in this project's verification. A method's yield is not comparable to another's until
-their coverage is, and on coverage these two are not close. What can be said is narrower and still
-useful: **every finding either instrument has produced was invisible to a careful reader who had
-already read the same lines**, which is four for four — and the three from the sweep say the same
-thing about the reader from the other direction, since a careful reader is what they replaced.
+**The 32-to-17 split should not be read as reading winning**, and thirteen of the seventeen are the
+sweep and its leads, which this section has already called reading under a narrower brief. The two
+verification instruments had existed for three days between them when that was written; one covers
+a single function of a JavaScript model and the other rewrites `revert` statements only, so it
+cannot see a view at all — §5 records that as the largest known hole in this project's
+verification. A method's yield is not comparable to another's until their coverage is, and on
+coverage these two are not close. What can be said is narrower and still useful: **every finding
+either instrument has produced was invisible to a careful reader who had already read the same
+lines**, which is four for four — and the three the first run accepted outright say the same thing
+about the reader from the other direction, since a careful reader is what they replaced.
 
 **What has not been swept:** the actor-versus-actor matrix is complete for the delegate, for
 third parties, for the **co-signer** and for the **recipient**, and as of 2026-08-26 the
-Solidity surface is complete too — all eleven test files and both mocks have now been read,
+Solidity surface was complete too — all eleven test files and both mocks had been read,
 deliberately not equally. Three were read in full — `test/mocks/MockUSDC.sol`,
 `test/mocks/MockRegistries.sol` and `test/Base.t.sol` — because they carry the trust assumptions
 that bound what a green suite is able to mean; that produced F23, F24, F25, F26 and the two lists
 under *"What a green suite cannot mean"*. The other ten were swept for **vacuity** rather than
 adversary surface — a test body has no adversary, so the only way it can hurt you is by passing
 without asserting anything — and that produced no findings at all, which is reported in §5 as a
-result rather than omitted as a non-event. **There is no deploy script and there never has been:**
-`git log --all --diff-filter=A --name-only` shows no `.s.sol` path and no `script/`
-directory anywhere in the repository's history, because v1 was deployed by hand with
-`forge create`. An earlier version of this paragraph was wrong on both counts, saying "the
-four other Solidity files" when there are thirteen, and implying a deploy script existed to
-be swept.
+result rather than omitted as a non-event. **A deploy script now exists, and it did not when this
+paragraph was written.** `script/Deploy.s.sol` arrived on 2026-08-28 in `9fa7ece`, after v1 had
+already been deployed by hand with `forge create`. The `git log --all --diff-filter=A --name-only`
+cited here as returning no `.s.sol` path now returns that one, and it has been swept since:
+findings 1, 2 and 5 of the `d4d2fb5` review are all in it, the first being three wiring checks
+that compared each constructor argument against itself, and `test/Deploy.t.sol` has exercised it
+since 2026-09-03. The project's Solidity surface is fifteen files at HEAD, where the sweep above
+covered thirteen — twelve test files now, two mocks and the script. An earlier version of this
+paragraph said "the four other Solidity files" when there were thirteen and implied a deploy
+script existed to be swept; the denial that replaced it was written on 2026-08-27 and the script
+arrived a day later.
 
 **How the trust-assumption sweep was run, and the two moves that produced everything in it.**
 Neither was a search for bugs in the mocks; a mock has no users. The question was *what does a
