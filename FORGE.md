@@ -544,8 +544,8 @@ of them is a naming or file-layout convention rather than a defect:
 
 | lint | where | count |
 | --- | --- | --- |
-| `multi-contract-file` | `MandateManager.sol` :147, :156, :164, :194 | 4 |
-| `screaming-snake-case-immutable` | `MandateManager.sol` :205, :210, :214 | 3 |
+| `multi-contract-file` | `MandateManager.sol` :147, :156, :164, :200 | 4 |
+| `screaming-snake-case-immutable` | `MandateManager.sol` :211, :216, :220 | 3 |
 | `screaming-snake-case-const` | `MockUSDC.sol` :52, :53, :54 | 3 |
 | `multi-contract-file` | `MockRegistries.sol` :16, :74 | 2 |
 

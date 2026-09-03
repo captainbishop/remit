@@ -162,6 +162,12 @@ interface IIdentityRegistry {
 /// validator and the agent the attestation is about come back in the tuple and
 /// must be checked, or the gate is decorative. See _checkCredential.
 interface IValidationRegistry {
+    /// @return validatorAddress The validator that answered this hash, required to match the one the payer named.
+    /// @return agentId The agent the attestation is about, compared against the agent the payer expects.
+    /// @return response The verdict as a score, required to reach the payer's `minResponse` floor.
+    /// @return responseHash The attestation's payload hash, which this contract decodes and leaves unused.
+    /// @return tag The validator's free-text label, whose dynamic type widens the decode failures F49 records.
+    /// @return lastUpdate When the attestation was last updated, which the freshness rule measures age from.
     function getValidationStatus(bytes32 requestHash)
         external
         view
