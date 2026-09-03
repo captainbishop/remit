@@ -1135,11 +1135,11 @@ primitive, so it is enforced rather than documented"* — and what was enforced 
 than what that sentence promised.
 
 `L3-VAULT.md:174` states this exactly and correctly, and concludes *"the vault must require
-it in its own code."* As with F1, the knowledge was in the repository but was addressed
-to a developer building a vault on top of Remit, not to the ordinary payer who reads
-`README.md` and grants a mandate directly. Both passages have since been extended to record
-what v2 changed — and in each case the conclusion the vault spec had reached survives the
-narrowing, for reasons the spec now states rather than leaves as an inference.
+the flag in its own code."* As with F1, the knowledge was in the repository but was
+addressed to a developer building a vault on top of Remit, not to the ordinary payer who
+reads `README.md` and grants a mandate directly. Both passages have since been extended to
+record what v2 changed — and in each case the conclusion the vault spec had reached
+survives the narrowing, for reasons the spec now states rather than leaves as an inference.
 
 Whether to *change* it was a real design question rather than an obvious fix. Refusing
 `F_PER_TX`-only grants breaks legitimately open-ended arrangements (a subscription with a
@@ -4357,9 +4357,10 @@ overwritten cannot show you which way its own numbers move.
   the parameterised form at `af9df40` and is a docstring line now. A `HEAD` run of
   `reference/line-citations.py` could not see it, because the working tree and `HEAD` agreed about
   866 itself; the bare run printed the docstring line as the target and reported nothing wrong,
-  since a bare run lists rather than judges. **What surfaced it was luck**: six test inserts moved
-  `HEAD`'s text off 866, and drift against `HEAD` is the one thing that run does fail on. The
-  pointer is a helper's name now, which no insert above it can move.
+  since a bare run listed rather than judged then; it now fails on a quotation of a document that is
+  not at the line citing it, and this bullet quoted nothing. **What surfaced it was luck**: six test
+  inserts moved `HEAD`'s text off 866, and drift against `HEAD` is the one thing that run does fail
+  on. The pointer is a helper's name now, which no insert above it can move.
 - **All 37 declared errors are expected by at least one test, and there is no orphan.** Same loop as
   before. `BadConfig` 33, `CosignRequired` 9, `SelfPayment` 8, then `UnknownMandate`,
   `BadDeadline` and `CredentialMissing` at 6 apiece. **Four errors are named exactly once** —
