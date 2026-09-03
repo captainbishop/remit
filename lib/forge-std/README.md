@@ -2,7 +2,7 @@
 
 Forge Standard Library is a collection of helpful contracts and libraries for use with [Forge and Foundry](https://github.com/foundry-rs/foundry). It leverages Forge's cheatcodes to make writing tests easier and faster, while improving the UX of cheatcodes.
 
-**Learn how to use Forge-Std with the [📖 Foundry Book (Forge-Std Guide)](https://book.getfoundry.sh/forge/forge-std.html).**
+**Learn how to use Forge-Std with the [📖 Foundry Book (Forge-Std Guide)](https://getfoundry.sh/reference/forge-std/overview/).**
 
 ## Install
 
@@ -11,9 +11,10 @@ forge install foundry-rs/forge-std
 ```
 
 ## Contracts
+
 ### stdError
 
-This is a helper contract for errors and reverts. In Forge, this contract is particularly helpful for the `expectRevert` cheatcode, as it provides all compiler builtin errors.
+This is a helper contract for errors and reverts. In Forge, this contract is particularly helpful for the `expectRevert` cheatcode, as it provides all compiler built-in errors.
 
 See the contract itself for all error codes.
 
@@ -45,11 +46,12 @@ contract ErrorsTest {
 
 ### stdStorage
 
-This is a rather large contract due to all of the overloading to make the UX decent. Primarily, it is a wrapper around the `record` and `accesses` cheatcodes. It can *always* find and write the storage slot(s) associated with a particular variable without knowing the storage layout. The one _major_ caveat to this is while a slot can be found for packed storage variables, we can't write to that variable safely. If a user tries to write to a packed slot, the execution throws an error, unless it is uninitialized (`bytes32(0)`).
+This is a rather large contract due to all of the overloading to make the UX decent. Primarily, it is a wrapper around the `record` and `accesses` cheatcodes. It can _always_ find and write the storage slot(s) associated with a particular variable without knowing the storage layout. By default, writing to packed storage variables is not supported and will throw an error. However, you can enable packed slot support by calling `enable_packed_slots()` before using `find()` or `checked_write()`.
 
 This works by recording all `SLOAD`s and `SSTORE`s during a function call. If there is a single slot read or written to, it immediately returns the slot. Otherwise, behind the scenes, we iterate through and check each one (assuming the user passed in a `depth` parameter). If the variable is a struct, you can pass in a `depth` parameter which is basically the field depth.
 
 I.e.:
+
 ```solidity
 struct T {
     // depth 0
@@ -74,7 +76,7 @@ contract TestContract is Test {
     }
 
     function testFindExists() public {
-        // Lets say we want to find the slot for the public
+        // Let's say we want to find the slot for the public
         // variable `exists`. We just pass in the function selector
         // to the `find` command
         uint256 slot = stdstore.target(address(test)).sig("exists()").find();
@@ -82,16 +84,16 @@ contract TestContract is Test {
     }
 
     function testWriteExists() public {
-        // Lets say we want to write to the slot for the public
+        // Let's say we want to write to the slot for the public
         // variable `exists`. We just pass in the function selector
         // to the `checked_write` command
         stdstore.target(address(test)).sig("exists()").checked_write(100);
         assertEq(test.exists(), 100);
     }
 
-    // It supports arbitrary storage layouts, like assembly based storage locations
+    // It supports arbitrary storage layouts, like assembly-based storage locations
     function testFindHidden() public {
-        // `hidden` is a random hash of a bytes, iteration through slots would
+        // `hidden` is a random hash of bytes; iterating through slots would
         // not find it. Our mechanism does
         // Also, you can use the selector instead of a string
         uint256 slot = stdstore.target(address(test)).sig(test.hidden.selector).find();
@@ -165,13 +167,13 @@ contract Storage {
 
 ### stdCheats
 
-This is a wrapper over miscellaneous cheatcodes that need wrappers to be more dev friendly. Currently there are only functions related to `prank`. In general, users may expect ETH to be put into an address on `prank`, but this is not the case for safety reasons. Explicitly this `hoax` function should only be used for addresses that have expected balances as it will get overwritten. If an address already has ETH, you should just use `prank`. If you want to change that balance explicitly, just use `deal`. If you want to do both, `hoax` is also right for you.
-
+This is a wrapper around miscellaneous cheatcodes that need wrappers to be more dev-friendly. It includes functions for pranking, dealing with ETH and tokens, deploying contracts, creating test addresses, time manipulation, and fuzzing helpers. In general, users may expect ETH to be put into an address with `prank`, but this is not the case for safety reasons. Explicitly, this `hoax` function should only be used for addresses that have expected balances as it will get overwritten. If an address already has ETH, you should just use `prank`. If you want to change that balance explicitly, just use `deal`. If you want to do both, `hoax` is also right for you.
 
 #### Example usage:
+
 ```solidity
 
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
@@ -217,7 +219,53 @@ contract Bar {
 
 ### Std Assertions
 
-Contains various assertions.
+Provides comprehensive assertion functions for testing, including equality checks (assertEq, assertNotEq), comparisons (assertLt, assertGt, assertLe, assertGe), approximate equality (assertApproxEqAbs, assertApproxEqRel), and boolean assertions (assertTrue, assertFalse). All assertions support multiple data types and optional custom error messages.
+
+### StdConfig
+
+This is a contract that parses a TOML configuration file and loads its variables into storage, automatically casting them on deployment. It assumes a TOML structure where top-level keys represent chain IDs or aliases. Under each chain key, variables are organized by type in separate sub-tables like `[<chain>.<type>]`, where type must be: `bool`, `address`, `bytes32`, `uint`, `int`, `string`, or `bytes`.
+
+#### Example usage
+
+```solidity
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity ^0.8.13;
+
+import "forge-std/Script.sol";
+import "forge-std/StdConfig.sol";
+
+contract MyScript is Script {
+    StdConfig config;
+
+    function run() public {
+        // Load config (set writeToFile=true only in scripts to persist changes)
+        config = new StdConfig("config.toml", false);
+
+        // Get values for the current chain
+        uint256 myNumber = config.get("important_number").toUint256();
+        address weth = config.get("weth").toAddress();
+        address[] memory admins = config.get("whitelisted_admins").toAddressArray();
+
+        // Get values for a specific chain
+        bool isLive = config.get(1, "is_live").toBool();
+
+        // Check if a key exists
+        if (config.exists("optional_param")) {
+            // ...
+        }
+
+        // Get RPC URL for current or specific chain
+        string memory rpc = config.getRpcUrl();
+        string memory mainnetRpc = config.getRpcUrl(1);
+
+        // Get all configured chain IDs
+        uint256[] memory chainIds = config.getChainIds();
+    }
+}
+```
+
+See the contract itself for supported TOML format and all available methods.
 
 ### `console.log`
 
@@ -251,13 +299,13 @@ See our [contributing guidelines](./CONTRIBUTING.md).
 
 ## Getting Help
 
-First, see if the answer to your question can be found in [book](https://book.getfoundry.sh).
+First, see if the answer to your question can be found in [book](https://getfoundry.sh/).
 
 If the answer is not there:
 
--   Join the [support Telegram](https://t.me/foundry_support) to get help, or
--   Open a [discussion](https://github.com/foundry-rs/foundry/discussions/new/choose) with your question, or
--   Open an issue with [the bug](https://github.com/foundry-rs/foundry/issues/new/choose)
+- Join the [support Telegram](https://t.me/foundry_support) to get help, or
+- Open a [discussion](https://github.com/foundry-rs/foundry/discussions/new/choose) with your question, or
+- Open an issue with [the bug](https://github.com/foundry-rs/foundry/issues/new/choose)
 
 If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/foundry_rs) to chat with us about the development of Foundry!
 

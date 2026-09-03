@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: MIT
-pragma solidity >=0.6.2;
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity >=0.8.13 <0.9.0;
 
-import "./IERC20.sol";
+import {IERC20} from "./IERC20.sol";
 
 /// @dev Interface of the ERC4626 "Tokenized Vault Standard", as defined in
 /// https://eips.ethereum.org/EIPS/eip-4626
@@ -79,7 +79,7 @@ interface IERC4626 is IERC20 {
     /// - MUST emit the Deposit event.
     /// - MAY support an additional flow in which the underlying tokens are owned by the Vault contract before the
     ///   deposit execution, and are accounted for during deposit.
-    /// - MUST revert if all of assets cannot be deposited (due to deposit limit being reached, slippage, the user not
+    /// - MUST revert if all assets cannot be deposited (due to deposit limit being reached, slippage, the user not
     ///   approving enough underlying tokens to the Vault contract, etc).
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault’s underlying asset token.
@@ -112,7 +112,7 @@ interface IERC4626 is IERC20 {
     /// - MUST emit the Deposit event.
     /// - MAY support an additional flow in which the underlying tokens are owned by the Vault contract before the mint
     ///   execution, and are accounted for during mint.
-    /// - MUST revert if all of shares cannot be minted (due to deposit limit being reached, slippage, the user not
+    /// - MUST revert if all shares cannot be minted (due to deposit limit being reached, slippage, the user not
     ///   approving enough underlying tokens to the Vault contract, etc).
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault’s underlying asset token.
@@ -138,7 +138,7 @@ interface IERC4626 is IERC20 {
     /// - MUST NOT revert.
     ///
     /// NOTE: any unfavorable discrepancy between convertToShares and previewWithdraw SHOULD be considered slippage in
-    /// share price or some other type of condition, meaning the depositor will lose assets by depositing.
+    /// share price or some other type of condition, meaning the owner will lose assets by withdrawing.
     function previewWithdraw(uint256 assets) external view returns (uint256 shares);
 
     /// @notice Burns shares from owner and sends exactly assets of underlying tokens to receiver.
@@ -146,7 +146,7 @@ interface IERC4626 is IERC20 {
     /// - MUST emit the Withdraw event.
     /// - MAY support an additional flow in which the underlying tokens are owned by the Vault contract before the
     ///   withdraw execution, and are accounted for during withdrawal.
-    /// - MUST revert if all of assets cannot be withdrawn (due to withdrawal limit being reached, slippage, the owner
+    /// - MUST revert if all assets cannot be withdrawn (due to withdrawal limit being reached, slippage, the owner
     ///   not having enough shares, etc).
     ///
     /// Note that some implementations will require pre-requesting to the Vault before a withdrawal may be performed.
@@ -161,7 +161,7 @@ interface IERC4626 is IERC20 {
     /// - MUST NOT revert.
     function maxRedeem(address owner) external view returns (uint256 maxShares);
 
-    /// @notice Allows an on-chain or off-chain user to simulate the effects of their redeemption at the current block,
+    /// @notice Allows an on-chain or off-chain user to simulate the effects of their redemption at the current block,
     /// given current on-chain conditions.
     /// @dev
     /// - MUST return as close to and no more than the exact amount of assets that would be withdrawn in a redeem call
@@ -173,7 +173,7 @@ interface IERC4626 is IERC20 {
     /// - MUST NOT revert.
     ///
     /// NOTE: any unfavorable discrepancy between convertToAssets and previewRedeem SHOULD be considered slippage in
-    /// share price or some other type of condition, meaning the depositor will lose assets by redeeming.
+    /// share price or some other type of condition, meaning the owner will lose assets by redeeming.
     function previewRedeem(uint256 shares) external view returns (uint256 assets);
 
     /// @notice Burns exactly shares from owner and sends assets of underlying tokens to receiver.
@@ -181,7 +181,7 @@ interface IERC4626 is IERC20 {
     /// - MUST emit the Withdraw event.
     /// - MAY support an additional flow in which the underlying tokens are owned by the Vault contract before the
     ///   redeem execution, and are accounted for during redeem.
-    /// - MUST revert if all of shares cannot be redeemed (due to withdrawal limit being reached, slippage, the owner
+    /// - MUST revert if all shares cannot be redeemed (due to withdrawal limit being reached, slippage, the owner
     ///   not having enough shares, etc).
     ///
     /// NOTE: some implementations will require pre-requesting to the Vault before a withdrawal may be performed.

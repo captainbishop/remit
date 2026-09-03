@@ -101,7 +101,7 @@ abstract contract ArcParityBase is Base {
         }
     }
 
-    /// `pure` is correct: forge-std 1.9.6's console.log is itself pure, which solc
+    /// `pure` is correct: forge-std 1.16.2's console.log is itself pure, which solc
     /// confirmed by warning (2018) when this was first written as view.
     function _report(string memory label, uint256 execution, bytes memory cd) internal pure {
         uint256 intrinsic = _intrinsic(cd);

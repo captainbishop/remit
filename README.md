@@ -224,7 +224,7 @@ Arc's own tutorial uses `cast wallet new` and a `PRIVATE_KEY` in `.env`. This us
 encrypted keystore instead: the key is never printed and never written in plaintext.
 
 ```
-forge build                                    # clean; forge-std 1.9.6 is vendored in lib/
+forge build                                    # clean; forge-std 1.16.2 vendored in lib/
 forge test                                     # 276 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;

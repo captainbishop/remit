@@ -421,9 +421,9 @@ abstract contract Base is Test {
     /// bytes4 does not implicitly convert.
     ///
     /// This used to be non-`pure`, with a comment claiming "assertEq logs on failure".
-    /// That was true of older forge-std; as of 1.9.6 the assertions route through
-    /// `vm.assertEq` and are themselves `pure`, and solc emits Warning (2018) saying so.
-    /// The comment outlived the fact it described.
+    /// That was true of older forge-std; as of 1.9.6, and still at 1.16.2, the assertions
+    /// route through `vm.assertEq` and are themselves `pure`, and solc emits Warning (2018)
+    /// saying so. The comment outlived the fact it described.
     function assertRevertedWith(bytes memory err, bytes4 expected, string memory ctx) internal pure {
         assertEq(bytes32(selectorOf(err)), bytes32(expected), ctx);
     }

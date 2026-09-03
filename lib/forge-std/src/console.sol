@@ -1,30 +1,21 @@
-// SPDX-License-Identifier: MIT
-pragma solidity >=0.4.22 <0.9.0;
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity >=0.8.13 <0.9.0;
 
 library console {
-    address constant CONSOLE_ADDRESS =
-        0x000000000000000000636F6e736F6c652e6c6f67;
+    address constant CONSOLE_ADDRESS = 0x000000000000000000636F6e736F6c652e6c6f67;
 
     function _sendLogPayloadImplementation(bytes memory payload) internal view {
         address consoleAddress = CONSOLE_ADDRESS;
-        /// @solidity memory-safe-assembly
-        assembly {
-            pop(
-                staticcall(
-                    gas(),
-                    consoleAddress,
-                    add(payload, 32),
-                    mload(payload),
-                    0,
-                    0
-                )
-            )
+        assembly ("memory-safe") {
+            pop(staticcall(gas(), consoleAddress, add(payload, 32), mload(payload), 0, 0))
         }
     }
 
-    function _castToPure(
-      function(bytes memory) internal view fnIn
-    ) internal pure returns (function(bytes memory) pure fnOut) {
+    function _castToPure(function(bytes memory) internal view fnIn)
+        internal
+        pure
+        returns (function(bytes memory) pure fnOut)
+    {
         assembly {
             fnOut := fnIn
         }
@@ -1556,5 +1547,53 @@ library console {
 
     function log(address p0, address p1, address p2, address p3) internal pure {
         _sendLogPayload(abi.encodeWithSignature("log(address,address,address,address)", p0, p1, p2, p3));
+    }
+
+    function table(uint256[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(uint256[])", values));
+    }
+
+    function table(int256[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(int256[])", values));
+    }
+
+    function table(address[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(address[])", values));
+    }
+
+    function table(bytes32[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(bytes32[])", values));
+    }
+
+    function table(string[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[])", values));
+    }
+
+    function table(bool[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(bool[])", values));
+    }
+
+    function table(string[] memory keys, uint256[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],uint256[])", keys, values));
+    }
+
+    function table(string[] memory keys, int256[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],int256[])", keys, values));
+    }
+
+    function table(string[] memory keys, address[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],address[])", keys, values));
+    }
+
+    function table(string[] memory keys, bytes32[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],bytes32[])", keys, values));
+    }
+
+    function table(string[] memory keys, string[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],string[])", keys, values));
+    }
+
+    function table(string[] memory keys, bool[] memory values) internal pure {
+        _sendLogPayload(abi.encodeWithSignature("table(string[],bool[])", keys, values));
     }
 }

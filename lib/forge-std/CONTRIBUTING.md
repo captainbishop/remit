@@ -140,13 +140,13 @@ All contributors who choose to review and provide feedback on pull requests have
 
 Reviews that are dismissive or disrespectful of the contributor or any other reviewers are strictly counter to the Code of Conduct.
 
-When reviewing a pull request, the primary goals are for the codebase to improve and for the person submitting the request to succeed. **Even if a pull request is not merged, the submitter should come away from the experience feeling like their effort was not unappreciated**. Every PR from a new contributor is an opportunity to grow the community.
+When reviewing a pull request, the primary goals are for the codebase to improve and for the person submitting the request to succeed. **Even if a pull request is not merged, the submitter should come away from the experience feeling like their effort was appreciated**. Every PR from a new contributor is an opportunity to grow the community.
 
 ##### Review a bit at a time
 
 Do not overwhelm new contributors.
 
-It is tempting to micro-optimize and make everything about relative performance, perfect grammar, or exact style matches. Do not succumb to that temptation..
+It is tempting to micro-optimize and make everything about relative performance, perfect grammar, or exact style matches. Do not succumb to that temptation.
 
 Focus first on the most significant aspects of the change:
 

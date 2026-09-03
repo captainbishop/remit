@@ -67,7 +67,7 @@ tidied away.
 
 ## Setup
 
-forge-std 1.9.6 is **vendored into `lib/` and tracked in this repository**, so there is
+forge-std 1.16.2 is **vendored into `lib/` and tracked in this repository**, so there is
 nothing to install beyond Foundry itself. From the project root:
 
 ```
@@ -131,8 +131,12 @@ If you ever need to restore `lib/` from scratch — a corrupted checkout, say �
 version is:
 
 ```
-git clone --depth 1 --branch v1.9.6 https://github.com/foundry-rs/forge-std lib/forge-std
+git clone --depth 1 --branch v1.16.2 https://github.com/foundry-rs/forge-std lib/forge-std
 ```
+
+That tag resolved to commit `bf647bd6046f2f7da30d0c2bf435e5c76a780c1b` when the tree was
+taken from it, which is the provenance `scope.md` records. Re-cloning the same tag and
+diffing against `lib/` is how an auditor checks that nothing local was edited in.
 
 The suite assumes **forge-std >= 1.9**, where the assertion helpers are `pure` and can
 therefore be called from `view` test and invariant functions. On an older forge-std the
@@ -161,8 +165,12 @@ pre-audit setting and takes minutes.
 
 **The deep profile was run on 2026-08-25 at 140 tests: 140 passed, 0 failed, 0 skipped,
 exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence/deep.log`.
-The suite is 276 tests now, so the deep profile has not been run against its current form.
-What that run bought, in calls rather than runs: each of the three `invariant_` functions in
+**It was re-run on 2026-09-03 at 276 tests against forge-std 1.16.2: 276 passed, 0 failed,
+0 skipped, exit 0, in 11m48.298s wall** — `evidence/deep-v2.log`, which supersedes the
+first without replacing it, since the first is the campaign the deployed v1 bytecode was
+cleared by. The second run was the faster of the two despite carrying twice the tests, and
+its header records that as an open question rather than a win.
+What each run bought, in calls rather than runs: each of the three `invariant_` functions in
 `WindowInvariant.t.sol` ran 2,000 sequences of 256 handler calls, so 512,000 calls apiece
 and 1,536,000 in total, against 16,384 apiece under the default profile. Each of the four
 `testFuzz_` functions in `WindowFuzz.t.sol` ran 20,000 cases instead of 512. Nothing new
@@ -488,10 +496,10 @@ have truncated to a small amount and passed. It now carries a `require`, so the 
 person to write `usd(fuzzInput)` gets a failure instead of a false green.
 
 `assertRevertedWith` was marked non-`pure` with a comment explaining that `assertEq` logs
-on failure. That was true of older forge-std; at 1.9.6 the assertions route through
-`vm.assertEq` and are themselves `pure`, and `solc` emits Warning (2018) saying so. The
-comment had outlived the fact it described, which is worse than no comment. Now `pure`,
-with the history recorded.
+on failure. That was true of older forge-std; at 1.9.6, and still at 1.16.2, the assertions
+route through `vm.assertEq` and are themselves `pure`, and `solc` emits Warning (2018)
+saying so. The comment had outlived the fact it described, which is worse than no comment.
+Now `pure`, with the history recorded.
 
 Three helpers in `Base.t.sol` — `micro`, `payAs`, `balanceOfVendor` — were defined and
 never called once. `micro`'s doc comment claimed it was "used to probe boundaries", which

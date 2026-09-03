@@ -7,7 +7,7 @@ import re
 import subprocess
 from enum import Enum as PyEnum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional, Union
 from urllib import request
 
 VoidFn = Callable[[], None]
@@ -59,8 +59,7 @@ def main():
 
     pp = CheatcodesPrinter(
         spdx_identifier="MIT OR Apache-2.0",
-        solidity_requirement=">=0.6.2 <0.9.0",
-        abicoder_pragma=True,
+        solidity_requirement=">=0.8.13 <0.9.0",
     )
     pp.p_prelude()
     pp.prelude = False
@@ -412,7 +411,6 @@ class CheatcodesPrinter:
     prelude: bool
     spdx_identifier: str
     solidity_requirement: str
-    abicoder_v2: bool
 
     block_doc_style: bool
 
@@ -429,17 +427,15 @@ class CheatcodesPrinter:
         prelude: bool = True,
         spdx_identifier: str = "UNLICENSED",
         solidity_requirement: str = "",
-        abicoder_pragma: bool = False,
         block_doc_style: bool = False,
         indent_level: int = 0,
-        indent_with: int | str = 4,
+        indent_with: Union[int, str] = 4,
         nl_str: str = "\n",
         items_order: ItemOrder = ItemOrder.default(),
     ):
         self.prelude = prelude
         self.spdx_identifier = spdx_identifier
         self.solidity_requirement = solidity_requirement
-        self.abicoder_v2 = abicoder_pragma
         self.block_doc_style = block_doc_style
         self.buffer = buffer
         self.indent_level = indent_level
@@ -494,22 +490,16 @@ class CheatcodesPrinter:
             else:
                 assert False, f"unknown item {item}"
 
-    def p_prelude(self, contract: Cheatcodes | None = None):
+    def p_prelude(self, contract: Optional[Cheatcodes] = None):
         self._p_str(f"// SPDX-License-Identifier: {self.spdx_identifier}")
         self._p_nl()
 
         if self.solidity_requirement != "":
             req = self.solidity_requirement
-        elif contract and len(contract.errors) > 0:
-            req = ">=0.8.4 <0.9.0"
         else:
-            req = ">=0.6.0 <0.9.0"
+            req = ">=0.8.13 <0.9.0"
         self._p_str(f"pragma solidity {req};")
         self._p_nl()
-
-        if self.abicoder_v2:
-            self._p_str("pragma experimental ABIEncoderV2;")
-            self._p_nl()
 
         self._p_nl()
 

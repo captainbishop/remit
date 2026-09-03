@@ -363,7 +363,7 @@ trail with no error, which is worse than a cliff no caller can reach.
 **How it went missing.** This is one of three "documented soft spots" that the real-money
 decision of 2026-08-24 turned from curiosities into real decisions. The other two — the
 unreachable cosign requirement and the misleading `NotPayer()` — are both above. This one is
-recorded in `README.md:480`, `FORGE.md:262` and the test's own header, and was named in the
+recorded in `README.md:480`, `FORGE.md:270` and the test's own header, and was named in the
 same breath as the other two when the decision was made, and it still reached this file's
 "changelist" section in none of them. All three were documented and two of the three were
 listed. **A list assembled by remembering what belongs on it will be short by about a

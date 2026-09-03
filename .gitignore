@@ -3,17 +3,21 @@ out/
 cache/
 broadcast/
 
-# NOTE: lib/ is deliberately NOT ignored. forge-std 1.9.6 is vendored into this
+# NOTE: lib/ is deliberately NOT ignored. forge-std 1.16.2 is vendored into this
 # repository as ordinary tracked files rather than pulled as a git submodule.
 #
 # Two reasons, and the second is the load-bearing one. First, `git clone` followed by
 # `forge test` has to work on the first attempt without a --recursive flag anyone can
-# forget. Second, and more important: the 140 tests and every gas figure in DESIGN.md
-# are properties of *these exact bytes* compiled by solc 0.8.28 at optimizer_runs = 200,
-# and the deployed bytecode at 0x3744E93B9e796E05CB66311d897559B6F3860196 is verified
-# on-chain against them. Re-resolving the dependency risks silently fetching a different
-# forge-std and invalidating the whole baseline. Vendoring is what makes the build
-# reproducible, which for an audited contract matters more than a tidy dependency graph.
+# forget. Second, and more important: every test count and gas figure this repo publishes
+# is a property of *these exact bytes* compiled by solc 0.8.28 at optimizer_runs = 200.
+# Re-resolving the dependency risks silently fetching a different forge-std and
+# invalidating that baseline. Vendoring is what makes the build reproducible, which for an
+# audited contract matters more than a tidy dependency graph.
+#
+# The deployed bytecode at 0x3744E93B9e796E05CB66311d897559B6F3860196, verified on-chain
+# against solc 0.8.28, is not exposed to any of this: `grep -rc forge-std contracts/`
+# returns 0, so no forge-std byte has ever reached the chain. A bump can break the test
+# tree; it cannot reach what is already deployed.
 #
 # Cost of this choice, stated honestly: `forge update` will fight it, and the diff on any
 # future forge-std bump will be large. Bump deliberately, in its own commit, and re-run
