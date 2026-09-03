@@ -578,8 +578,8 @@ anywhere in this repository.
 
 Those are mock-USDC figures and are kept because they are the only ones covering the whole
 configuration space. **For what a real spend actually costs, the live numbers below
-supersede them.** Contract size is 11,572 bytes of runtime code against the EIP-170 limit
-of 24,576, so a little over half the budget is still free. (This document previously said
+supersede them.** Deployed v1 is 11,572 bytes of runtime code against the EIP-170 limit of
+24,576; the v2 tree on `main` is 17,063, so under a third is free. (This document previously said
 11,964, which was wrong; see the size note in `foundry.toml`.)
 
 **A note on what these rows are, since it was got wrong once.** For the state-changing
@@ -763,8 +763,8 @@ bytecode budget. The reason is structural rather than incidental, and it was alr
 visible in the cost model above: a spend's gas is `(K+1)` cold `SLOAD`s per window at 2,100
 each plus an external `transferFrom`, and those prices are set by the EVM rather than by
 codegen. The optimizer can only win on instruction selection and layout, which is noise at
-this scale; it cannot make a storage read cheaper. `200` stays, and the 13,004 spare bytes
-stay available for the EIP-712 cosign variant.
+this scale; it cannot make a storage read cheaper. `200` stays, and v1's 13,004 spare bytes
+have since absorbed the EIP-712 cosign variant, leaving v2 with 7,513 free.
 
 Deploying to Arc confirmed this from the other direction, though less forcefully than first
 claimed. **13,110 gas** of a real spend is Arc's own native-USDC accounting — a cost no

@@ -4,28 +4,28 @@ The material an auditor is being asked to read is listed below, together with th
 material excluded from that request. Every count here comes from the tree at the commit
 named in the next line; if that line is stale, the counts are too.
 
-**Anchored at `9fa7ece` on branch `main`.** The deployed release is the annotated tag
+**Anchored at `2847c76` on branch `main`.** The deployed release is the annotated tag
 `v1.0.0-arc-testnet`; `main` is v2 in progress and does not reproduce the deployed
 bytecode. A scope statement tied to "the current tree" expires without anyone noticing;
 re-derive these numbers against whatever commit is handed over.
 
 ## In scope
 
-The in-scope code is one file, 1,537 lines, **14,458 bytes of runtime bytecode**
-(initcode 14,768), leaving 10,118 bytes under the EIP-170 limit.
+The in-scope code is one file, 2,599 lines, **17,063 bytes of runtime bytecode**
+(initcode 17,545), leaving 7,513 bytes under the EIP-170 limit.
 
 That figure describes the tree named above rather than the deployed contract. Deployed v1
 is 11,572 bytes, confirmed by its own on-chain code length, and that is the number most of
-this repo's other documents quote. v2 is 2,886 bytes larger, almost all of it the
+this repo's other documents quote. v2 is 5,491 bytes larger, almost all of it the
 co-signature rework and `spendableAcross`. If a document quotes 11,572 without
 saying which release it means, it means v1.
 
 | File | What it is |
 |---|---|
-| `contracts/MandateManager.sol` | The whole system. 38 custom errors, 5 events, no imports, no inheritance, no owner. |
+| `contracts/MandateManager.sol` | The whole system. 39 custom errors, 6 events, no imports, no inheritance, no owner. |
 
 There is nothing else in `contracts/`. The contract declares the three interfaces it
-needs inline at lines 136, 144 and 151 rather than importing them, so the file is
+needs inline at lines 147, 156 and 164 rather than importing them, so the file is
 self-contained and can be read start to finish without following a dependency.
 
 ## Supporting files outside the contract
@@ -33,7 +33,7 @@ self-contained and can be read start to finish without following a dependency.
 | File | Why it is here |
 |---|---|
 | `test/mocks/MockUSDC.sol` (132 lines) | Stands in for Arc's native USDC. It reproduces failure modes rather than idealising them, so what it does and does not model is part of what the suite proves. |
-| `test/mocks/MockRegistries.sol` (129 lines) | Stands in for the two ERC-8004 registries. `ownerOf` reverts for a nonexistent id, matching ERC-721, which is the behaviour the credential gate is written against. |
+| `test/mocks/MockRegistries.sol` (156 lines) | Stands in for the two ERC-8004 registries. `ownerOf` reverts for a nonexistent id, matching ERC-721, which is the behaviour the credential gate is written against. |
 | `script/Deploy.s.sol` | Pins the three constructor arguments per chain and reads all three back after deploying. Not deployed code, but a mistake here becomes immutable. `test/Deploy.t.sol` exercises every check it makes. |
 
 ## Out of scope
@@ -64,17 +64,18 @@ replayed on another or against a second deployment on the same chain.
 
 ## Entry points
 
-Five functions change state, and everything else reads.
+Six functions change state, and everything else reads.
 
 | Function | Who may call it | What it does |
 |---|---|---|
-| `createMandate` | anyone, on their own behalf | Grants a mandate. `msg.sender` becomes the payer. 21 refusals guard the parameter set. |
+| `createMandate` | anyone, on their own behalf | Grants a mandate. `msg.sender` becomes the payer. 30 refusals guard the parameter set. |
 | `spend` | the named spender | Moves `amount` USDC from payer to recipient via `transferFrom`. The one function that moves money. |
 | `revoke` | the payer or the spender | Kills a mandate permanently, and with it every outstanding co-sign approval, since `spend` refuses a revoked mandate before it looks at anything else. The spender is allowed to revoke so a delegate can hand authority back. |
 | `approveCosignFor` | the cosigner | Pre-approves one exact spend hash, with a deadline. |
 | `withdrawCosign` | the cosigner | Cancels an approval before it is used. The payer cannot cancel one directly; revoking the mandate is the payer's route. |
+| `clearReservation` | the payer | Releases the nonce a co-sign approval reserved, so a later spend can use it. The approval itself is left in place, which is what separates this from `withdrawCosign`. |
 
-The contract exposes twelve view functions, plus getters for `usdc`, `identityRegistry`,
+The contract exposes fourteen view functions, plus getters for `usdc`, `identityRegistry`,
 `validationRegistry` and `DOMAIN`. The two an integrator is most likely to build on are
 `spendable` and `spendableAcross`, and `spendableAcross` is the only place in the
 contract where an error reports a badly formed question rather than a refused action.
@@ -103,7 +104,7 @@ is the document about what that means for a payer.
 |---|---|
 | What is this and why | `README.md` |
 | Design decisions and the arguments behind them | `DESIGN.md` |
-| Trust assumptions, threat model, 37 recorded findings, 22 invariants | `THREAT-MODEL.md` |
+| Trust assumptions, threat model, 50 recorded findings, 24 invariants | `THREAT-MODEL.md` |
 | What immutability costs and what recourse a payer has | `IMMUTABILITY.md` |
 | Test and tooling conventions, compiler settings | `FORGE.md` |
 | Live transactions, gas measurements, verification output | `evidence/` |

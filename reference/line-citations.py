@@ -45,7 +45,7 @@ themselves:
     DESIGN.md, CHANGELIST.md, L3-VAULT.md,    declared in FORGE.md:111-128
     PRIVACY.md, GAS-ABSTRACTION.md,
     IMMUTABILITY.md and evidence/README.md
-    an unqualified contract line number in    9fa7ece, declared in scope.md:7
+    an unqualified contract line number in    2847c76, declared in scope.md:7
     scope.md
     policy.js, policy.test.js and the         65f05d8 for F27 and F28, af9df40
     contract, cited from THREAT-MODEL.md      for F29 to F37, declared in
@@ -130,7 +130,7 @@ ANCHORS = [
         None,
         {"scope.md"},
         {CONTRACT},
-        ["9fa7ece"],
+        ["2847c76"],
         "scope.md:7",
     ),
     (

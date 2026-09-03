@@ -57,9 +57,9 @@ no atomicity the architecture cannot provide and it makes the safety property st
 instead of dynamic.
 
 The same fact that rules out atomic debiting also delivers a benefit: because the vault
-is not in the spend path, **L3 adds zero gas to a spend.** The measured 177,429-gas
-marginal spend is unchanged. The constraint and the benefit are one fact seen from two
-sides.
+is not in the spend path, **L3 adds zero gas to a spend.** The 177,429-gas marginal spend
+it leaves unchanged is v1's measured figure; v2's own has not been taken yet. The
+constraint and the benefit are one fact seen from two sides.
 
 ## Architecture
 

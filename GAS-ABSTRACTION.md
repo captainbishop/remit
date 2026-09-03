@@ -65,7 +65,7 @@ $ cast code 0x0000000071727De22E5E9d8BAf0edAc6f37da032 --rpc-url https://rpc.tes
 
 32,073 output bytes, less the `0x` prefix and the trailing newline, halved: **16,035 bytes
 of runtime bytecode**, comfortably under EIP-170's 24,576 limit and about 1.4× the size of
-`MandateManager`'s own 11,572, so a substantial contract *is* deployed at the canonical
+`MandateManager`'s deployed 11,572, so a substantial contract *is* deployed at the canonical
 address on Arc testnet.
 
 **That proves a contract is there, not that it is EntryPoint v0.7**, and the usual next

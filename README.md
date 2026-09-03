@@ -400,7 +400,7 @@ deployed v1 contract is **11,572 bytes** of runtime code, against the 11,964 thi
 published for weeks — 11,572 is confirmed twice, by `forge build --sizes` at the v1 tag
 and by the contract's own on-chain code length, whereas 11,964 came from a single
 unverified source and matches neither the runtime nor the initcode (11,868). The v2 tree
-on `main` measures 14,458 runtime and 14,768 initcode, so an unqualified 11,572 anywhere
+on `main` measures 17,063 runtime and 17,545 initcode, so an unqualified 11,572 anywhere
 in this repository means v1. And Arc's 20 Gwei base fee is a *floor*, not a price: every
 transaction so far settled at 21 Gwei, so every cost figure computed at the floor ran ~5%
 low. Deployment cost **0.0537 USDC**, not the 0.051 published.
