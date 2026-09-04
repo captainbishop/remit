@@ -4172,9 +4172,9 @@ still be hiding there.
   report SURVIVED at exit 1, and rewording the keyed line prints STALE ENTRY. It is keyed by source
   text rather than line number because mutants move — `_checkIdentity`'s pair shifted 1228/1229 to
   1234/1235 on a docstring edit alone. **Writing this up also caught a false claim in the
-  contract**: the comment above `:2010` said the hoisted check is what makes "the payer of nothing"
-  unreachable below, which the loop's own check does anyway. Corrected in place, comment-only and
-  line-neutral.
+  contract**: the comment above `MandateManager.sol:2010` said the hoisted check is what makes
+  "the payer of nothing" unreachable below, which the loop's own check does anyway. Corrected in
+  place, comment-only and line-neutral.
 - **The gate could not address the constructor at all, for as long as it has existed.** New on
   2026-08-29. `function_bounds` looked for `    function NAME(`, and a constructor carries no
   `function` keyword, so `constructor` as a target died on "no function constructor(" instead of
