@@ -4298,7 +4298,7 @@ still be hiding there.
   fourteen removals short.** Re-enumerated on 2026-09-05 with the script's own `is_code` and
   `function_bounds`, driven over every function at contract indentation rather than over a
   remembered list of targets, the working tree offers **103 removals over 13 targets** — 109
-  buildable with the six injections and 115 with the six hand cases on top. The same enumeration
+  buildable with the six injections and 123 with the fourteen hand cases. The same enumeration
   pointed at `22fc0fb` returns 89 over eleven, the figure this bullet records for that tree, and
   reproducing it is what licenses the 103. Every step between the two is attributable: `8487b5a`
   added one to `approveCosignFor` the same day as F38 through F40, `9b701ee` two to `createMandate`
@@ -4310,6 +4310,26 @@ still be hiding there.
   what is owed, and that it grew with every fix that added a refusal, which is the reading the
   89 → 91 → 95 sequence already carried. #11 owns the run that turns the enumeration back into a
   census, and until that happens the honest form of any clean claim here names `22fc0fb` as its tree.
+  [**The run happened on 2026-09-05 and it closes this bullet: 123 mutants, 119 caught by a named
+  test, 4 EQUIVALENT, 0 SURVIVED, 0 INCONCLUSIVE**, over 17 invocations each carrying its own
+  baseline of `320 passed, 0 failed`.
+  The evidence is `evidence/mutgate-sol-census-320.log`, which holds the summary and all 17 target
+  logs. A clean claim here may now name the current tree rather than `22fc0fb`, and the enumeration
+  closed exactly: 103 removals plus 6 injections plus 14 hand cases is the 123 that were built.
+  **The sentence above read 115 because it counted six hand cases where the table holds fourteen** —
+  six was the F38 through F40 figure, and F43 through F46 brought `createMandate` in as a hand
+  target with seven of its own, so that is one more count restated instead of derived, which is the
+  habit this document keeps finding in itself. Five targets had never been censused at any tree or
+  stood well below their last recorded figure: `setRevoker` 4 of 4, `clearReservation` 3 of 3, and
+  `constructor`, `withdrawCosign` and `createMandate` at 3, 3 and 31 against the 1, 1 and 27 on
+  record. **The gate could not run at all when the census opened**, and every target hid it the same
+  way — all 17 exited 2 with 0 mutants in about a second, because `COPY` omitted `script` while
+  `test/Deploy.t.sol` imports `../script/Deploy.s.sol`, so the throwaway tree failed to compile and
+  no baseline was produced. Failing closed is correct behaviour and still produces no evidence, so
+  no Solidity run could have succeeded between the commit that added that test file and the fix.
+  **55 of the 123 mutants have exactly one named killer**, which is the designed outcome wherever an
+  isolating test was written for a shadowed guard, and it is recorded here because each of those 55
+  sits one deleted test away from being unasserted.]
 - **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
   coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
   `_checkCredential:1261` is the `catch` arm's
@@ -4342,6 +4362,28 @@ still be hiding there.
   contract**: the comment above `MandateManager.sol:2010` said the hoisted check is what makes
   "the payer of nothing" unreachable below, which the loop's own check does anyway. Corrected in
   place, comment-only and line-neutral.
+  [**The class holds four as of 2026-09-05, and the two arrivals came through `--hand` rather than
+  through removal.** The full census reports both of the above still exempt, named by their
+  functions rather than by a line number, since a census log's line numbers are a fact about that
+  log and this document's numbers are anchored to a declared commit: `_checkCredential`'s `catch`
+  arm and `spendableAcross`'s hoisted payer check, at the 1261 and 2010 of 2026-08-30 and eleven
+  hundred lines further down today. The two new ones are hand cases.
+  `_cosignIsLive` ends on `return validUntil != 0 && nowTs < validUntil;`, and dropping the first
+  conjunct cannot be killed because `validUntil` is a `uint40` compared against a `uint256`, so a
+  never-approved slot reads 0 and `nowTs < 0` is false for every clock value there is. F44's flag
+  mask in `createMandate` is `if (flags & ~F_KNOWN != 0) revert BadConfig();`, and rewriting it as a
+  magnitude test cannot be killed because `F_KNOWN` is `0x7F` and `flags` is a `uint8`, so bit 7 is
+  the only bit either form can catch; the mask is kept for the version after this one, where an
+  eighth flag would leave it reading correctly while the magnitude test read nothing. **The
+  mechanism differs from the two removals by one step**: a shadowed removal leans on a successor
+  guard a few lines lower, where a hand equivalent drops a conjunct whose twin on the same line
+  already refuses everything it would have. Both are held to the same two-way rule, so a test that
+  ever kills one is the run reporting that the recorded reason has stopped being true. **Writing
+  this up found a soft spot in `line-citations.py` worth naming:** it reported two of four
+  working-tree pointers as absent at every declared anchor and let the other two pass, and those two
+  resolve at `af9df40` to a docstring fragment and a comment about `L3-VAULT.md`. A citation that
+  lands on unrelated text is worse than one that lands on nothing, because only the second kind gets
+  read again.]
 - **The gate could not address the constructor at all, for as long as it has existed.** New on
   2026-08-29. `function_bounds` looked for `    function NAME(`, and a constructor carries no
   `function` keyword, so `constructor` as a target died on "no function constructor(" instead of
