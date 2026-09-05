@@ -69,10 +69,13 @@
 #
 # COST. Ten runs on 2026-08-30 put this at 18-21s per mutant including its recompile, plus one
 # baseline of about the same per target, so a census of the whole contract runs past half an hour.
-# That census is 89 removals over 10 targets plus 6 injections, with 6 hand cases on top that the
-# two automatic operators cannot build. It was derived on 2026-08-30 by counting mutable `revert`
-# lines per target with this script's own `is_code` and `function_bounds`, and it moves whenever a
-# guard is added, so re-derive it rather than quoting the figure here. An earlier note guessed ~57s
+# That census was 89 removals over eleven targets plus 6 injections at `22fc0fb`, with 6 hand cases
+# on top that the two automatic operators cannot build. It was derived on 2026-08-30 by counting
+# mutable `revert` lines per target with this script's own `is_code` and `function_bounds`, and it
+# moves whenever a guard is added, so re-derive it rather than quoting the figure here. The same
+# enumeration returned 103 removals over 13 targets on 2026-09-05, and the target count read 10 in
+# this comment until that re-derivation corrected it, 10 having last been true on 2026-08-26. An
+# earlier note guessed ~57s
 # per mutant from the compile and suite times measured separately, which overstated it threefold —
 # forge caches almost all of that between mutants. The whole suite runs against every mutant, with
 # no --match-path shortcut, so "caught" means some named test in the repo noticed rather than a

@@ -633,9 +633,15 @@ it does not remove the mempool. See F4.
 
 ## 3. Properties the contract does enforce, and the guard for each
 
-Derived by walking the source, not by reading the test names. Five functions change
-state: `createMandate`, `spend`, `revoke`, `approveCosignFor`, `withdrawCosign`. There are no
-setters, no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade path.
+Derived by walking the source, not by reading the test names. Seven functions change
+state: `createMandate`, `spend`, `revoke`, `approveCosignFor`, `withdrawCosign`,
+`clearReservation` and `setRevoker`. One of them is a setter — `setRevoker`, which names the
+mandate's revoker and is described in F51 — and there are no admin functions, no
+`delegatecall`, no `selfdestruct` and no upgrade path. **This sentence read "Five functions"
+and "There are no setters" until 2026-09-05, and F20's row had already priced that exact
+failure**: `clearReservation` arrived with F47 on 2026-09-02 and `setRevoker` with F51 three
+days later, so for three days the claim a payer could check against the source in ten seconds
+was wrong in the direction that matters, understating what the contract lets someone change.
 
 | Property | Enforced by |
 | :--- | :--- |
@@ -657,6 +663,7 @@ setters, no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade
 | A co-signature expires | #28/F16: `approveCosignFor` refuses `validUntil <= block.timestamp` and `validUntil > block.timestamp + MAX_COSIGN_TTL` (30 days) with `BadDeadline`; `spend` refuses at or after the deadline with `CosignExpired`, distinct from `CosignRequired` for one never granted |
 | Revocation is immediate and permanent | `revoke` sets `revoked = true`; no un-revoke exists |
 | A compromised agent can shut itself off | `revoke` also accepts the spender |
+| A payer who can no longer afford their own gas can still have the mandate stopped | **Row added 2026-09-05 — F51.** `revoke` accepts a third address the payer nominated, named through `MandateParams.revoker` at grant time or `setRevoker` afterwards, and `_callerIsRevoker` compares the caller against the stored nominee behind an explicit non-zero test, so an unset mapping authorises no one. The nominee holds revocation and nothing else: `_revoker` is read on no other path, `setRevoker` is payer-only, and the three addresses that would make the role decorative — this contract, the payer, the spender — are refused at both write sites. The property answers F42, where USDC is the money and the gas at once, so every other holder of the switch is either the party being stranded or the party whose spending strands them |
 | Caps hold even if the token misbehaves | see F7 — this is stronger than the source claims |
 | Authority follows the ERC-8004 agent identity, and dies when the identity moves | **Row added 2026-08-28; its absence is F27's other half.** `spend` at `:725` calls `_checkIdentity`, which reads `ownerOf(agentId)` live and refuses `IdentityNotHeld` unless the caller still holds it — so selling or burning a transferable identity NFT kills the mandate rather than transferring authority with the token. Read at **spend** time, not grant time, which is the whole value of the gate. The second guard on the next line, `expectedOwner`, adds nothing to this and can only subtract — which is why, since 2026-08-29, `createMandate` accepts it only as zero or the spender. See **F27** for the finding and **F33** for the guard |
 | A gate a payer configures can actually open | **Row added 2026-08-29 — F33 and F34; the fourth item's reading corrected 2026-09-02.** `createMandate` refuses four configurations that would make every spend revert for the life of the mandate: `identity.agentId == 0`, an `expectedOwner` naming anyone but the spender, `credential.minResponse > 100`, and `credential.requestHash == 0`. The first three read at the call site like extra strictness and are bricks. The fourth is a brick in the ordinary case and worse in one reachable case: zero is an occupied key on Arc Testnet, so a mandate keyed there reads a stranger's record and can pass a failed attestation rather than only reverting — see F34 for the four settings that combination needs. The mandate is checked for openability at the one moment it can still be edited, which is the same argument #22's `Unbounded` refusal makes about caps |
@@ -672,14 +679,16 @@ false or overstated claims in comments and documents rather than defects in code
 for a primitive whose entire product is *legibility of authority* is not a lesser
 category.
 
-**Forty-six findings, counted from the headings below rather than asserted** — `grep -c
-"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 46, which is the check, not the
+**Fifty-one findings, counted from the headings below rather than asserted** — `grep -c
+"^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 51, which is the check, not the
 memory of having added some. The count is not a measure of anything — it is a function of how
-long the search ran. They partition exactly, which is more useful than the total: **twenty-nine are
+long the search ran. They partition exactly, which is more useful than the total: **thirty-five are
 already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; eleven in `af9df40` on
 2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; F3, F9,
-F10, F11 in #24 on 2026-08-30; F38, F39, F40 in `8487b5a` later the same day; and F43, F44, F45, F46
-in `9b701ee` on 2026-09-01, written on 2026-08-31 under the rule the paragraphs below record); **two
+F10, F11 in #24 on 2026-08-30; F38, F39, F40 in `8487b5a` later the same day; F43, F44, F45, F46
+in `9b701ee` on 2026-09-01, written on 2026-08-31 under the rule the paragraphs below record; F47
+through F50 in `6b1e4d7` on 2026-09-02; F24, whose guard half landed in that same commit while its
+consequence half became F49; and F51 on 2026-09-05); **two
 were fixed in this document as it was being written** (F22 and F23, both missing trust
 boundaries — §2 gained its sixth and seventh in one day); **one has a fix that changes v2's
 behaviour** (F13); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F14,
@@ -687,10 +696,9 @@ F21, F41 and F42 in the contract, F26 in the mocks — that last one is in `test
 frozen-metadata constraint that governs `contracts/`; F41 is the only member of the bucket that also
 brought a test, and F42 is the only one whose other half is a paragraph in §2, which is why it sits
 here rather than under documentation); **three are documentation** (F2, F6, F18); **one needs a
-decision before it can be sized** (F20, whether the contract gains a sixth state-changing function,
-and its first that mutates a mandate after creation); **one needs a four-line test before it can be
-sized at all**, because one of its two possible answers cannot be settled by reading source (F24);
-and **one needs nothing** (F12). 29 + 2 + 1 + 8 + 3 + 1 + 1 + 1 = 46, which is the arithmetic and
+decision before it can be sized** (F20, whether the contract gains a payer-facing mutator over a
+mandate's recipients — an objection F51 has since spent, since `setRevoker` is one); and **one needs
+nothing** (F12). 35 + 2 + 1 + 8 + 3 + 1 + 1 = 51, which is the arithmetic and
 not a second assertion of the same number.
 
 **This paragraph was stale by one for a day, and the failure is the one it warns about.** F42 landed
@@ -698,6 +706,19 @@ with its own section and never entered the partition, so the sentence above read
 both `grep -c` commands it cites returned 42 — a count asserted from memory in the one paragraph that
 exists to say counts are derived. Re-derived on 2026-08-31 by running both commands and rebuilding
 the buckets from the headings.
+
+**Then stale by four for three days, which is the same failure a second time.** F47 through F50
+landed on 2026-09-02 with their sections and their table rows, and entered no bucket, so the sentence
+above read *forty-six* while both commands returned 50. Re-derived on 2026-09-05 while F51 was being
+written, by running both commands again and rebuilding the buckets from the headings rather than
+adding five to the old total. Two corrections came out of the rebuild that adding five would have
+missed. F24 had left the bucket that held it: that bucket existed because F24 needed a four-line test
+before it could be sized, and the test question moved to F49 while F24's guard half shipped, so the
+bucket is empty and gone rather than sitting at zero — the same rule that emptied the model-divergence
+bucket on 2026-08-29. And F20's parenthetical was pricing a cost that had already been paid, since it
+called recipient removal the contract's first mutator of a mandate after creation and `setRevoker` is
+one. **A count that is re-derived only when it changes goes stale in the gap**, which is the argument
+for deriving it on every pass through §4 and not only on the passes that add a finding.
 
 **The fixed bucket carried two statuses for one day, and now carries one again.** F38, F39 and F40
 were written into the working tree and counted as fixed before any of it had been committed,
@@ -797,7 +818,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F17 dead approvals refused | **DONE in #28, 2026-08-28.** Not 2 lines — **18 guards**, derived from `spend`'s permanent refusals rather than from this row's list, plus 13 tests in `test/Cosign.t.sol` and a mutation gate that proves each guard is asserted. The count was 17 on the day it shipped and F19 made it 18 the day after; see F19 for why that is a rule and not an accident. The hard half was deciding what NOT to refuse: `notBefore`, a full rolling window and an unfiled credential all recover, so refusing them would turn our caution into somebody's unapprovable payment | — |
 | F18 co-signer rotation | documentation only — `README.md`, that re-granting resets the lifetime counters | whether a rotation path is wanted at all, which needs a setter and this contract has none |
 | ✅ F19 refuse `recipient == m.payer` | **DONE in #28, 2026-08-28.** Not "1 error + 1 line" — **1 error and 2 guards**, because F17 had shipped the day before and F17's rule is that every permanent refusal `spend` makes is mirrored in `approveCosignFor`. `m.payer` is assigned once and has no mutator, so this is permanent, and omitting the mirror would have holed F17's invariant one day after it landed. Plus 4 tests (3 in `Bounds.t.sol`, 1 in `Cosign.t.sol`), 4 model refusals, and 2 more gate mutants — `approveCosignFor` 17 → 18 guards, both gates 21 → 22. **The undercount was mine and it is the second in a row**; see F17's row above for the first | — |
-| F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds** |
+| F20 recipient removal | either 0 lines (document it) or a payer-only remove-only mutator + event + tests | **whether the contract gains a sixth state-changing function — and its first that mutates a mandate after creation. Monotone, but §3's "no setters, no admin functions" is a sentence a payer can verify in ten seconds.** Both halves of that objection were spent on 2026-09-05 by F51: `clearReservation` had already made six, `setRevoker` makes seven, and `setRevoker` is a payer-only mutator of a mandate's authority written after the grant, which is the shape this row was hesitating over. §3's sentence now says so. What is left to decide is narrower than it was — whether removal is wanted at all, at the price of one more mutator and one more event — and the precedent for the shape, including its refusals and its log, exists to copy |
 | F21 `ZeroRecipient`'s Arc citation | comment only | — |
 | ✅ F22 §2's missing self-payment boundary | **DONE 2026-08-26**, in this document, in the commit that found it. **A second half landed 2026-08-30** — the property that paragraph asserts, `recipient == m.spender` staying ALLOWED, was executable nowhere in Solidity, so 3 tests and 2 gate injections hold it now, one injection on `spend` and one on `approveCosignFor`. Cost: 3 tests, one new `INJECTIONS` entry, and not a single contract line, which is why the census rose while the contract stayed byte-identical | — |
 | ✅ F23 §2's missing ERC-8004 registry boundary | **DONE 2026-08-26**, in this document — §2's seventh boundary; 0 lines of Solidity, and none available anyway since the addresses are `immutable` | — |
@@ -828,6 +849,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 | ✅ F48 a mandate naming this contract as its own spender | **DONE 2026-09-02, in the commit that added F47 through F50.** 1 guard and 1 invariant row in §3, carrying F45's reasoning onto a second field. Deliberately narrower than `_isUndebitable`: that helper asks whether money can come back, this asks whether the address can originate a call, and the two answers separate for three of the four addresses. **1 Solidity test, `test_f48_theContractAsItsOwnSpender_reverts`, landed with the fix** | — |
 | ✅ F49 a successful answer that will not decode escapes the `catch` | **DONE 2026-09-02, in the commit that added F47 through F50.** 1 new error `RegistryHasNoCode(address)` and 2 constructor guards, which close F24's guard half at the place the addresses are set rather than where they are read, since both are `immutable`. Plus a comment at each `try` stating what the arm covers, and a third comment recording the `_usdc` guard that was left out on purpose. **3 Solidity tests landed with the fix rather than the 2 this row asked for**: the no-code refusal and the accepting case control each other at the constructor, and the third stages a registry that answers with bytes the `try` cannot decode, which is the path past the `catch` the finding is named after and which neither constructor guard exercises | **OPEN, and only Arc can answer it: whether `EXTCODESIZE` on the USDC precompile returns non-zero.** If it does, the symmetrical third constructor guard becomes available; if it returns zero, that guard would refuse this contract's own production deployment. One `cast code` settles it and §5 now carries it |
 | ✅ F50 two checks no view returned, and a third view that understated itself | **DONE 2026-09-02, in the commit that added F47 through F50.** 2 views, `getIdentityGate` and `getCredentialGate`, plus the enforced-span derivation added to `getWindow`. The views read unambiguously only because F32, F33 and F34 refuse the configurations that would give a zeroed struct a second meaning, so this row rests on three earlier fixes. **2 Solidity tests, added a day later in `b295a90`, which is the commit that took the contract to 100% on all four coverage columns**, and the pre-existing unknown-mandate view test was extended to read both new views in the same change. The third item owes no test of its own: the `getWindow` derivation is a docstring rather than a returned field, and the enforced span it describes is F41's arithmetic, which F41's test already covers | **`MandateCreated`'s missing `cosigner` and `cosignThreshold` are held out deliberately** — adding fields changes `topic0`, which is cheap only while v2 is unreleased, so it is a decision and it is tracked on its own |
+| ✅ F51 every holder of the kill switch paid for it out of the balance the mandate drains | **DONE 2026-09-05.** 1 optional field in `MandateParams`, 1 mapping, 1 event (`RevokerSet`), 1 external function (`setRevoker`, payer-only, 4 guards), 1 view (`getRevoker`), 1 private helper (`_callerIsRevoker`), 1 clause on `revoke`'s authority test and 1 refusal in `createMandate` — which is why the parameter refusals go 30 → 31 while the **error count stays 39**: the role reuses `NotAuthorised`, `BadConfig`, `Revoked` and `UnknownMandate`, so it names an authority rather than a role, exactly as F47's row argued. **42 Solidity tests in a new `test/Revoker.t.sol`, 15 of them adversarial**, and the `reference/policy.js` counterpart with its own cases. The cost the row cannot avoid is the ABI: adding a field to `MandateParams` moves `createMandate`'s selector from `0x9ab253da` to `0x0ed62010`, so every client written against v2's earlier shape must be rebuilt. That is cheap only while v2 is unreleased, which is the same clock F50's held-back event fields are running against | **DECIDED 2026-09-04, and the objection to it is on record because it was the right objection: adding a party who can revoke may be worse than the lockout it fixes.** The answer is that the role holds exactly one power and the tests are what establish it, not this sentence — 15 of the 42 attempt to spend, to approve or withdraw a co-signature, to clear a reservation, to re-nominate, to un-revoke, to reach a second mandate, and to call from the zero address on a mandate that named no one, and each asserts the payer's balance and allowance are unchanged afterwards. The worst a hostile nominee achieves is stopping payments the payer wanted continued, which costs the payer a fresh grant under a new salt and moves no USDC. Nominating stays optional and `address(0)` is the removal value, so a payer who does not want the trade keeps v1's behaviour exactly |
 | §5 coverage gaps | **1 test, 4 testnet transactions, later the same day on 2026-08-30.** Six tests landed in `test/Windows.t.sol` and four items came off together — the four-window maximum-cost spend and all three window geometries — which is the largest single drop this row has recorded, and the four fell to one commit because they shared one file and one harness. What remains is 1 spend through a `minResponse` between 1 and 99, which is a decision before it is a test, and F34's OPEN cell in this table holds that same question. **Three findings landed after this layer was written and the count stayed at 1**, because F38, F39 and F40 each arrived with the Solidity and model tests their fix needs, so none of them opened a gap of the kind this row counts. **F41 makes it four and the count still holds at 1**, and for a different reason worth separating: F41 changes no guard, so it owes no mutation either, and the test it brought closes a cell — the long-window arithmetic — that this row had never listed, so it cannot come off a tally it was never on. What the first three did open is four hand mutations, which are owed and are recorded in §5, and they sit outside this tally under the rule the next sentence states. The gas measurement the maximum-cost item asked for stays out of this count, for the reason the view-reaching mutation operator stays out: a measurement is not a test. The layer this replaces follows, reading as it did. **5 tests, 4 testnet transactions as of 2026-08-30.** The `UnrecoverableRecipient` mirror came off because its test was written and `mutgate-only-approveCosignFor.log` shows the mutant caught, which leaves 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99. A sixth gap opened and closed inside the same day and so never entered this tally: the F32 credential guard at `createMandate:873` was shadowed rather than unasserted, and the two tests that isolate it landed with the finding. The layer it replaces read **6 tests, 4 testnet transactions as of 2026-08-29**, and that was the first time the tally had gone *up* — re-enumerated by walking §5's bullets, the same way every figure before it was built, which is the reason this row is appended to rather than decremented. Before it, **5 tests, 3 testnet transactions as of 2026-08-28**; before that **10 tests, 3 testnet transactions**, and before that "9 tests, 1 testnet transaction", which undercounted the testnet side by two: the ERC-20 self-transfer log and the pending-validation state are both transactions, not tests. The 10 decomposed, against `c46dccd`'s blob, as 1 four-window spend + 3 window geometries + 4 co-signature behaviours + 1 `recipient == m.payer` + 1 future-dated `lastUpdate`. **Five came off for three different reasons, and only three came off because somebody wrote the test the bullet asked for**: F17's three cosign tests now run; the fourth cosign gap was withdrawn as never having been one, since the test it named as missing already existed at the anchor commit; and `recipient == m.payer` came off with its test never written, because F19 made the behaviour unreachable and the bullet had itself said such a test *"would have to be **deleted** if F19's fix lands"*. So a shrinking tally here does not mean the suite grew by the difference. **The 6 decomposes as 1 four-window maximum-cost spend + 3 window geometries + 1 spend through a `minResponse` between 1 and 99 + 1 assertion on the `UnrecoverableRecipient` mirror in `approveCosignFor`.** One came off (the `lastUpdate` test was written, and writing it produced F31) and two went on, both from `af9df40` — a new guard that nothing asserts, and a bound whose permitted range nothing executes. **New guards create coverage gaps at roughly the rate they close findings**, which is the honest reading of a tally that rose while eleven findings were being fixed. The testnet side went 3 → 4 for the blocklist question `MockUSDC` cannot answer, and no amount of Solidity can move any of the four. One further owed item is deliberately *not* counted here because it is not a test: the view-reaching mutation operator. **The second such item is closed as of 2026-08-30** — the mutation-gate runs the contract still owed, which this row first put at 73 across five targets before §5 re-derived it as 33 across six, and all eleven targets have now run for 89 of 89 mutants attempted, nine clean and two holding one equivalent mutant apiece. **A third owed item closed later the same day, and it was never in this tally either** — F22's property had no Solidity test at all, while this tally counts only gaps §5's own bullets had named, and that one surfaced by asking what the mutation gate was unable to falsify. Closing it therefore leaves the count at **5 rather than 4**, which is the honest arithmetic, since a tally can shrink only by the items it once listed. What it moved instead is the mutant census, 89 → 91 | fold into #14, which needs the gas number anyway |
 
 **Three rows in this table said "uncommitted" for two days after the commit landed, and six findings
@@ -3767,6 +3789,109 @@ them; the view's documentation now derives it.
 existing event changes its `topic0` and breaks any indexer already written against it. That is cheap
 only while v2 is unreleased, so it is a decision rather than an edit, and it is tracked separately.
 
+### F51 — Every holder of the kill switch paid for it out of the balance the mandate is authorised to drain
+
+**Severity: low as exposure and high as a gap in the design — no cap moves, nothing can be taken
+through the role, and the fix costs a payer who declines it nothing; what makes it worth an entry is
+who the exposure stranded · Status: FIXED in v2, 2026-09-05 — one optional grant field, one
+payer-only setter, one view, one event, one mapping, one clause on `revoke`, and 42 tests ·
+Confidence: certain for the bound on what the role can do, which follows from `_revoker` having one
+reader; the premise it answers is F42's, and rests on Arc's own statement that the native and ERC-20
+balances are one quantity.**
+
+F42 documented the lockout and stopped one step short of this. It closed with two mitigations for the
+cooperative case, both of which describe a delegate that has agreed to stop, and named Arc's relayer
+and 4337 paymaster support as the real escape for the case where it has not. What none of the three
+addressed is the shape of `revoke`'s authority test itself. Until this fix it admitted exactly two
+addresses, and **both of them draw gas from the purse the mandate is authorised to empty**: the payer,
+who is the party the lockout strands by definition, and the spender, whose spending is what strands
+them. So the kill switch had no holder standing outside the failure it exists to escape, and F42 is
+that observation from the payer's side while this is the same observation from the switch's side.
+
+**The fix is a third address the payer chooses, and it can do one thing.** A grant may carry
+`MandateParams.revoker`, `setRevoker` names or replaces one afterwards, `address(0)` removes whoever
+holds it, `getRevoker` returns it, and `RevokerSet` is emitted by both write paths so one log stream
+carries every change the role ever undergoes. `revoke`'s authority test gained
+`!_callerIsRevoker(mandateId)` as its last clause, where `&&` short-circuits, so a payer or a spender
+revoking never reaches the extra `SLOAD` and only a third-party caller pays to learn whether they are
+the nominee.
+
+**A reserve inside `spend` was the other candidate and F42 already declined it on four counts, all of
+which still hold.** The relevant contrast is with the escape F42 did endorse. A relayer or a paymaster
+works, and it is an arrangement the payer has to complete before they need it: a smart account has to
+be one already, and delegating an EOA under 7702 is itself a transaction the payer funds. Nominating
+costs one field at grant time, or one transaction at any point afterwards, and asks nothing of the
+payer's account type. The two are not alternatives — a payer can hold both — but only one of them is
+available to a payer who has already been spent down, because `setRevoker` can be called by a payer
+whose next transaction is their last while a 7702 delegation cannot be arranged after the money is
+gone.
+
+**The objection to this fix was raised before it was written, and it was the right objection: adding a
+party who can revoke may be worse than the lockout it fixes.** It is a trade, and it is sound only
+because the role is exactly one power wide. `revoked` is written in two places, `false` in
+`createMandate` and `true` in `revoke`, and read on two state-changing paths, where `spend` and
+`approveCosignFor` each refuse with `Revoked()`. The nominee cannot spend, cannot raise a cap, cannot
+add or remove a recipient, cannot approve or withdraw a co-signature, cannot clear a reservation,
+cannot un-revoke, cannot name a different revoker, and cannot reach a second mandate. **That list is a
+claim about this contract rather than a property of the design, so it is the tests that make it
+evidence**: 15 of the 42 in `test/Revoker.t.sol` attempt every item on it and assert the payer's
+balance and allowance are unchanged after each attempt.
+
+**What a hostile or compromised nominee does achieve is stopping payments the payer wanted
+continued**, and the price of that is worth stating rather than dismissing. The mandate cannot be
+restarted, so recovery is a fresh grant under a new salt, which resets the lifetime counters — F18's
+cost, arriving here for a second reason. No USDC moves and no allowance changes, so the loss is the
+salt, the gas for a new grant, and whatever the interruption was worth. Set against a lockout that
+takes away the payer's ability to act at all, the trade is defensible; it is not free, and a payer who
+does not want it makes no nomination and keeps v1's behaviour exactly, since the field is optional and
+zero is its default.
+
+**Three addresses are refused as nominees at both write sites, and the fourth candidate a reader
+expects to see refused is deliberately eligible.** This contract is refused because no path in it
+calls `revoke`, so the role could never be exercised — the same argument F48 makes about a mandate
+naming this contract as its own spender. The payer is refused because they hold the authority already
+and are the address the lockout strands, so naming themselves reads like an escape and is not one. The
+spender is refused because it holds the authority already too, and its spending is what creates the
+situation. The cosigner stays eligible on purpose: a party the payer has already chosen to hold a
+second signature is the obvious nominee, and co-signing touches none of this. `setRevoker` reads those
+three off the stored mandate rather than off calldata, and skips all three for `address(0)`, because
+removal is the only route back to v1's behaviour and must never be refusable.
+
+**`setRevoker` is payer-only, and the asymmetry with `revoke` is deliberate.** `revoke` accepts the
+spender because surrendering your own authority cannot harm the payer. That reason does not carry over
+to choosing who else holds a kill switch: a spender able to replace the nominee could point the role
+at an address it controls and revoke on its own schedule, or point it at a stranger and remove the
+escape with nothing in the payer's own records to show it. Payer-only also means the payer is the only
+party who can change the answer, so a payer
+reading `getRevoker` is reading their own decision and not someone else's edit to it.
+
+**The zero test inside `_callerIsRevoker` is not redundant defence.** `_revoker` returns `address(0)`
+for every mandate that named no one, which is most of them, so a guard written as
+`msg.sender == nominated` alone would have authorised `address(0)` to revoke all of them. Nothing on
+the EVM can originate a call from the zero address today, which makes that a latent defect rather than
+a live one — and two opcodes are the wrong price for a latent defect in a kill switch on a contract
+with no upgrade path. The test that holds it is
+`test_revoke_ATTACK_zeroAddressCannotRevokeAnUnguardedMandate`.
+
+**What this does not fix, stated plainly.** Revocation recovers nothing already spent, and F42's
+arithmetic about the allowance is unchanged: `approve(usdc, remit, 0)` remains the only control that
+bounds the account rather than the mandate, and it is still the payer's alone. The gas has not stopped
+being owed — it has moved to a party the delegate cannot drain — so a nominee who is themselves
+insolvent reproduces the lockout, and choosing a nominee is choosing someone likely to be funded when
+the payer is not. None of that is testable in CI: `MockUSDC` does not couple fees to balance, which is
+the structural limit F26 records and F42 relies on, so the premise of this finding cannot be staged in
+Foundry and the 42 tests prove the bound on the role instead of the lockout it escapes.
+
+**The ABI cost, and the model.** Adding a field to `MandateParams` moves `createMandate`'s selector
+from `0x9ab253da` to `0x0ed62010`, so any client built against v2's earlier shape must be rebuilt;
+`setRevoker` is `0x043af6a1` and `getRevoker` is `0x4091b238`. That cost is cheap only while v2 is
+unreleased, which is the same clock F50's held-back event fields are running against, and it is the
+reason this landed now rather than later. `reference/policy.js` carries the role, with `setRevoker`,
+the widened authority test in `revoke`, and the string-versus-zero normalisation trap named in its own
+comment — a JavaScript `if (revoker)` is true of the zero-address *string*, which would have stored a
+nominee the chain refuses. The contract's third refusal, `revoker == address(this)`, has no analogue in
+the model, and the model says so where a reader will look for it.
+
 ---
 
 ## 5. Coverage gaps — what this pass could not reach, and what no test executes
@@ -3852,7 +3977,7 @@ still be hiding there.
   a throwaway `contracts/LintProbe.sol` carrying four deliberate violations made the same
   bare invocation report two warnings, and a second run against a warm cache printed
   `No files changed, compilation skipped` *together with* both warnings, so linting does not
-  depend on compiling. `FORGE.md:528-570` carries the method and the numbers.
+  depend on compiling. `FORGE.md:544-577` carries the method and the numbers.
 
   The commenting asymmetry is real and the reason for it is not established. Both casts have
   the same shape — `uint64` of a `uint256` divided by a `uint32` `subLength` — and only the
@@ -4071,8 +4196,17 @@ still be hiding there.
   applies to removals. **The sentence above says four and its own list holds five**, and the
   unkillable variant named after it makes six, which is one more count written beside the list it
   counts. Re-derived today with the script's own `is_code` and `function_bounds`, the automatic
-  census is 89 removals over 10 targets plus 6 injections, so the gate can build 101 mutants against
-  this contract, and two of the three targets it reaches by hand hold no `revert` at all.
+  census is 89 removals over eleven targets plus 6 injections, so the gate can build 101 mutants
+  against this contract, and two of the four targets it reaches by hand hold no `revert` at all.
+  [**Both target counts in that sentence were wrong when it was written, and re-deriving them on
+  2026-09-05 is what found it.** It read *10 targets* and *three targets it reaches by hand*. The
+  automatic figure was last 10 on 2026-08-26, where the same enumeration returns 56 removals, and it
+  became 11 two days later when the cosign rework gave `spendHash` a refusal of its own. The tree
+  that produced the 89, `22fc0fb`, needs every one of its eleven functions to reach that total, so no
+  tree in this repository's history has ever offered 89 over 10. The hand figure was 3 until F44's
+  `createMandate` case landed on 2026-09-01. The 89 itself reproduces exactly, which is how the
+  target counts came to be checked at all, and the reproduction is recorded at the end of the census
+  bullet below.]
   **The first run of all six, the same evening: five caught, one `SURVIVED` where `EQUIVALENT` was
   promised, and the two `_cosignIsLive` cases had their labels crossed with their replacements.** The
   case labelled "the deadline stops being read" was built as `return nowTs < validUntil;`, which
@@ -4143,6 +4277,22 @@ still be hiding there.
   F11, which takes the whole-contract figure to **95 — 89 removals plus 6 injections** over eleven
   targets, against the 91 recorded earlier the same day. Both `EQUIVALENT` shadows were confirmed
   present exactly once inside their own target before the runs, so neither claim has lapsed.
+  **The census stopped describing this contract on the day it was established, and it now reads
+  fourteen removals short.** Re-enumerated on 2026-09-05 with the script's own `is_code` and
+  `function_bounds`, driven over every function at contract indentation rather than over a
+  remembered list of targets, the working tree offers **103 removals over 13 targets** — 109
+  buildable with the six injections and 115 with the six hand cases on top. The same enumeration
+  pointed at `22fc0fb` returns 89 over eleven, the figure this bullet records for that tree, and
+  reproducing it is what licenses the 103. Every step between the two is attributable: `8487b5a`
+  added one to `approveCosignFor` the same day as F38 through F40, `9b701ee` two to `createMandate`
+  with F43 through F46, `6b1e4d7` six with F47 through F50 — two constructor guards from F49, one
+  refusal, and `clearReservation` arriving as a twelfth target with three of its own — and `58ef048`
+  five with F51, one refusal plus `setRevoker` as a thirteenth target with four. **An enumeration is
+  not a census.** Nothing above was written into a throwaway tree, compiled or run, so no mutant is
+  claimed caught and no target is claimed clean at 103; what the count establishes is the size of
+  what is owed, and that it grew with every fix that added a refusal, which is the reading the
+  89 → 91 → 95 sequence already carried. #11 owns the run that turns the enumeration back into a
+  census, and until that happens the honest form of any clean claim here names `22fc0fb` as its tree.
 - **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
   coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
   `_checkCredential:1261` is the `catch` arm's
@@ -4221,6 +4371,24 @@ fourth may not be reachable on a faucet-funded account, and if it is not, it sta
 `cast code` above. It is grouped here because it shares the property that makes the other four
 unanswerable in this repository — only Arc can answer it — and separated in the count because it
 sends nothing and costs no gas.
+
+**Two more transactions joined on 2026-09-05 with F51, and they are owed for a different reason
+from the five above**: `setRevoker`, and a `revoke` sent by the third party the payer nominated.
+Neither has executed on any chain. Nothing about Arc's behaviour is in question here, which is the
+property the other five share and these two do not — they are owed as record, because the live
+phase closed at 31 transactions that gave four of v2's state-changing paths a receipt for the same
+signature in v1's bytes, and F51 takes that surface from six functions to seven. The count is
+therefore six transactions and one read, and the four above stay four because the list they belong
+to is the list of questions only Arc can settle.
+
+**The lockout F51 answers is the one item on this page that no test anywhere can reach.** F42's
+reading is that on Arc the fee and the mandate draw on one balance; `MockUSDC` charges no fee, so
+no Foundry test can put a payer in the position the role exists for. The 42 tests in
+`test/Revoker.t.sol` bound what the role can and cannot do, and none of them shows a payer
+stranded, which is why F51's confidence line rests on Arc's own statement about the balances rather
+than on a run. F26 is where this repository already records that limit of the mock, and it is a
+limit of the mock rather than a gap in the suite: an Arc receipt for `setRevoker` proves the call
+works, and the position it rescues a payer from stays unstageable either way.
 
 **One thing this pass looked for and did not find bounds how much the gaps above can be
 hiding.** The ten test files were swept for *vacuity* rather than for adversary surface,
@@ -4507,7 +4675,7 @@ had been written for `approveCosignFor` and scanned for `throw refuse(` while `e
 with `return deny(`. A mutation gate that covers half a file reports a clean sweep in exactly the
 same words as one that covers all of it.
 
-**Where the 50 findings actually came from, since §4 now promises this accounting in writing.**
+**Where the 51 findings actually came from, since §4 now promises this accounting in writing.**
 Sorted by what produced them rather than by what they are:
 
 - **Reading source against something else — 32.** F1–F26, plus F29, F30, F32, F34, F35 and F36.
@@ -4517,11 +4685,14 @@ Sorted by what produced them rather than by what they are:
   twice on its first run.
 - **A mutation gate — 3.** F27 and F28 on 2026-08-28 from extending `reference/mutation-gate.js` to
   `evaluate`, and F37 on 2026-08-29 from the same mutation gate over `createMandate`.
-- **A twelve-agent parallel sweep — 9.** F38, F39, F40 and F41, all reported on 2026-08-30, from
+- **A twelve-agent parallel sweep — 10.** F38, F39, F40 and F41, all reported on 2026-08-30, from
   twelve readers run at once over one bundle of the whole in-scope source, each carrying a single
   specialty and a rule that a claim without a concrete trace is a lead rather than a finding. F42
   is the same run's eighth and last report, read a day later. F47 through F50 come from a second
-  run of the instrument, over the tree at `d4d2fb5`, and landed on 2026-09-02.
+  run of the instrument, over the tree at `d4d2fb5`, and landed on 2026-09-02. F51 is finding 8 of
+  that same second run, and it landed three days after the other four because the fix it asked for
+  hands a power over someone else's mandate to a new party, so the objection came back from the
+  payer's side before any code was written and is quoted inside F51 rather than paraphrased.
 - **A sweep lead worked afterwards — 4.** F43, F44, F45 and F46, all on 2026-09-01. A lead is a
   claim its reader could not carry to a trace, so the first run returned leads alongside its
   findings, and four of the leads became entries once the missing proof was worked out by hand.

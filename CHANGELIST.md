@@ -363,7 +363,7 @@ trail with no error, which is worse than a cliff no caller can reach.
 **How it went missing.** This is one of three "documented soft spots" that the real-money
 decision of 2026-08-24 turned from curiosities into real decisions. The other two — the
 unreachable cosign requirement and the misleading `NotPayer()` — are both above. This one is
-recorded in `README.md:480`, `FORGE.md:273` and the test's own header, and was named in the
+recorded in `README.md:480`, `FORGE.md:282` and the test's own header, and was named in the
 same breath as the other two when the decision was made, and it still reached this file's
 "changelist" section in none of them. All three were documented and two of the three were
 listed. **A list assembled by remembering what belongs on it will be short by about a
@@ -456,7 +456,7 @@ would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
 functions by static count across eleven files at #22, up two net — a static count, not a
 `forge test` count, and therefore **unverified** then, because forge did not run in the
-environment these edits were made in, and `forge test` reports **278** today.
+environment these edits were made in, and `forge test` reports **320** today.
 
 **What it broke.** `DESIGN.md`'s flagship worked example and the narrative `THREAT-MODEL.md`
 F2 is built on are now un-creatable for a *second and independent* reason:

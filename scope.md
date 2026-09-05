@@ -4,25 +4,29 @@ The material an auditor is being asked to read is listed below, together with th
 material excluded from that request. Every count here comes from the tree at the commit
 named in the next line; if that line is stale, the counts are too.
 
-**Anchored at `2847c76` on branch `main`.** The deployed release is the annotated tag
+**Anchored at `58ef048` on branch `main`.** The deployed release is the annotated tag
 `v1.0.0-arc-testnet`; `main` is v2 in progress and does not reproduce the deployed
 bytecode. A scope statement tied to "the current tree" expires without anyone noticing;
 re-derive these numbers against whatever commit is handed over.
 
 ## In scope
 
-The in-scope code is one file, 2,599 lines, **17,063 bytes of runtime bytecode**
-(initcode 17,545), leaving 7,513 bytes under the EIP-170 limit.
+The in-scope code is one file, 2,764 lines, **17,888 bytes of runtime bytecode**
+(initcode 18,370), leaving 6,688 bytes under the EIP-170 limit.
 
-That figure describes the tree named above rather than the deployed contract. Deployed v1
-is 11,572 bytes, confirmed by its own on-chain code length, and that is the number most of
-this repo's other documents quote. v2 is 5,491 bytes larger, almost all of it the
-co-signature rework and `spendableAcross`. If a document quotes 11,572 without
-saying which release it means, it means v1.
+That figure describes the tree named above rather than the deployed contract, and it comes
+from the `forge build --sizes` run recorded in `evidence/sizes-v2.log`, made on 2026-09-05
+against the same warm `out/` the 320-test campaign in `evidence/deep-v4.log` used, so it
+measures the bytecode those tests exercised. Deployed v1 is 11,572 bytes, confirmed by its
+own on-chain code length, and that is the number most of this repo's other documents quote.
+v2 is 6,316 bytes larger than what is deployed. The co-signature rework and `spendableAcross`
+are the bulk of that, with `clearReservation` and the payer-nominated revoker the most recent
+additions; the split between them has never been measured, so read the total rather than any
+share of it. If a document quotes 11,572 without saying which release it means, it means v1.
 
 | File | What it is |
 |---|---|
-| `contracts/MandateManager.sol` | The whole system. 39 custom errors, 6 events, no imports, no inheritance, no owner. |
+| `contracts/MandateManager.sol` | The whole system. 39 custom errors, 7 events, no imports, no inheritance, no owner. |
 
 There is nothing else in `contracts/`. The contract declares the three interfaces it
 needs inline at lines 147, 156 and 164 rather than importing them, so the file is
@@ -38,7 +42,7 @@ self-contained and can be read start to finish without following a dependency.
 
 ## Out of scope
 
-- `test/` — 12 `.t.sol` files, 278 tests.
+- `test/` — 13 `.t.sol` files, 320 tests.
 - `lib/forge-std/` — forge-std 1.16.2, vendored as 68 tracked files. Test-only;
   `grep -rc forge-std contracts/` returns 0, so none of it reaches deployed bytecode.
   It is vendored rather than submoduled, so the upstream commit is recorded here instead
@@ -64,18 +68,19 @@ replayed on another or against a second deployment on the same chain.
 
 ## Entry points
 
-Six functions change state, and everything else reads.
+Seven functions change state, and everything else reads.
 
 | Function | Who may call it | What it does |
 |---|---|---|
-| `createMandate` | anyone, on their own behalf | Grants a mandate. `msg.sender` becomes the payer. 30 refusals guard the parameter set. |
+| `createMandate` | anyone, on their own behalf | Grants a mandate. `msg.sender` becomes the payer. 31 refusals guard the parameter set. |
 | `spend` | the named spender | Moves `amount` USDC from payer to recipient via `transferFrom`. The one function that moves money. |
-| `revoke` | the payer or the spender | Kills a mandate permanently, and with it every outstanding co-sign approval, since `spend` refuses a revoked mandate before it looks at anything else. The spender is allowed to revoke so a delegate can hand authority back. |
+| `revoke` | the payer, the spender, or the revoker the payer named | Kills a mandate permanently, and with it every outstanding co-sign approval, since `spend` refuses a revoked mandate before it looks at anything else. The spender is allowed to revoke so a delegate can hand authority back. The nominated revoker is allowed so that the escape does not depend on the payer still being able to afford it, which is F51's whole reason. |
+| `setRevoker` | the payer | Names or removes that third party, at grant time through `MandateParams.revoker` or afterwards through this function. `address(0)` removes. It refuses the contract, the payer and the spender, and it cannot reach a revoked mandate. Nominating gives away exactly one power, revocation, and the adversarial tests are the record of that. |
 | `approveCosignFor` | the cosigner | Pre-approves one exact spend hash, with a deadline. |
 | `withdrawCosign` | the cosigner | Cancels an approval before it is used. The payer cannot cancel one directly; revoking the mandate is the payer's route. |
 | `clearReservation` | the payer | Releases the nonce a co-sign approval reserved, so a later spend can use it. The approval itself is left in place, which is what separates this from `withdrawCosign`. |
 
-The contract exposes fourteen view functions, plus getters for `usdc`, `identityRegistry`,
+The contract exposes fifteen view functions, plus getters for `usdc`, `identityRegistry`,
 `validationRegistry` and `DOMAIN`. The two an integrator is most likely to build on are
 `spendable` and `spendableAcross`, and `spendableAcross` is the only place in the
 contract where an error reports a badly formed question rather than a refused action.
@@ -104,7 +109,7 @@ is the document about what that means for a payer.
 |---|---|
 | What is this and why | `README.md` |
 | Design decisions and the arguments behind them | `DESIGN.md` |
-| Trust assumptions, threat model, 50 recorded findings, 24 invariants | `THREAT-MODEL.md` |
+| Trust assumptions, threat model, 51 recorded findings, 25 invariants | `THREAT-MODEL.md` |
 | What immutability costs and what recourse a payer has | `IMMUTABILITY.md` |
 | Test and tooling conventions, compiler settings | `FORGE.md` |
 | Live transactions, gas measurements, verification output | `evidence/` |

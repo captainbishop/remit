@@ -44,8 +44,11 @@ optimizer_runs = 200
 # against the live chain to 0.009%, so the conclusion rests on those and still stands.
 #
 # So the size budget stays spent on headroom instead: v1 used 11,572 of 24,576 bytes, and
-# the 13,004 that left has since taken the EIP-712 cosign variant. v2 measures 17,063, so
-# 7,513 is what remains for anything still to come.
+# the 13,004 that left has since taken the EIP-712 cosign variant, `spendableAcross`,
+# `clearReservation` and the payer-nominated revoker. v2 measures 17,888, so 6,688 is what
+# remains for anything still to come. The split between those four has never been measured,
+# so the 6,316-byte total is the only figure here that any measurement backs. That
+# measurement is `evidence/sizes-v2.log`, and v1's is `evidence/verify.log`.
 #
 # METHOD NOTE for anyone re-running this comparison, and it was made stricter on
 # 2026-08-25 after being tested. The original advice was "compare the Min column, or pass

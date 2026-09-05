@@ -138,7 +138,7 @@ reference/policy.js        the normative spec — executable model of every deci
 reference/policy.test.js   102 tests, including boundary-aiming fuzzers
 reference/                 also holds the seven checkers, and the house style they enforce
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
-test/                      278 Forge tests in 12 files, against the real storage layout
+test/                      320 Forge tests in 13 files, against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 test/Deploy.t.sol          the deploy script's own checks, exercised against mocks
 script/Deploy.s.sol        deploys with the constructor arguments pinned per chain
@@ -146,7 +146,7 @@ demo/playground.html       browser simulation with 7 scripted attacks
 evidence/                  the testnet logs every gas and receipt figure is quoted from
 scope.md                   what an auditor is being asked to read, and what they are not
 DESIGN.md                  rationale, worked examples, verification worksheet
-THREAT-MODEL.md            the adversarial review: assets, boundaries, 50 findings
+THREAT-MODEL.md            the adversarial review: assets, boundaries, 51 findings
 IMMUTABILITY.md            what "no upgrade path" means for a payer, and the migration runbook
 PRIVACY.md                 what a mandate leaks, and the layers that could stop it
 CONFIDENTIAL-USDC.md       the unanswered question underneath them, and who owns it
@@ -176,15 +176,15 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-A second suite now exists in Solidity — 278 Forge tests in `test/` — covering the same
+A second suite now exists in Solidity — 320 Forge tests in `test/` — covering the same
 ground plus the three properties a JavaScript model structurally cannot express: a failed
 spend consumes nothing (real transaction rollback), rewinding onto the same physical ring
 slot accumulates rather than overwrites (real storage aliasing), and `totalSpent` panics
-rather than wrapping near 2^96 (real packed arithmetic). All 278 pass, under `solc` 0.8.28
+rather than wrapping near 2^96 (real packed arithmetic). All 320 pass, under `solc` 0.8.28
 — 2,048 fuzz runs and 49,152 invariant calls. `forge coverage` puts the contract at
-100% of lines (313/313), statements (565/565), branches (144/144) and functions
-(27/27), measured on the v2 tree at 278 tests rather than carried from an earlier one.
-Repo-wide the four columns read 99.84%, 98.55%, 92.65% and 100.00%. One of the functions
+100% of lines (334/334), statements (598/598), branches (152/152) and functions
+(30/30), measured on the v2 tree at 320 tests rather than carried from an earlier one.
+Repo-wide the four columns read 99.85%, 98.61%, 92.92% and 100.00%. One of the functions
 behind that last column is the USDC mock's plain `transfer`, which had no caller anywhere
 in the tree until the invariant handler's `donate` move called it. The deploy script was
 the one file with no coverage at all until `test/Deploy.t.sol` was written; the branches
@@ -227,7 +227,7 @@ encrypted keystore instead: the key is never printed and never written in plaint
 
 ```
 forge build                                    # clean; forge-std 1.16.2 vendored in lib/
-forge test                                     # 278 tests, all passing
+forge test                                     # 320 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;
                                                     # prints the address, never the key
@@ -402,7 +402,7 @@ deployed v1 contract is **11,572 bytes** of runtime code, against the 11,964 thi
 published for weeks — 11,572 is confirmed twice, by `forge build --sizes` at the v1 tag
 and by the contract's own on-chain code length, whereas 11,964 came from a single
 unverified source and matches neither the runtime nor the initcode (11,868). The v2 tree
-on `main` measures 17,063 runtime and 17,545 initcode, so an unqualified 11,572 anywhere
+on `main` measures 17,888 runtime and 18,370 initcode, so an unqualified 11,572 anywhere
 in this repository means v1. And Arc's 20 Gwei base fee is a *floor*, not a price: every
 transaction so far settled at 21 Gwei, so every cost figure computed at the floor ran ~5%
 low. Deployment cost **0.0537 USDC**, not the 0.051 published.
@@ -563,7 +563,7 @@ launch. The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 278 tests, including exact-ledger property tests and
+The Forge port is written and runs — 320 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence, and all of them pass.
 Gas is measured against Arc's real USDC, `K=24` is settled as affordable, and the contract
 is deployed and exercised on testnet.

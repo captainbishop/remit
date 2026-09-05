@@ -198,7 +198,7 @@ proof: 96 bytes of calldata, roughly 1,536 gas, plus three hashes, against a
 
 The costs are specific: a new branch in `spend`, the one function that must never
 be wrong; grant-time validation beside the existing invariant at line 363 pairing
-`F_ALLOWLIST` with a non-empty list; its own tests added to the current 278; and a
+`F_ALLOWLIST` with a non-empty list; its own tests added to the current 320; and a
 wider audit scope. Bit 7 is also the last one, and widening `flags` to `uint16` is
 possible, since slot 3 uses 29 of 32 bytes, though it would invalidate the
 storage-packing measurements already recorded in DESIGN.md.

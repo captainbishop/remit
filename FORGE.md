@@ -1,15 +1,15 @@
 # Running the Forge suite
 
-278 tests across twelve files — which `forge test` reports as **14 suites**, for reasons
+320 tests across thirteen files — which `forge test` reports as **15 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
 is the port of `reference/policy.test.js`, which has 102 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 278 pass; `forge lint` at default severity is clean on the v2 tree.** First
+**Status: all 320 pass; `forge lint` at default severity is clean on the v2 tree.** First
 compiled and first run on 2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at
-200 runs, in about twelve seconds; the last timed run was 8.63 seconds at 278. That covers
+200 runs, in about twelve seconds; the last timed run was 9.62 seconds at 320. That covers
 2,048 fuzz runs across the four property tests and 49,152 calls across the three invariants.
 What the first compile and the first run each cost is recorded below, because a suite's
 first green is the only time you learn whether it was testing anything.
@@ -166,18 +166,23 @@ pre-audit setting and takes minutes.
 **The deep profile was run on 2026-08-25 at 140 tests: 140 passed, 0 failed, 0 skipped,
 exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence/deep.log`.
 **It was re-run on 2026-09-03 at 276 tests against forge-std 1.16.2: 276 passed, 0 failed,
-0 skipped, exit 0, in 11m48.298s wall** — `evidence/deep-v2.log`. **And again on 2026-09-04
+0 skipped, exit 0, in 11m48.298s wall** — `evidence/deep-v2.log`. **Again on 2026-09-04
 at 278 tests: 278 passed, 0 failed, 0 skipped, exit 0, in 10m50.560s wall** —
-`evidence/deep-v3.log`, which is the gate in force. Each supersedes the one before it without
-replacing it, since the first is the campaign the deployed v1 bytecode was cleared by. Both
-later runs beat the 140-test one despite carrying twice the tests; `deep-v3.log` accounts for
-its own margin over `deep-v2.log` and leaves the earlier gap standing as an open question.
+`evidence/deep-v3.log`. **And on 2026-09-05 at 320 tests, after F51 added the payer-nominated
+revoker: 320 passed, 0 failed, 0 skipped, exit 0, in 9m21.166s wall** — `evidence/deep-v4.log`,
+which is the gate in force. Each supersedes the one before it without replacing it, since the
+first is the campaign the deployed v1 bytecode was cleared by. Every
+later run beats the 140-test one despite carrying twice the tests or more; `deep-v3.log`
+accounts for its own margin over `deep-v2.log`, `deep-v4.log` records a further 87.70s margin
+it cannot account for, and the earliest gap still stands as an open question.
 What each run bought, in calls rather than runs: each of the three `invariant_` functions in
 `WindowInvariant.t.sol` ran 2,000 sequences of 256 handler calls, so 512,000 calls apiece
 and 1,536,000 in total, against 16,384 apiece under the default profile. That budget is
 fixed, so the fourth handler move added in the third run took a quarter of it rather than
 adding to it: spend attempts per invariant fell from 341,447 to 256,473, and
-`deep-v3.log`'s header sets the figure out beside the reason it was accepted. Each of the four
+`deep-v3.log`'s header sets the figure out beside the reason it was accepted. F51 added tests
+without adding a handler move, so that share held: `deep-v4.log` reports 255,639, the
+difference being the random selector draw rather than a further claim on the budget. Each of the four
 `testFuzz_` functions in `WindowFuzz.t.sol` ran 20,000 cases instead of 512. Nothing new
 was found — no counterexample, no shrink, no revert that the policy did not intend. The
 only line in the log matching `panic` is the name of a test that asserts a panic.
@@ -221,6 +226,7 @@ success having tested nothing.
 test/Base.t.sol            harness: mocks, actors, params builders, denial helpers
 test/Creation.t.sol        56  grant-time validation — every way a mandate is refused
 test/Bounds.t.sol          32  per-tx, lifetime, allowlist, spender, time, revocation
+test/Revoker.t.sol         42  the payer's nominated revoker, and all it cannot touch
 test/Windows.t.sol         20  the rolling-window ring, by hand, with the boundary probes
 test/Gates.t.sol           26  ERC-8004 identity and credential gates
 test/Cosign.t.sol          66  what a co-signature actually commits to
@@ -233,7 +239,7 @@ test/Deploy.t.sol          22  script/Deploy.s.sol: the chain pin, the probes, a
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-The column sums to 278, which is the check worth running on it: a suite count swept in the
+The column sums to 320, which is the check worth running on it: a suite count swept in the
 prose above and not here leaves a table that disagrees with its own headline. On 2026-09-02
 this file still said 225 throughout, table included, so the column agreed with the headline
 while both were stale against the suite, which is the version of the problem that reads as
@@ -241,20 +247,23 @@ correct. Getting from 225 to 254 moved four cells: `Creation` 44 → 56, `Cosign
 `Gates` 24 → 26, `Views` 26 → 28. Reaching 276 took a whole row instead, added when the
 deploy script stopped being the one file in the repository with no coverage at all. Reaching
 278 moved one cell, `WindowInvariant` 5 → 7, on the day the claim that this contract never
-holds funds acquired a handler move able to falsify it.
+holds funds acquired a handler move able to falsify it. Reaching 320 took another whole row,
+`Revoker` at 42, when the payer gained a nominee able to revoke on their behalf.
 
-Twelve of the 278 are named attack simulations (`test_ATTACK_*`), three are regressions
-(`test_REGRESSION_*`) — one for a bug that shipped into the model, two for the self-comparing
+Twenty-seven of the 320 are named attack simulations, with `ATTACK` in the function name, and
+fifteen of those sit in `Revoker.t.sol`, where a third party able to revoke had to be shown
+unable to do anything else. Three are regressions (`test_REGRESSION_*`) — one for a bug that
+shipped into the model, two for the self-comparing
 read-back that shipped in the deploy script — and three pin behaviour that is deliberately
 weaker or stranger than a reader would assume (`test_DOCUMENTED_*`).
 
-**`forge test` prints `Ran 14 test suites`, and the arithmetic reconciling that count with
-twelve files is as follows.** Forge counts *contracts with test functions*, not files.
-Twelve files hold seventeen non-abstract contracts; `ArcParity.t.sol` alone declares four,
+**`forge test` prints `Ran 15 test suites`, and the arithmetic reconciling that count with
+thirteen files is as follows.** Forge counts *contracts with test functions*, not files.
+Thirteen files hold eighteen non-abstract contracts; `ArcParity.t.sol` alone declares four,
 one per measured transaction, because each needs cold storage. Subtract the three that
 declare no test functions of their own — `WindowHandler`, a fuzzing handler, and
-`Token18` and `TransposedRun` in `Deploy.t.sol` — and you get 14. `Base.t.sol` and
-`ArcParityBase` are `abstract` and contribute nothing. In total: 12 files, 14 suites, 278
+`Token18` and `TransposedRun` in `Deploy.t.sol` — and you get 15. `Base.t.sol` and
+`ArcParityBase` are `abstract` and contribute nothing. In total: 13 files, 15 suites, 320
 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot

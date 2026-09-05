@@ -55,7 +55,7 @@ themselves:
     DESIGN.md, CHANGELIST.md, L3-VAULT.md,    declared in FORGE.md:111-128
     PRIVACY.md, GAS-ABSTRACTION.md,
     IMMUTABILITY.md and evidence/README.md
-    an unqualified contract line number in    2847c76, declared in scope.md:7
+    an unqualified contract line number in    58ef048, declared in scope.md:4-7
     scope.md
     policy.js, policy.test.js and the         65f05d8 for F27 and F28, af9df40
     contract, cited from THREAT-MODEL.md      for F29 to F37, declared in
@@ -153,8 +153,12 @@ ANCHORS = [
         None,
         {"scope.md"},
         {CONTRACT},
-        ["2847c76"],
-        "scope.md:7",
+        ["58ef048"],
+        # The pointer names the sentence that states the convention rather than the line
+        # holding the revision, because that line is rewritten at every re-anchor and a
+        # pointer at it comes back drifted each time. This entry read 2847c76 until
+        # scope.md was re-anchored on 2026-09-05 and the drift report caught it.
+        "scope.md:4-7",
     ),
     (
         None,

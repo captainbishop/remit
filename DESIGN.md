@@ -471,10 +471,10 @@ correctness evidence for the whole project.
 `contracts/MandateManager.sol` is the on-chain implementation, written to mirror the
 model, with every deliberate deviation commented at the point it occurs.
 
-`test/` is the Forge port: 278 tests against the real storage layout, covering the same
+`test/` is the Forge port: 320 tests against the real storage layout, covering the same
 ground plus the three properties a model structurally cannot express — transactional
 rollback, storage aliasing in the bucket ring, and packed-`uint96` arithmetic. See
-FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 278 pass now.
+FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 320 pass now.
 
 ## Status and limits
 
@@ -517,7 +517,7 @@ about case by case.
 **The Solidity compiles and passes its suite, and first did so on 2026-08-24.** It was
 authored with no `solc` and no network access, so that was its first mechanical check.
 Under `solc` 0.8.28 with the optimizer at 200 runs it compiles with no errors, and `forge
-test` reported 140 of 140 then and reports 278 of 278 now: 2,048 fuzz runs across four
+test` reported 140 of 140 then and reports 320 of 320 now: 2,048 fuzz runs across four
 property tests and 49,152 calls across three stateful invariants, with both anti-vacuity
 guards green — so the suite is exercising the engine rather than agreeing with itself.
 
@@ -579,7 +579,7 @@ anywhere in this repository.
 Those are mock-USDC figures and are kept because they are the only ones covering the whole
 configuration space. **For what a real spend actually costs, the live numbers below
 supersede them.** Deployed v1 is 11,572 bytes of runtime code against the EIP-170 limit of
-24,576; the v2 tree on `main` is 17,063, so under a third is free. (This document previously said
+24,576; the v2 tree on `main` is 17,888, so under a third is free. (This document previously said
 11,964, which was wrong; see the size note in `foundry.toml`.)
 
 **A note on what these rows are, since it was got wrong once.** For the state-changing
@@ -764,7 +764,7 @@ visible in the cost model above: a spend's gas is `(K+1)` cold `SLOAD`s per wind
 each plus an external `transferFrom`, and those prices are set by the EVM rather than by
 codegen. The optimizer can only win on instruction selection and layout, which is noise at
 this scale; it cannot make a storage read cheaper. `200` stays, and v1's 13,004 spare bytes
-have since absorbed the EIP-712 cosign variant, leaving v2 with 7,513 free.
+have since absorbed the EIP-712 cosign variant and three later additions, leaving v2 with 6,688 free.
 
 Deploying to Arc confirmed this from the other direction, though less forcefully than first
 claimed. **13,110 gas** of a real spend is Arc's own native-USDC accounting — a cost no
