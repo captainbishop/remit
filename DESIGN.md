@@ -462,7 +462,7 @@ mandate or the ERC-20 allowance independently stops all spending.
 executable model of every decision the contract makes. It is the source of truth because
 it is the artifact that has actually been executed.
 
-`reference/policy.test.js` is 112 tests over that model: construction guards, each
+`reference/policy.test.js` is 116 tests over that model: construction guards, each
 cap and check, named attack tests, and property-based fuzzers. It includes a greedy
 adversary that aims spends at bucket boundaries across `K ∈ {2,3,4,6,12,24}` × 25
 seeds × 200 steps, checked against a brute-force exact ledger. This is the primary
@@ -479,7 +479,7 @@ FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 320 pass now.
 ## Status and limits
 
 The reference model is real, executed, and passing: `node --test
-reference/policy.test.js` reports 112 tests, 112 pass, 0 fail. It found six genuine
+reference/policy.test.js` reports 116 tests, 116 pass, 0 fail. It found six genuine
 cap-bypass bugs during development, four in the window algorithm and two in the
 credential check, each of which is now a named regression test.
 

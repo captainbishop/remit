@@ -314,6 +314,33 @@ test('construction: window length must divide evenly into buckets', () => {
   assert.doesNotThrow(() => win(DAY, usdc('1'), 24));
 });
 
+test('construction: a window length and a bucket count must both be positive', () => {
+  // Three of `window()`'s five refusals were unasserted until the mutation gate ran
+  // against this function for the first time on 2026-09-05. They look self-evidently
+  // covered because every other window in this file is built with sane arguments, which
+  // is the same trap the gate found in `createMandate` on 2026-08-29. The contract
+  // refuses all three as BadWindow and `test/Creation.t.sol` asserts them; the model's
+  // mirror of that rule did not.
+  assert.throws(() => win(0, usdc('1'), 12), /lengthSeconds must be positive/);
+  assert.throws(() => win(-DAY, usdc('1'), 12), /lengthSeconds must be positive/);
+  assert.throws(() => win(DAY, usdc('1'), 0), /buckets must be positive/);
+  assert.throws(() => win(DAY, usdc('1'), -12), /buckets must be positive/);
+
+  // Zero length is worse than useless rather than merely odd: `subLength` becomes zero, and
+  // the first spend divides the clock by it. A negative one is quieter still, because the
+  // remainder check passes and the ring is built with a negative sub-period.
+  assert.doesNotThrow(() => win(DAY, usdc('1'), 12));
+});
+
+test('construction: a bucket count above MAX_BUCKETS is refused, and the ceiling is inclusive', () => {
+  // 36 rather than 33, for the reason `test_createMandate_tooManyBuckets_reverts` gives on the
+  // Solidity side: 86400 % 33 is not zero, so 33 trips the divisibility check first and raises
+  // a different refusal, which would let this test pass while proving nothing about the bound.
+  assert.throws(() => win(DAY, usdc('1'), 36), new RegExp(`must be <= ${P.MAX_BUCKETS}`));
+  // Exactly MAX_BUCKETS is accepted. 86400 % 32 is zero, so this isolates the bound too.
+  assert.doesNotThrow(() => win(DAY, usdc('1'), P.MAX_BUCKETS));
+});
+
 test('construction: id, payer and spender are required, and the zero address is not one', () => {
   // All five guards this test and the next one cover already existed, and not one of them was
   // asserted. The mutation gate neutered each in turn on 2026-08-29 and the suite stayed green
@@ -1046,6 +1073,32 @@ test('a denied spend consumes nothing — nonce stays reusable', () => {
   assert.equal(evaluate(m, r, { now: 1 }).reason, Denial.OVER_PER_TX_CAP);
   // same nonce, now a legal amount: must succeed, because the failure was not a spend
   assert.equal(spend(m, { ...r, amount: usdc('10') }, { now: 1 }).allowed, true);
+});
+
+test('commit() refuses a denied decision instead of applying it', () => {
+  // `spend` reads `decision.allowed` before it commits, so this guard only ever fires for a
+  // caller who calls `evaluate` and `commit` separately — which is the whole reason the
+  // model exposes them separately, and what an integrator porting the policy will do.
+  // The mutation gate found the guard unasserted on 2026-09-05, the first time `commit`
+  // was a target.
+  const m = simpleMandate();
+  const denied = evaluate(m, req(usdc('999')), { now: 1 }); // over per-tx cap
+  assert.equal(denied.allowed, false);
+
+  assert.throws(() => P.commit(m, denied), /refusing to apply a denied decision/);
+  // The message carries the reason, so a caller who ignored `allowed` learns which rule
+  // refused rather than only that something did.
+  assert.throws(() => P.commit(m, denied), new RegExp(Denial.OVER_PER_TX_CAP));
+
+  // Nothing moved. Without the guard the first assignment reads `effects` off a denial, which
+  // is undefined, so the mandate would be left half-written by a TypeError.
+  assert.equal(m.totalSpent, 0n);
+  assert.equal(m.spendCount, 0n);
+
+  // The allowed path still works, and still accounts.
+  const ok = evaluate(m, req(usdc('10')), { now: 1 });
+  assert.doesNotThrow(() => P.commit(m, ok));
+  assert.equal(m.totalSpent, usdc('10'));
 });
 
 test('an amount that does not fit in uint96 is refused before any cap is consulted', () => {
@@ -2451,6 +2504,24 @@ test('joint ceiling: an empty set is answered, and dead mandates contribute zero
   // Sanity: the expiry-only one was worth MAX_AMOUNT before it lapsed, so the zero
   // above is the expiry doing the work rather than the clamp failing with no error.
   assert.equal(headroomAcross([gone], 1).maxJointSpendNow, MAX_AMOUNT);
+});
+
+test('joint ceiling: a caller who hands over something that is not a list is refused by name', () => {
+  // Found by the mutation gate on 2026-09-05, the first time `headroomAcross` was ever a
+  // target. The guard is not defensive noise. Remove it and a string gets past the length
+  // check, `mandates[0]` is a single character, its `payer` is undefined, every later
+  // comparison agrees with itself, and the view returns a total for something that was
+  // never a list of mandates.
+  assert.throws(() => headroomAcross('not a list', 1), /must be an array/);
+  assert.throws(() => headroomAcross(null, 1), /must be an array/);
+  assert.throws(() => headroomAcross(undefined, 1), /must be an array/);
+  // The array-like object is the plausible mistake rather than the absurd one: it has a
+  // length and an index, so it answers the two questions the function asks before it
+  // starts iterating.
+  assert.throws(() => headroomAcross({ 0: 'x', length: 1 }, 1), /must be an array/);
+
+  // An array is the only shape accepted, and an empty one is still an array.
+  assert.doesNotThrow(() => headroomAcross([], 1));
 });
 
 test('REGRESSION: a spend late in a sub-bucket is still counted K buckets later', () => {

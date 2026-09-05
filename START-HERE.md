@@ -7,7 +7,7 @@ one is written for someone who is starting out, and it assumes nothing.
 ## Where you are
 
 **All five stages below are done, as of 2026-08-24.** Node is installed and the reference
-tests pass — 112 of them in the current tree, since v2 has been adding to that suite. Foundry
+tests pass — 116 of them in the current tree, since v2 has been adding to that suite. Foundry
 is installed under WSL, the contract compiles, and all 320 Forge tests pass, including
 2,048 randomised fuzz runs and 49,152 invariant calls. Gas is measured, and stage 4 is
 complete: the contract is deployed to Arc Testnet with its source published, a mandate has
@@ -37,7 +37,7 @@ a real blockchain rather than only in tests.
 
 The **reference model** (`reference/policy.js`) is the rulebook, written in JavaScript.
 It decides every question: is this spend allowed, and if not, exactly why. It works right
-now, and its 112 tests pass.
+now, and its 116 tests pass.
 
 The **contract** (`contracts/MandateManager.sol`) is that same rulebook rewritten in
 Solidity, the language blockchains run. It first compiled on 2026-08-24 against 140 tests,
@@ -169,13 +169,13 @@ node --test reference/policy.test.js
 The last lines should read:
 
 ```
-# tests 112
-# pass 112
+# tests 116
+# pass 116
 # fail 0
 ```
 
 That is the rulebook verifying itself, including six deliberately reconstructed attacks
-it defeats. If you see `112 pass`, the foundation of the project is sound and you have run
+it defeats. If you see `116 pass`, the foundation of the project is sound and you have run
 your first test suite. If you see anything else, paste all of it to me — that would be
 surprising, and I would want to know.
 
@@ -186,8 +186,8 @@ because the contract panicked there and a JavaScript integer has no width to pan
 three for the holes in the co-signature requirement; six for the joint-ceiling view; and
 one for the narrowed definition of a bounded mandate — a per-transaction cap or a window is
 no longer enough on its own, because neither limits what can be spent over a lifetime. It
-then went 57 → 69 → 72 → 76 → 92 → 94 → 102 → 112 as later v2 tasks each brought their own
-regression tests, so the merkle allowlist was never what moved it next.)
+then went 57 → 69 → 72 → 76 → 92 → 94 → 102 → 112 → 116 as later v2 tasks each brought
+their own regression tests, so the merkle allowlist was never what moved it next.)
 
 ## Stage 2 — compile the contract ✅ done
 

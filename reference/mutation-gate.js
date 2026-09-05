@@ -34,8 +34,13 @@
 //
 // THE SPELLINGS ARE NOT COSMETIC, AND EACH ONE ADDED HAS REACHED A FUNCTION THE GATE HAD NEVER
 // TOUCHED. Counted from policy.js on 2026-08-30 rather than remembered: all 22 `throw refuse(`
-// lines sit inside `approveCosignFor`, all 27 `return deny(` lines inside `evaluate`, and the 35
-// `throw new Error(` lines are spread over nine functions with 20 of them inside `createMandate`.
+// lines sit inside `approveCosignFor`, all 27 `return deny(` lines inside `evaluate`, and the
+// `throw new Error(` lines read 35 over nine functions with 20 of them inside `createMandate` on
+// that date. The first two figures still hold. The third reads 43 over eleven functions with 22
+// inside `createMandate` when re-derived on 2026-09-05, and the two commits in between account
+// for all of the difference: F47-F50 (`6b1e4d7`) brought `clearReservation` in as a tenth
+// function carrying two of its own, and F51 (`58ef048`) brought `setRevoker` in as an eleventh
+// carrying four, and added the two revoker guards to `createMandate`.
 // The two counts F3 moved are the first and the second, which each gained the spend-count ceiling,
 // and F40 moved the first again with the window cap the approval path had been missing. The last
 // pair was stale before that: the figures here read 33 and 18 while the file held 35 and

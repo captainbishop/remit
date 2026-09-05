@@ -2413,11 +2413,15 @@ for each; a mutant that will not compile or will not run is reported INCONCLUSIV
 exactly the confidence this section exists to withhold. Each also *injects* guards the
 function is required NOT to have, since removal cannot reach a "must not refuse" claim.
 [**The figure here read "four guards" apiece when the sentence was written on 2026-08-28, and it is
-neither of the two live figures now** — `reference/mutation-gate.js` reached 7 injections with
-F27 and F28, while `reference/mutation-gate-sol.py` reached 6 on 2026-08-30, when F22's inversion
-was added to `spend` and to `approveCosignFor`. The count has moved out of the sentence and into
-this note, where going stale costs a reader nothing, which is the discipline F10 exists to argue
-for.]
+neither of the two live figures now** — `reference/mutation-gate.js` carries 11 injections and
+`reference/mutation-gate-sol.py` carries 6, the second reached on 2026-08-30 when F22's inversion
+was added to `spend` and to `approveCosignFor`. **This note said 7 for the JS mutation gate until
+2026-09-05, and 7 was never a total**: `d4f15ac` took the mutation gate from 4 injections to 11, so
+what got written down was the increment F27 and F28 brought. Both figures are counted from the two
+files now rather than remembered, and the JS one is confirmed a second way by
+`evidence/mutgate-js-all.log`, where 94 removals and 11 injections sum to the 105 mutants its eleven
+target headers declare. The count has moved out of the sentence and into this note, where going
+stale costs a reader nothing, which is the discipline F10 exists to argue for.]
 
 Both mutation gates found real holes on their first run, which is the only reason to trust
 either. In the model, `BAD_CONFIG` survived a green 68 because neutering the no-cosigner check
@@ -2442,6 +2446,19 @@ every test in the project aimed at it since v1, whereas `approveCosignFor` was a
 its own mutation gate caught `TotalSpentCeiling`. **Yield tracks the age of the tests, not the
 importance of the function**, so a clean sweep over old code is weak evidence and a clean sweep
 over new code is strong evidence, and this section should be read that way round.
+
+**A fourth run lands on the other side of that same rule.** On 2026-09-05 the JS mutation gate was
+pointed at all eleven throw-bearing functions in `reference/policy.js`, having only ever addressed
+five of them, and the newly reached ones gave up five survivors against a green 112: `window` at
+lines 238, 239 and 241, `commit` at 1033, `headroomAcross` at 1673. Not one was shadowed and not one
+was equivalent — every one was unasserted, which is the plainest thing that can be wrong with a
+suite and the thing a green run hides best. The contract's own equivalents were already asserted,
+four of them as `BadWindow` in `test/Creation.t.sol`, so the hole was in the model's tests and not
+in the policy either side implements. That is the milder of the two possible readings and it is
+still a real cost: a model whose own guards go untested cannot contradict the contract, and
+contradicting the contract is the only reason the model exists. Four tests closed all five, and the
+run recorded in `evidence/mutgate-js-all.log` is the one after them — 105 mutants over eleven
+targets, 105 caught, none surviving, at 116 tests.
 
 What the mutation gates still cannot mean: neither performs operator swaps, so a `>` becoming
 `>=` is invisible to both and only a boundary-tight assertion catches it. That is why the ceiling

@@ -135,7 +135,7 @@ one of which lives in USDC rather than in this codebase.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   112 tests, including boundary-aiming fuzzers
+reference/policy.test.js   116 tests, including boundary-aiming fuzzers
 reference/                 also holds the seven checkers, and the house style they enforce
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
 test/                      320 Forge tests in 13 files, against the real storage layout
@@ -168,7 +168,7 @@ Node 18+, no dependencies, no network.
 node --test reference/policy.test.js
 ```
 
-Expected: `# tests 112 / # pass 112 / # fail 0`.
+Expected: `# tests 116 / # pass 116 / # fail 0`.
 
 The tests are the actual correctness evidence for this project. They include named
 attack cases (tumbling-window boundary burst, backwards clock, co-signature

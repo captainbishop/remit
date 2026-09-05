@@ -450,7 +450,7 @@ derived by running it rather than counted by hand: `node --test policy.test.js` 
 `# tests 57 / # pass 57 / # fail 0`. **That 57 is the figure as of #22 and is left as history, not
 updated in place** — it reached **76** on 2026-08-28, having gained F16's and F17's cosign
 tests, F19's four refusals, and the four the `evaluate` mutation gate demanded, and stands at
-**112** today. F1 gets no mirror because the model has no `getMandate`
+**116** today. F1 gets no mirror because the model has no `getMandate`
 and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
 would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
@@ -976,6 +976,32 @@ mechanism reads like coverage of it. Two rows were added in the same commit. **A
 found a design defect that three reading passes did not, and it found it by failing rather than
 by passing** — the useful question at a surviving mutant is not "which test is missing" but
 "why was it never written".
+
+**2026-09-05: the model's mutation gate was pointed at all eleven of its targets for the first
+time, and five guards turned out to be unasserted.** The gate finds its own targets by scanning
+`reference/policy.js`, but a target is only mutated when it is named on the command line, and only
+five had ever been named. Running the rest gave **105 mutants over eleven targets and five
+survivors against a green 112** — `window` at lines 238, 239 and 241, `commit` at 1033,
+`headroomAcross` at 1673. Each was probed against the source before being believed, as the gate's
+own output instructs, and none is shadowed, equivalent or unreachable. All five were simply
+untested.
+
+**The tests those survivors asked for are not the tests a reader would guess.** Removing `commit`'s
+`!decision.allowed` guard does not make the model apply a denied decision — it makes it read
+`effects` off a denial, which is `undefined`, so the call still throws and a bare `assert.throws`
+would score the mutant caught while proving nothing. `headroomAcross(null)` behaves the same way,
+and so does `win(DAY, cap, 0)`, where a zero sub-period turns the first division into a BigInt
+`RangeError`. All four new tests therefore match on the message, which is the only thing that
+separates the guard from the crash that stands in for it. Suite 112 → **116**, and the eleven
+targets re-run at 105 of 105 caught, recorded in `evidence/mutgate-js-all.log`.
+
+**No chain behaviour was ever exposed, and the cost was somewhere else.** The contract asserts all
+five equivalents already, `window`'s three among them as `BadWindow` in `test/Creation.t.sol`,
+where `test_createMandate_tooManyBuckets_reverts` passes 36 rather than 33 for the same reason the
+new model test does: 86,400 leaves a remainder of 6 against 33, so the divisibility check would
+fire first and the test would pass without touching the bound it names. What the gap cost is the
+cross-check itself. The model earns its place by being able to disagree with the contract, and a
+guard nothing tests cannot disagree with anything.
 
 ## What does not go in
 
