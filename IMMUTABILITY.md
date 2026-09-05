@@ -422,7 +422,7 @@ surface is five mandates, five spends, three revocations, four cosignature trans
 in total, every one status 1, with both ERC-8004 checks having fired against Arc's real
 registries. All five state-changing functions have now run live, so none of them stands at
 zero. Line 13 likewise credits the reference model with 46 tests, which was right then and
-is 102 now.
+is 112 now.
 
 The one part of that banner which is correct and which the v2 replacement keeps verbatim is
 the `NOT AUDITED` / no-real-money half.

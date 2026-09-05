@@ -50,7 +50,7 @@ self-contained and can be read start to finish without following a dependency.
   `bf647bd6046f2f7da30d0c2bf435e5c76a780c1b`. The tree was taken from a clone of that tag
   rather than diffed against it afterwards, so an auditor who wants byte-equality should
   re-clone the tag with the recipe in `FORGE.md` and diff the 68 files themselves.
-- `reference/` — a JavaScript model of the policy (`policy.js`), its 102-test suite, and
+- `reference/` — a JavaScript model of the policy (`policy.js`), its 112-test suite, and
   two mutation-testing scripts. The model exists to cross-check the contract, and the
   two have disagreed twice in ways that mattered, so it is useful context. It is not
   deployed and it holds nothing.

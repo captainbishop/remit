@@ -450,7 +450,7 @@ derived by running it rather than counted by hand: `node --test policy.test.js` 
 `# tests 57 / # pass 57 / # fail 0`. **That 57 is the figure as of #22 and is left as history, not
 updated in place** — it reached **76** on 2026-08-28, having gained F16's and F17's cosign
 tests, F19's four refusals, and the four the `evaluate` mutation gate demanded, and stands at
-**102** today. F1 gets no mirror because the model has no `getMandate`
+**112** today. F1 gets no mirror because the model has no `getMandate`
 and no storage struct, so it has no notion of a field being *displayed*; mirroring it there
 would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so that the
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
