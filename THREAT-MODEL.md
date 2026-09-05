@@ -278,9 +278,9 @@ what it does not, and which areas remain unexamined.
 > **+4**. The insertion points in the `af9df40` file are 115, 310, 518 and 1167, one line at
 > each. Those deltas are recorded rather than applied, for the reason the F19 paragraph above
 > gives: each number is correct against the blob it names, and rewriting it would make it wrong.
-> The ladder is how to cross from one blob to the other. **`reference/policy.test.js` is cited by
-> no line number anywhere in the repository**, which was checked by grep over every tracked
-> `.md`, `.sol`, `.js` and `.py` file rather than assumed, so its five new lines cost nothing.
+> The ladder is how to cross from one blob to the other. **This paragraph said no line number cited
+> `reference/policy.test.js` and the grep offered as proof missed six that do**, five of them added
+> earlier the same day. All six are anchored, so the five new lines still cost nothing.
 >
 > **2026-08-30, the Solidity mutation gate finished: eleven of eleven targets, 89 of 89 mutants.**
 > The green figure is now **209 Solidity cases and 92 model tests**, so the 207 five paragraphs
@@ -2588,20 +2588,20 @@ mandate**, so there is no second owner the pin could ever be protecting against.
 
 **How this was found, because the method is the transferable part.** Not by review — this
 document's §3 enumeration walked past it twice. It came out of extending
-`reference/mutation-gate.js` to `evaluate` on 2026-08-28: neutering the model's mirror of `:942`
-killed no test, and the reason turned out to be that **every `expectedOwner` in
-`reference/policy.test.js` was set to `AGENT`, which is also the spender**, so the guard had never
-once been reached in a green suite. The question *"why is this guard unreachable in the tests"*
-answered itself with *"because it is nearly unreachable in life"*. A coverage tool produced a
-design finding, which is not what coverage tools are usually for.
+`reference/mutation-gate.js` to `evaluate` on 2026-08-28: neutering the model's mirror of
+`contracts/MandateManager.sol:942` killed no test, and the reason turned out to be that **every
+`expectedOwner` in `reference/policy.test.js` was set to `AGENT`, which is also the spender**, so
+the guard had never once been reached in a green suite. The question *"why is this guard
+unreachable in the tests"* answered itself with *"because it is nearly unreachable in life"*. A
+coverage tool produced a design finding, which is not what coverage tools are usually for.
 
-**`test/Gates.t.sol:62-65` is a seventh instance of the #25 pattern — a wrong justification
-beside a correct assertion.** Its comment explains the mismatch case as *"a distinct error,
-because it means the mandate's assumptions changed rather than that the agent lost its key."*
-The assumptions did not change. Nothing happened at all: the test's mandate is born unspendable
-at grant time, and `test_identityGate_expectedOwnerMismatch_reportsIdentityTransferred` is
-asserting the brick, not a transfer. The test is right and its name is right; the reason attached
-to it teaches the reader the opposite of F27. It belongs on #25's list.
+**`test/Gates.t.sol` carried a seventh instance of the #25 pattern — a wrong justification beside a
+correct assertion**, closed by F33. Its comment explained the mismatch case as *"a distinct error,
+because it means the mandate's assumptions changed rather than that the agent lost its key."* The
+assumptions did not change: the test's mandate was born unspendable at grant time, so the test was
+asserting the brick, not a transfer. `createMandate` now refuses that configuration, the test is
+`test_identityGate_expectedOwnerNotTheSpender_isRefusedAtGrantTime` asserting `BadConfig`, and
+`test/Gates.t.sol:63-69` keeps the whole lesson where a reader of the test will meet it.
 
 ---
 
@@ -2698,7 +2698,7 @@ a caller learns which of the two it named. The refusal is mirrored in `approveCo
 `:1479`, under F17's rule that every permanent refusal `spend` makes is also made at approval time.
 
 **What proves it.** `test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies`
-(`test/Views.t.sol:439-465`) asserts both halves for both addresses: the view answers `false`, and
+(`test/Views.t.sol:498-518`) asserts both halves for both addresses: the view answers `false`, and
 `spend` then reverts with the argument-encoded error. One test therefore covers F29's spend leg and
 all of F36. The model carries the same refusal on both paths, at `reference/policy.js:634` for a
 spend and `:1112` for an approval, with four `F29:` tests in `policy.test.js` including one that
@@ -3071,7 +3071,7 @@ reader: this is a recipient answer only. The caps, the nonce, the co-signature r
 ERC-8004 checks all remain outside it, so a `true` means "this payee is permitted", not "this spend will
 succeed". `spendable` answers how much can move.
 
-`test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` (`test/Views.t.sol:439-465`) is the proof
+`test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` (`test/Views.t.sol:498-518`) is the proof
 for this finding and for F29's spend leg together: it asserts `false` for all four addresses and then
 `payReverts` each of them, so the two claims are checked against each other rather than separately. A
 second test covers the unknown mandate. The model has no equivalent view — `evaluate` answers the whole
@@ -4333,8 +4333,8 @@ still be hiding there.
   sits one deleted test away from being unasserted.]
 - **Two mutants survive permanently, and they are a fourth class of survivor rather than two more
   coverage gaps.** New on 2026-08-30, from the sweep that closed the bullet above.
-  `_checkCredential:1261` is the `catch` arm's
-  `revert CredentialMissing();` and `spendableAcross:2010` is the hoisted
+  In `contracts/MandateManager.sol`, `_checkCredential`'s `:1261` is the `catch` arm's
+  `revert CredentialMissing();` and `spendableAcross`'s `:2010` is the hoisted
   `if (payer == address(0)) revert UnknownMandate();`. In each case the successor guard refuses the
   same input under the **same error name** one to twelve lines lower — `:1264` and `:2022` — so no
   input exists that reaches the mutated line and not its shadow, nothing outside the contract can

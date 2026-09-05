@@ -22,10 +22,13 @@ reported as needing a reading.
 
 Both forms run the quotation check, and either can fail on it. A pointer into a
 document is otherwise watched for movement and never for meaning, so a pointer
-that lands on unrelated prose reports clean for as long as that prose holds
-still. Where the citing sentence attributes a quotation of four words or more to
-the target, the words themselves say which line is meant, and the run fails when
-they are not within reach of the number.
+that lands on real but unrelated prose reports clean for as long as that prose
+holds still. Two checks do reach past movement: where the citing sentence
+attributes a quotation of four words or more to the target, the words themselves
+say which line is meant and the run fails when they are not within reach of the
+number, and a number landing on a blank line or past the end of the file cites
+nothing at all, which fails whether the target is a declared anchor or the
+working tree.
 
 CITATION SHAPES RECOGNISED.
 
@@ -33,15 +36,17 @@ CITATION SHAPES RECOGNISED.
     File.sol:123-140            a range; the first number is checked
     `File.sol:123`              inside a code span, identical after the span is stripped
     v2:123                      the v2 convention, anchored below
-    ... File.sol ... :123       a bare `:123` attributed to the last filename on the line
+    ... File.sol ... :123       a bare `:123`, owned by the nearest filename before it
     ... File.sol ... line 123   the prose form, attributed the same way, and `Line 123` too
 
 Attribution looks back to the start of the paragraph for a filename, because a
-paragraph often names the file once and then refers to several lines in it. That
-reach is wide enough to capture a number meant for the file the citing document
-declares as its subject, so write the pointer explicitly when its paragraph
-names some other document. A `:123` with no filename in range is reported as
-unattributed rather than guessed at.
+paragraph often names the file once and then refers to several lines in it. A
+filename standing after the number does not own it, since a sentence that names
+two files usually cites a line in the first and mentions the second afterwards.
+That reach is wide enough to capture a number meant for the file the citing
+document declares as its subject, so write the pointer explicitly when its
+paragraph names some other document. A `:123` with no filename in range is
+reported as unattributed rather than guessed at.
 
 ANCHORED CITATIONS.
 
@@ -310,15 +315,21 @@ def citations(path: Path):
         for m in SELF.finditer(line):
             claimed.add(m.span())
             yield n, raw.strip(), None, int(m.group(1)), "self", m.start()
-        names = FILENAME.findall(line)
-        window = names or recent
+        found = [(m.start(), m.group(0)) for m in FILENAME.finditer(line)]
+        names = [name for _, name in found]
         for m in BARE.finditer(line):
             if any(s <= m.start() <= e for s, e in claimed):
                 continue
             num = next(g for g in m.groups() if g)
-            if window:
-                kind = "bare" if names else "lookback"
-                yield n, raw.strip(), window[-1], int(num), kind, m.start()
+            # The nearest filename at or before the pointer owns it, not the last one on
+            # the line. A sentence that names one file, cites a line in it, and then names
+            # a second file otherwise hands that number to the second file, which usually
+            # holds a line at the same number and so reports clean.
+            before = [name for start, name in found if start <= m.start()]
+            if before:
+                yield n, raw.strip(), before[-1], int(num), "bare", m.start()
+            elif recent:
+                yield n, raw.strip(), recent[-1], int(num), "lookback", m.start()
             else:
                 yield n, raw.strip(), default, int(num), "default", m.start()
 
@@ -520,7 +531,7 @@ def main() -> int:
     unattributed = [r for r in rows if r[3] is None and r[5] != "self"]
     quoted = ok = illustrative = selfref = 0
     live, anchored, broken, drifted, unresolved = [], [], [], [], []
-    advisory, edited, checkable = [], [], []
+    advisory, edited, checkable, nothing = [], [], [], []
 
     for path, n, raw, name, target, kind, col in rows:
         if kind == "self":
@@ -555,6 +566,25 @@ def main() -> int:
             else:
                 broken.append((citer, rel, target, declared, readings, raw))
             continue
+        # An anchored citation whose line is blank at every anchor fails above. Give a live
+        # citation the same verdict: a number that lands on a blank line or past the end of its
+        # file cites nothing, whatever the sentence around it claims, and that holds in both
+        # modes. Two exemptions apply, both of them narrow: a pointer attributed by inference
+        # may simply name the wrong file, so it takes the advisory route this file already uses
+        # for that doubt, and a `.log` target is a run's output, where a number beside a
+        # filename is a gas figure or a mandate id rather than a position in a file.
+        if not current or current == "<past end of file>":
+            note = (
+                f"past the end of a {len(now)}-line file"
+                if target > len(now)
+                else "a blank line"
+            )
+            if tgt.suffix != ".log":
+                if inferred:
+                    advisory.append((citer, rel, target, current, raw, note))
+                else:
+                    nothing.append((citer, rel, target, note, raw))
+                continue
         if rev is None:
             live.append((citer, rel, target, current))
             continue
@@ -636,6 +666,7 @@ def main() -> int:
     print(f"    unresolved filenames            : {len(unresolved)}")
     print(f"    unattributed bare line numbers  : {len(unattributed)}")
     print(f"    anchored but absent at anchor   : {len(broken)}")
+    print(f"    live pointer landing on nothing : {len(nothing)}")
     print(f"    verbatim quotations checked     : {quotes_tested}")
 
     by_convention: dict[str, dict[str, int]] = {}
@@ -663,6 +694,16 @@ def main() -> int:
             print(f"    {citer}  cites {rel}:{target}   convention declared in {declared}")
             print(f"        tried  : {', '.join(a for a, _ in readings)}")
             print(f"        citing : {raw[:100]}")
+
+    if nothing:
+        print(f"\nlive pointers that land on nothing: {len(nothing)}\n")
+        print("The number names a blank line, or a line past the end of the file. A citation")
+        print("like this cites nothing at all, so the sentence around it is unsupported until")
+        print("the pointer is read and renumbered against the file as it stands now.\n")
+        for citer, rel, target, note, raw in nothing:
+            print(f"{citer}  cites {rel}:{target}   {note}")
+            print(f"    citing text : {raw[:100]}")
+            print()
 
     if edited:
         print(f"\ncitations edited since {rev}, so drift against {rev} says nothing: {len(edited)}")
@@ -711,7 +752,7 @@ def main() -> int:
             print(f"    quoted      : {phrase[:100]}")
             print()
 
-    if drifted or broken or misquoted:
+    if drifted or broken or misquoted or nothing:
         print("\nFAIL — read every drifted citation. A quoted tool report stays verbatim,")
         print("a pointer into the current tree gets the new number, and a pointer into a")
         print("declared anchor stays as written.")
