@@ -1,0 +1,697 @@
+Solidity mutation census at 320 tests — the full run, 17 invocations, 2026-09-05.
+
+The contract measured is commit 47c5cb41e438348ff8e02f72ce79d42bd49a233b; `git diff` over
+contracts/, test/, script/ and foundry.toml was empty for the whole run. The GATE itself carried
+one uncommitted fix at the time, the `COPY` tuple gaining "script", without which no run could
+build at all — the commit carrying this file carries that fix as well.
+
+Twelve targets ran at 15:28Z and the machine died during the thirteenth. The remaining five ran
+at 16:35Z after the runner was made resumable; a target is skipped only when its log already
+ends in a verdict line, so the four stale logs from the failed first attempt were rebuilt.
+
+What follows is the runner's SUMMARY and then all 17 target logs, each complete: every mutant
+line and every closing verdict is here as the run wrote it. One file is left out, the 408-line
+plain `forge test` the runner takes before the first target, because its only result line is
+quoted in SUMMARY above and each of the 17 targets carries its own baseline anyway.
+
+================================================================ SUMMARY
+census at 2026-09-05T15:28:48Z
+commit  47c5cb41e438348ff8e02f72ce79d42bd49a233b
+forge   forge Version: 1.7.1
+
+Suite result: ok. 4 passed; 0 failed; 0 skipped; finished in 8.54s (27.38s CPU time)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 8.93s (21.20s CPU time)
+Ran 15 test suites in 8.95s (26.25s CPU time): 320 tests passed, 0 failed, 0 skipped (320 total tests)
+
+bare setRevoker                rc=0   4 mutants:  4 caught 0 survived 0 equiv 0 inconc     97s (total   97s)
+bare spendHash                 rc=0   1 mutants:  1 caught 0 survived 0 equiv 0 inconc     38s (total  135s)
+bare _checkAndCommitWindows    rc=0   1 mutants:  1 caught 0 survived 0 equiv 0 inconc     36s (total  171s)
+bare _checkIdentity            rc=0   2 mutants:  2 caught 0 survived 0 equiv 0 inconc     57s (total  228s)
+bare revoke                    rc=0   2 mutants:  2 caught 0 survived 0 equiv 0 inconc     58s (total  286s)
+bare clearReservation          rc=0   3 mutants:  3 caught 0 survived 0 equiv 0 inconc     77s (total  363s)
+bare withdrawCosign            rc=0   3 mutants:  3 caught 0 survived 0 equiv 0 inconc     79s (total  442s)
+bare constructor               rc=0   3 mutants:  3 caught 0 survived 0 equiv 0 inconc     97s (total  539s)
+bare spendableAcross           rc=0   5 mutants:  4 caught 0 survived 1 equiv 0 inconc    136s (total  675s)
+bare _checkCredential          rc=0   6 mutants:  5 caught 0 survived 1 equiv 0 inconc    145s (total  820s)
+bare spend                     rc=0  21 mutants: 21 caught 0 survived 0 equiv 0 inconc    453s (total 1273s)
+bare approveCosignFor          rc=0  27 mutants: 27 caught 0 survived 0 equiv 0 inconc    573s (total 1846s)
+
+RESUMED 2026-09-05T16:35:14Z  commit 47c5cb41e438348ff8e02f72ce79d42bd49a233b
+Ran 15 test suites in 10.10s (54.30s CPU time): 320 tests passed, 0 failed, 0 skipped (320 total tests)
+
+bare setRevoker                cached   4 mutants:  4 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare spendHash                 cached   1 mutants:  1 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare _checkAndCommitWindows    cached   1 mutants:  1 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare _checkIdentity            cached   2 mutants:  2 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare revoke                    cached   2 mutants:  2 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare clearReservation          cached   3 mutants:  3 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare withdrawCosign            cached   3 mutants:  3 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare constructor               cached   3 mutants:  3 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare spendableAcross           cached   5 mutants:  4 caught 0 survived 1 equiv 0 inconc   (done earlier)
+bare _checkCredential          cached   6 mutants:  5 caught 0 survived 1 equiv 0 inconc   (done earlier)
+bare spend                     cached  21 mutants: 21 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare approveCosignFor          cached  27 mutants: 27 caught 0 survived 0 equiv 0 inconc   (done earlier)
+bare createMandate             rc=0    31 mutants: 31 caught 0 survived 0 equiv 0 inconc    775s (total  776s)
+hand _cosignIsLive             rc=0     2 mutants:  1 caught 0 survived 1 equiv 0 inconc     73s (total  849s)
+hand _isUndebitable            rc=0     2 mutants:  2 caught 0 survived 0 equiv 0 inconc     76s (total  925s)
+hand approveCosignFor          rc=0     3 mutants:  3 caught 0 survived 0 equiv 0 inconc     95s (total 1020s)
+hand createMandate             rc=0     7 mutants:  6 caught 0 survived 1 equiv 0 inconc    196s (total 1216s)
+
+done in 1216s. 17 runs, logs in census-320/
+
+================================================================ bare-_checkAndCommitWindows.log
+mutation gate (solidity): _checkAndCommitWindows
+  working copy: /tmp/remit-solmut-u39_z1tu   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  1 mutant(s) queued
+  baseline: 320 passed, 0 failed  (19s)
+
+  [ 1/1] removed  OverWindowCap (line 1493) ... caught  (16s)
+
+mutation gate: _checkAndCommitWindows — 1 mutants, baseline 320 green
+
+  caught       removed  OverWindowCap (line 1493)
+               by: testFuzz_exactTrailingWindowNeverExceedsTheCap, testFuzz_greedyAdversaryCannotBreachTheExactWindow, testFuzz_twoWindowsBothHoldExactly (+23 more)   [27 failing]
+
+OK — the one mutant was caught by a named test.
+
+================================================================ bare-_checkCredential.log
+mutation gate (solidity): _checkCredential
+  working copy: /tmp/remit-solmut-dy683m_7   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  6 mutant(s) queued
+  baseline: 320 passed, 0 failed  (21s)
+
+  [ 1/6] removed  CredentialMissing (line 1599) ... EQUIVALENT  (20s)
+  [ 2/6] removed  CredentialMissing (line 1602) ... caught  (20s)
+  [ 3/6] removed  CredentialWrongValidator (line 1603) ... caught  (20s)
+  [ 4/6] removed  CredentialWrongAgent (line 1616) ... caught  (20s)
+  [ 5/6] removed  CredentialMissing (line 1618) ... caught  (23s)
+  [ 6/6] removed  CredentialStale (line 1632) ... caught  (20s)
+
+mutation gate: _checkCredential — 6 mutants, baseline 320 green
+
+  EQUIVALENT   removed  CredentialMissing (line 1599)
+               shadowed by line 1602: if (gotValidator == address(0)) revert CredentialMissing();
+               A reverting registry leaves all four locals at their zero defaults, so the zero-
+               validator check refuses the identical call under the identical selector one line
+               lower. Splitting the two apart would be actively WRONG rather than merely
+               unnecessary: Arc's live registry was observed on 2026-08-24 to revert with
+               Error("unknown") for an unset hash, so this catch arm carries the ordinary not-yet-
+               filed case, and a separate error here would report Arc's commonest credential state
+               as a registry failure. The header of test/mocks/MockRegistries.sol records that
+               probe and its three transaction hashes.
+  caught       removed  CredentialMissing (line 1602)
+               by: test_bothGates_mustPassIndependently, test_credentialGate_missingAttestation_denies, test_gates_areCheckedBeforeTheCaps (+1 more)   [4 failing]
+  caught       removed  CredentialWrongValidator (line 1603)
+               by: test_ATTACK_attestationFromAnUnnamedValidator_denies, test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent   [2 failing]
+  caught       removed  CredentialWrongAgent (line 1616)
+               by: test_ATTACK_realAttestationAboutADifferentAgent_denies, test_credentialGate_fallsBackToTheIdentityGatesAgentId   [2 failing]
+  caught       removed  CredentialMissing (line 1618)
+               by: test_credentialGate_failingAttestation_denies   [1 failing]
+  caught       removed  CredentialStale (line 1632)
+               by: test_credentialGate_staleAttestation_denies, test_credentialGate_stalenessBoundaryIsInclusive, test_f31_aFutureDatedAttestationIsRefusedRatherThanFreshForever (+1 more)   [4 failing]
+
+OK — 5 of 6 mutants were caught by a named test, and 1
+     could not be by any test that could be written:
+       EQUIVALENT  CredentialMissing (line 1599)
+     Each removal there neuters a guard whose successor refuses the same input under
+     the same error name, and each hand case there drops a conjunct whose twin on the
+     same line already refuses everything it would have. Every shadow a removal leans
+     on was looked up above, and the exemption lapses if it disappears.
+
+================================================================ bare-_checkIdentity.log
+mutation gate (solidity): _checkIdentity
+  working copy: /tmp/remit-solmut-08bnb65s   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  2 mutant(s) queued
+  baseline: 320 passed, 0 failed  (19s)
+
+  [ 1/2] removed  IdentityNotHeld (line 1559) ... caught  (19s)
+  [ 2/2] removed  IdentityTransferred (line 1560) ... caught  (19s)
+
+mutation gate: _checkIdentity — 2 mutants, baseline 320 green
+
+  caught       removed  IdentityNotHeld (line 1559)
+               by: test_ATTACK_transferringTheAgentIdentity_killsTheMandate, test_bothGates_mustPassIndependently, test_identityGate_burnedIdentity_deniesLegibly   [3 failing]
+  caught       removed  IdentityTransferred (line 1560)
+               by: test_f33_forcingTheUnreachablePin_stillRefusesTheSpend   [1 failing]
+
+OK — all 2 mutants were caught by a named test.
+
+================================================================ bare-approveCosignFor.log
+mutation gate (solidity): approveCosignFor
+  3 hand case(s) exist for approveCosignFor and need --hand; not built here
+  working copy: /tmp/remit-solmut-4tuvp119   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  27 mutant(s) queued
+  baseline: 320 passed, 0 failed  (22s)
+
+  [ 1/27] removed  UnknownMandate (line 1885) ... caught  (23s)
+  [ 2/27] removed  BadConfig (line 1886) ... caught  (22s)
+  [ 3/27] removed  NotCosigner (line 1887) ... caught  (22s)
+  [ 4/27] removed  Revoked (line 1910) ... caught  (20s)
+  [ 5/27] removed  Expired (line 1914) ... caught  (20s)
+  [ 6/27] removed  BadDeadline (line 1919) ... caught  (22s)
+  [ 7/27] removed  ZeroRecipient (line 1922) ... caught  (19s)
+  [ 8/27] removed  SelfPayment (line 1929) ... caught  (20s)
+  [ 9/27] removed  UnrecoverableRecipient (line 1934) ... caught  (24s)
+  [10/27] removed  RecipientNotAllowed (line 1939) ... caught  (19s)
+  [11/27] removed  ZeroAmount (line 1941) ... caught  (20s)
+  [12/27] removed  AmountTooLarge (line 1942) ... caught  (19s)
+  [13/27] removed  NonceAlreadyUsed (line 1966) ... caught  (19s)
+  [14/27] removed  OverPerTxCap (line 1971) ... caught  (20s)
+  [15/27] removed  OverTotalCap (line 1974) ... caught  (22s)
+  [16/27] removed  TotalSpentCeiling (line 1977) ... caught  (19s)
+  [17/27] removed  SpendCountCeiling (line 1985) ... caught  (21s)
+  [18/27] removed  OverWindowCap (line 2006) ... caught  (21s)
+  [19/27] removed  CosignNotRequired (line 2016) ... caught  (19s)
+  [20/27] removed  BadDeadline (line 2026) ... caught  (20s)
+  [21/27] removed  BadDeadline (line 2032) ... caught  (20s)
+  [22/27] removed  NonceReserved (line 2048) ... caught  (20s)
+  [23/27] injected a notBefore in the future ... caught  (20s)
+  [24/27] injected a currently full rolling window ... caught  (20s)
+  [25/27] injected an unfiled ERC-8004 credential ... caught  (20s)
+  [26/27] injected the maximal wrong design: approve only what could be spent RIGHT NOW ... caught  (20s)
+  [27/27] injected F22: the spender refused as its own recipient, on the approval path ... caught  (21s)
+
+mutation gate: approveCosignFor — 27 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 1885)
+               by: test_approveCosignFor_onUnknownMandate_reverts   [1 failing]
+  caught       removed  BadConfig (line 1886)
+               by: test_approveCosignFor_onAMandateWithoutCosigning_reverts   [1 failing]
+  caught       removed  NotCosigner (line 1887)
+               by: test_revoker_ATTACK_cannotApproveACosignature, test_revoker_ATTACK_theWholeMutableSurfaceMovesNothing, test_onlyTheNamedCosignerMayApprove   [3 failing]
+  caught       removed  Revoked (line 1910)
+               by: test_revoke_byTheNomineeAlsoStopsTheCosigner, test_f17_approvingOnARevokedMandate_isRefused, test_f46_deadMandateOutranksAStaleDeadline   [3 failing]
+  caught       removed  Expired (line 1914)
+               by: test_f17_approvingOnAnExpiredMandate_isRefused, test_f46_deadMandateOutranksAStaleDeadline   [2 failing]
+  caught       removed  BadDeadline (line 1919)
+               by: test_deadlineBeyondTheCap_isRefused, test_deadlineInThePast_isRefused, test_f46_deadMandateOutranksAStaleDeadline   [3 failing]
+  caught       removed  ZeroRecipient (line 1922)
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  SelfPayment (line 1929)
+               by: test_f19_approvingThePayerAsRecipient_isRefused, test_f22_approvingTheSpenderAsRecipient_isAccepted   [2 failing]
+  caught       removed  UnrecoverableRecipient (line 1934)
+               by: test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused, test_f38_approvingEitherRegistryAsRecipient_isRefused   [2 failing]
+  caught       removed  RecipientNotAllowed (line 1939)
+               by: test_f17_approvingANonAllowlistedRecipient_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  ZeroAmount (line 1941)
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  AmountTooLarge (line 1942)
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  NonceAlreadyUsed (line 1966)
+               by: test_f17_approvingAConsumedNonce_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  OverPerTxCap (line 1971)
+               by: test_f17_approvingOverAPermanentCap_isRefused, test_f17_singleDefectRefusalsMatchSpend   [2 failing]
+  caught       removed  OverTotalCap (line 1974)
+               by: test_f17_approvingOverAPermanentCap_isRefused   [1 failing]
+  caught       removed  TotalSpentCeiling (line 1977)
+               by: test_f17_approvingPastTheUint96AuditCeiling_isRefused   [1 failing]
+  caught       removed  SpendCountCeiling (line 1985)
+               by: test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused   [1 failing]
+  caught       removed  OverWindowCap (line 2006)
+               by: test_f40_approvingAboveAWindowCap_isRefused, test_f40_theBindingWindowIsFoundWhereverItSits   [2 failing]
+  caught       removed  CosignNotRequired (line 2016)
+               by: test_f17_approvingAtOrBelowTheThreshold_isRefused   [1 failing]
+  caught       removed  BadDeadline (line 2026)
+               by: test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry   [1 failing]
+  caught       removed  BadDeadline (line 2032)
+               by: test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry   [1 failing]
+  caught       removed  NonceReserved (line 2048)
+               by: test_f30_twoApprovalsOnOneNonce_areRefused, test_f39_onceAnApprovalLapsesTheCosignerCanApproveAReplacement   [2 failing]
+  caught       injected a notBefore in the future
+               by: test_f17_approvingBeforeTheMandateStarts_isAllowed, test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry, test_f35_aStartInTheFutureIsAWaitRatherThanADeath (+1 more)   [4 failing]
+  caught       injected a currently full rolling window
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_approvingPastTheUint96AuditCeiling_isRefused, test_f17_approvingWhileAWindowIsFull_isAllowed (+4 more)   [7 failing]
+  caught       injected an unfiled ERC-8004 credential
+               by: test_f17_approvingWhileACredentialIsMissing_isAllowed   [1 failing]
+  caught       injected the maximal wrong design: approve only what could be spent RIGHT NOW
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_approvingBeforeTheMandateStarts_isAllowed, test_f17_approvingOnAnExpiredMandate_isRefused (+11 more)   [14 failing]
+  caught       injected F22: the spender refused as its own recipient, on the approval path
+               by: test_f22_approvingTheSpenderAsRecipient_isAccepted   [1 failing]
+
+OK — all 27 mutants were caught by a named test.
+
+================================================================ bare-clearReservation.log
+mutation gate (solidity): clearReservation
+  working copy: /tmp/remit-solmut-1ofoqiln   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  3 mutant(s) queued
+  baseline: 320 passed, 0 failed  (19s)
+
+  [ 1/3] removed  UnknownMandate (line 2154) ... caught  (19s)
+  [ 2/3] removed  BadConfig (line 2155) ... caught  (19s)
+  [ 3/3] removed  NotAuthorised (line 2156) ... caught  (19s)
+
+mutation gate: clearReservation — 3 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 2154)
+               by: test_f47_clearingOnAnUnknownMandateOrWithoutTheCosignFlag_reverts   [1 failing]
+  caught       removed  BadConfig (line 2155)
+               by: test_f47_clearingOnAnUnknownMandateOrWithoutTheCosignFlag_reverts   [1 failing]
+  caught       removed  NotAuthorised (line 2156)
+               by: test_revoker_ATTACK_cannotClearAReservation, test_revoker_ATTACK_theWholeMutableSurfaceMovesNothing, test_f47_onlyThePayerMayClearAReservation   [3 failing]
+
+OK — all 3 mutants were caught by a named test.
+
+================================================================ bare-constructor.log
+mutation gate (solidity): constructor
+  working copy: /tmp/remit-solmut-me90_l5d   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  3 mutant(s) queued
+  baseline: 320 passed, 0 failed  (22s)
+
+  [ 1/3] removed  BadConfig (line 736) ... caught  (26s)
+  [ 2/3] removed  RegistryHasNoCode (line 751) ... caught  (25s)
+  [ 3/3] removed  RegistryHasNoCode (line 754) ... caught  (23s)
+
+mutation gate: constructor — 3 mutants, baseline 320 green
+
+  caught       removed  BadConfig (line 736)
+               by: test_constructor_zeroUsdc_reverts   [1 failing]
+  caught       removed  RegistryHasNoCode (line 751)
+               by: test_f49_aRegistryWithNoCode_isRefusedAtConstruction   [1 failing]
+  caught       removed  RegistryHasNoCode (line 754)
+               by: test_f49_aRegistryWithNoCode_isRefusedAtConstruction   [1 failing]
+
+OK — all 3 mutants were caught by a named test.
+
+================================================================ bare-createMandate.log
+mutation gate (solidity): createMandate
+  7 hand case(s) exist for createMandate and need --hand; not built here
+  working copy: /tmp/remit-solmut-3dbuk_ks   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  31 mutant(s) queued
+  baseline: 320 passed, 0 failed  (29s)
+
+  [ 1/31] removed  MandateExists (line 819) ... caught  (27s)
+  [ 2/31] removed  BadConfig (line 820) ... caught  (23s)
+  [ 3/31] removed  BadConfig (line 834) ... caught  (24s)
+  [ 4/31] removed  BadConfig (line 840) ... caught  (23s)
+  [ 5/31] removed  Unbounded (line 866) ... caught  (23s)
+  [ 6/31] removed  BadConfig (line 870) ... caught  (23s)
+  [ 7/31] removed  BadConfig (line 871) ... caught  (24s)
+  [ 8/31] removed  BadConfig (line 872) ... caught  (23s)
+  [ 9/31] removed  BadConfig (line 873) ... caught  (24s)
+  [10/31] removed  BadConfig (line 874) ... caught  (23s)
+  [11/31] removed  BadConfig (line 875) ... caught  (24s)
+  [12/31] removed  BadConfig (line 894) ... caught  (23s)
+  [13/31] removed  BadConfig (line 923) ... caught  (24s)
+  [14/31] removed  BadConfig (line 924) ... caught  (23s)
+  [15/31] removed  BadConfig (line 925) ... caught  (24s)
+  [16/31] removed  BadConfig (line 942) ... caught  (23s)
+  [17/31] removed  BadConfig (line 959) ... caught  (23s)
+  [18/31] removed  BadWindow (line 961) ... caught  (23s)
+  [19/31] removed  BadWindow (line 989) ... caught  (24s)
+  [20/31] removed  BadWindow (line 990) ... caught  (22s)
+  [21/31] removed  BadWindow (line 991) ... caught  (23s)
+  [22/31] removed  BadConfig (line 1032) ... caught  (25s)
+  [23/31] removed  BadConfig (line 1049) ... caught  (23s)
+  [24/31] removed  BadConfig (line 1062) ... caught  (22s)
+  [25/31] removed  BadConfig (line 1072) ... caught  (23s)
+  [26/31] removed  BadConfig (line 1082) ... caught  (23s)
+  [27/31] removed  BadConfig (line 1090) ... caught  (24s)
+  [28/31] removed  BadConfig (line 1095) ... caught  (29s)
+  [29/31] removed  BadConfig (line 1105) ... caught  (29s)
+  [30/31] removed  BadConfig (line 1127) ... caught  (25s)
+  [31/31] removed  BadConfig (line 1152) ... caught  (28s)
+
+mutation gate: createMandate — 31 mutants, baseline 320 green
+
+  caught       removed  MandateExists (line 819)
+               by: test_createMandate_sameSaltTwice_reverts   [1 failing]
+  caught       removed  BadConfig (line 820)
+               by: test_createMandate_zeroSpenderWithACosigner_reverts   [1 failing]
+  caught       removed  BadConfig (line 834)
+               by: test_f48_theContractAsItsOwnSpender_reverts   [1 failing]
+  caught       removed  BadConfig (line 840)
+               by: test_f44_bit7Alone_isRefusedByTheMaskNotByUnbounded, test_f44_unknownFlagBit_reverts   [2 failing]
+  caught       removed  Unbounded (line 866)
+               by: test_createMandate_withNoLifetimeBound_reverts, test_f44_bit7Alone_isRefusedByTheMaskNotByUnbounded   [2 failing]
+  caught       removed  BadConfig (line 870)
+               by: test_createMandate_flagWithoutValue_reverts, test_createMandate_valueWithoutFlag_reverts   [2 failing]
+  caught       removed  BadConfig (line 871)
+               by: test_createMandate_totalCapFlagMismatch_reverts   [1 failing]
+  caught       removed  BadConfig (line 872)
+               by: test_createMandate_cosignFlagWithoutCosigner_reverts, test_createMandate_cosignerWithoutFlag_reverts   [2 failing]
+  caught       removed  BadConfig (line 873)
+               by: test_createMandate_credentialFlagWithoutValidator_reverts   [1 failing]
+  caught       removed  BadConfig (line 874)
+               by: test_createMandate_allowlistFlagMismatch_reverts   [1 failing]
+  caught       removed  BadConfig (line 875)
+               by: test_createMandate_expiryNotAfterNotBefore_reverts   [1 failing]
+  caught       removed  BadConfig (line 894)
+               by: test_f45_expiryAlreadyPast_reverts, test_f45_theBoundaryIsTheCurrentSecond   [2 failing]
+  caught       removed  BadConfig (line 923)
+               by: test_createMandate_expiresAtWithoutTheFlag_reverts   [1 failing]
+  caught       removed  BadConfig (line 924)
+               by: test_createMandate_gateWithoutRegistry_reverts   [1 failing]
+  caught       removed  BadConfig (line 925)
+               by: test_createMandate_gateWithoutRegistry_reverts   [1 failing]
+  caught       removed  BadConfig (line 942)
+               by: test_createMandate_thresholdWithoutCosignFlag_reverts   [1 failing]
+  caught       removed  BadConfig (line 959)
+               by: test_createMandate_spenderAsItsOwnCosigner_reverts   [1 failing]
+  caught       removed  BadWindow (line 961)
+               by: test_createMandate_tooManyWindows_reverts   [1 failing]
+  caught       removed  BadWindow (line 989)
+               by: test_createMandate_zeroLengthOrCapOrBuckets_reverts   [1 failing]
+  caught       removed  BadWindow (line 990)
+               by: test_createMandate_tooManyBuckets_reverts, test_createMandate_zeroLengthOrCapOrBuckets_reverts   [2 failing]
+  caught       removed  BadWindow (line 991)
+               by: test_createMandate_windowLengthNotDivisibleByBuckets_reverts   [1 failing]
+  caught       removed  BadConfig (line 1032)
+               by: test_createMandate_deadCosignGate_lifetimeCapBinds, test_createMandate_deadCosignGate_perTxCapBoundaryIsExact, test_createMandate_deadCosignGate_unboundedAmountIsStillAccepted (+2 more)   [5 failing]
+  caught       removed  BadConfig (line 1049)
+               by: test_createMandate_zeroAddressInAllowlist_reverts, test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses   [2 failing]
+  caught       removed  BadConfig (line 1062)
+               by: test_createMandate_identityDataWithoutTheFlag_reverts   [1 failing]
+  caught       removed  BadConfig (line 1072)
+               by: test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused   [1 failing]
+  caught       removed  BadConfig (line 1082)
+               by: test_identityGate_zeroAgentId_isRefusedAtGrantTime   [1 failing]
+  caught       removed  BadConfig (line 1090)
+               by: test_identityGate_expectedOwnerNotTheSpender_isRefusedAtGrantTime   [1 failing]
+  caught       removed  BadConfig (line 1095)
+               by: test_createMandate_credentialWithZeroMinResponse_reverts   [1 failing]
+  caught       removed  BadConfig (line 1105)
+               by: test_createMandate_credentialMinResponseAboveThePassScore_reverts   [1 failing]
+  caught       removed  BadConfig (line 1127)
+               by: test_createMandate_credentialWithZeroRequestHash_reverts   [1 failing]
+  caught       removed  BadConfig (line 1152)
+               by: test_createMandate_refusesTheContractItself, test_createMandate_refusesThePayer, test_createMandate_refusesTheSpender   [3 failing]
+
+OK — all 31 mutants were caught by a named test.
+
+================================================================ bare-revoke.log
+mutation gate (solidity): revoke
+  working copy: /tmp/remit-solmut-bv_uy1ao   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  2 mutant(s) queued
+  baseline: 320 passed, 0 failed  (19s)
+
+  [ 1/2] removed  UnknownMandate (line 1684) ... caught  (19s)
+  [ 2/2] removed  NotAuthorised (line 1693) ... caught  (19s)
+
+mutation gate: revoke — 2 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 1684)
+               by: test_revoke_unknownMandate_reverts   [1 failing]
+  caught       removed  NotAuthorised (line 1693)
+               by: test_revoke_byStranger_reverts, test_revoke_ATTACK_nomineeOfOneMandateCannotReachAnother, test_revoke_ATTACK_strangerStillRefused (+3 more)   [6 failing]
+
+OK — all 2 mutants were caught by a named test.
+
+================================================================ bare-setRevoker.log
+mutation gate (solidity): setRevoker
+  working copy: /tmp/remit-solmut-i1a1q804   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  4 mutant(s) queued
+  baseline: 320 passed, 0 failed  (18s)
+
+  [ 1/4] removed  UnknownMandate (line 1739) ... caught  (20s)
+  [ 2/4] removed  NotAuthorised (line 1740) ... caught  (20s)
+  [ 3/4] removed  Revoked (line 1741) ... caught  (20s)
+  [ 4/4] removed  BadConfig (line 1744) ... caught  (19s)
+
+mutation gate: setRevoker — 4 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 1739)
+               by: test_setRevoker_refusesUnknownMandate   [1 failing]
+  caught       removed  NotAuthorised (line 1740)
+               by: test_revoker_ATTACK_theWholeMutableSurfaceMovesNothing, test_setRevoker_ATTACK_cosignerCannotNominate, test_setRevoker_ATTACK_nomineeCannotNominate (+3 more)   [6 failing]
+  caught       removed  Revoked (line 1741)
+               by: test_setRevoker_refusesRevokedMandate   [1 failing]
+  caught       removed  BadConfig (line 1744)
+               by: test_setRevoker_refusesTheContractItself, test_setRevoker_refusesThePayer, test_setRevoker_refusesTheSpender   [3 failing]
+
+OK — all 4 mutants were caught by a named test.
+
+================================================================ bare-spend.log
+mutation gate (solidity): spend
+  working copy: /tmp/remit-solmut-58jt8dmy   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  21 mutant(s) queued
+  baseline: 320 passed, 0 failed  (23s)
+
+  [ 1/21] removed  UnknownMandate (line 1217) ... caught  (22s)
+  [ 2/21] removed  Revoked (line 1218) ... caught  (22s)
+  [ 3/21] removed  NotYetValid (line 1221) ... caught  (26s)
+  [ 4/21] removed  Expired (line 1226) ... caught  (22s)
+  [ 5/21] removed  WrongSpender (line 1228) ... caught  (24s)
+  [ 6/21] removed  ZeroRecipient (line 1232) ... caught  (21s)
+  [ 7/21] removed  SelfPayment (line 1238) ... caught  (22s)
+  [ 8/21] removed  UnrecoverableRecipient (line 1253) ... caught  (21s)
+  [ 9/21] removed  RecipientNotAllowed (line 1254) ... caught  (22s)
+  [10/21] removed  ZeroAmount (line 1256) ... caught  (21s)
+  [11/21] removed  AmountTooLarge (line 1258) ... caught  (19s)
+  [12/21] removed  NonceAlreadyUsed (line 1266) ... caught  (19s)
+  [13/21] removed  OverPerTxCap (line 1271) ... caught  (20s)
+  [14/21] removed  OverTotalCap (line 1296) ... caught  (19s)
+  [15/21] removed  TotalSpentCeiling (line 1321) ... caught  (19s)
+  [16/21] removed  SpendCountCeiling (line 1331) ... caught  (18s)
+  [17/21] removed  NonceReserved (line 1386) ... caught  (19s)
+  [18/21] removed  CosignRequired (line 1394) ... caught  (18s)
+  [19/21] removed  CosignExpired (line 1399) ... caught  (19s)
+  [20/21] removed  TransferFailed (line 1423) ... caught  (18s)
+  [21/21] injected F22: the spender refused as its own recipient ... caught  (19s)
+
+mutation gate: spend — 21 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 1217)
+               by: test_spend_unknownMandate_reverts   [1 failing]
+  caught       removed  Revoked (line 1218)
+               by: test_f17_approvingOnARevokedMandate_isRefused, test_f35_isCosignApproved_isFalseOnceTheMandateIsRevoked, test_f51_theMandateDiesWithoutThePayerActing (+5 more)   [8 failing]
+  caught       removed  NotYetValid (line 1221)
+               by: test_f17_approvingBeforeTheMandateStarts_isAllowed, test_f35_aStartInTheFutureIsAWaitRatherThanADeath, test_notBefore_isInclusive   [3 failing]
+  caught       removed  Expired (line 1226)
+               by: test_expiry_isExclusive, test_f17_approvingOnAnExpiredMandate_isRefused, test_subLengthOfOneSecond_atTheLastSpendableSecond_stillBuckets   [3 failing]
+  caught       removed  WrongSpender (line 1228)
+               by: test_ATTACK_transferringTheAgentIdentity_killsTheMandate, test_revoker_ATTACK_cannotPayThemselvesThroughAnotherMandate, test_revoker_ATTACK_cannotSpend (+1 more)   [4 failing]
+  caught       removed  ZeroRecipient (line 1232)
+               by: test_deniedSpends_consumeNothing, test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies, test_zeroRecipient_reverts_evenWithNoAllowlist (+1 more)   [4 failing]
+  caught       removed  SelfPayment (line 1238)
+               by: test_f19_approvingThePayerAsRecipient_isRefused, test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies, test_f19_aThirdPartyIsStillPayableOnTheSameMandate (+3 more)   [6 failing]
+  caught       removed  UnrecoverableRecipient (line 1253)
+               by: test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies, test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused, test_f38_approvingEitherRegistryAsRecipient_isRefused   [3 failing]
+  caught       removed  RecipientNotAllowed (line 1254)
+               by: test_deniedSpends_consumeNothing, test_f17_approvingANonAllowlistedRecipient_isRefused, test_f17_singleDefectRefusalsMatchSpend (+4 more)   [7 failing]
+  caught       removed  ZeroAmount (line 1256)
+               by: test_deniedSpends_consumeNothing, test_zeroAmount_reverts, test_f17_singleDefectRefusalsMatchSpend   [3 failing]
+  caught       removed  AmountTooLarge (line 1258)
+               by: test_amountAboveUint96_reverts_beforeTheCapIsConsulted, test_spendable_agreesWithSpendableAcross_forASingleMandate, test_f17_singleDefectRefusalsMatchSpend   [3 failing]
+  caught       removed  NonceAlreadyUsed (line 1266)
+               by: test_nonceIsCheckedBeforeTheCaps, test_replayingANonceWithADifferentPayload_stillReverts, test_replayingANonce_reverts (+4 more)   [7 failing]
+  caught       removed  OverPerTxCap (line 1271)
+               by: test_perTxCap_oneUnitOver_reverts, test_cosign_isCheckedAfterEveryCap, test_f17_approvingOverAPermanentCap_isRefused (+2 more)   [5 failing]
+  caught       removed  OverTotalCap (line 1296)
+               by: test_totalCap_doesNotRecoverWithTime, test_totalCap_exactFitThenRefusal, test_totalSpent_withMaximumLifetimeCap_deniesWithOverTotalCap (+2 more)   [5 failing]
+  caught       removed  TotalSpentCeiling (line 1321)
+               by: test_totalSpent_atTheUint96Ceiling_deniesWithANameNotAPanic, test_f17_approvingPastTheUint96AuditCeiling_isRefused   [2 failing]
+  caught       removed  SpendCountCeiling (line 1331)
+               by: test_spendCount_atTheUint32Ceiling_deniesWithANameNotAPanic, test_f3_approvingOnAMandateAtTheSpendCountCeiling_isRefused   [2 failing]
+  caught       removed  NonceReserved (line 1386)
+               by: test_revoker_ATTACK_cannotClearAReservation, test_ATTACK_inflatingAnApprovedSpend_isRefused, test_ATTACK_redirectingAnApprovedSpend_isRefused (+5 more)   [8 failing]
+  caught       removed  CosignRequired (line 1394)
+               by: test_ATTACK_inflatingAnApprovedSpend_isRefused, test_ATTACK_redirectingAnApprovedSpend_isRefused, test_ATTACK_swappingTheReference_isRefused (+6 more)   [9 failing]
+  caught       removed  CosignExpired (line 1399)
+               by: test_approval_expires, test_expiredAndAbsent_areDifferentErrors, test_f41_anApprovalCanDieBeforeTheWindowRoomReturns   [3 failing]
+  caught       removed  TransferFailed (line 1423)
+               by: test_failedTransfer_rollsBackSoTheSameSpendCanBeRetried, test_transferReturningFalse_raisesTransferFailed   [2 failing]
+  caught       injected F22: the spender refused as its own recipient
+               by: test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid, test_f22_theSpenderMayBePaidByItsOwnMandate, test_f22_approvingTheSpenderAsRecipient_isAccepted   [3 failing]
+
+OK — all 21 mutants were caught by a named test.
+
+================================================================ bare-spendHash.log
+mutation gate (solidity): spendHash
+  working copy: /tmp/remit-solmut-x5h_n_cd   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  1 mutant(s) queued
+  baseline: 320 passed, 0 failed  (19s)
+
+  [ 1/1] removed  UnknownMandate (line 2196) ... caught  (19s)
+
+mutation gate: spendHash — 1 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 2196)
+               by: test_spendHash_onUnknownMandate_reverts   [1 failing]
+
+OK — the one mutant was caught by a named test.
+
+================================================================ bare-spendableAcross.log
+mutation gate (solidity): spendableAcross
+  working copy: /tmp/remit-solmut-9jkuie6o   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  5 mutant(s) queued
+  baseline: 320 passed, 0 failed  (26s)
+
+  [ 1/5] removed  TooManyMandates (line 2722) ... caught  (23s)
+  [ 2/5] removed  UnknownMandate (line 2731) ... EQUIVALENT  (25s)
+  [ 3/5] removed  UnknownMandate (line 2743) ... caught  (21s)
+  [ 4/5] removed  MixedPayers (line 2744) ... caught  (21s)
+  [ 5/5] removed  DuplicateMandate (line 2752) ... caught  (20s)
+
+mutation gate: spendableAcross — 5 mutants, baseline 320 green
+
+  caught       removed  TooManyMandates (line 2722)
+               by: test_spendableAcross_lengthCapIsExact   [1 failing]
+  EQUIVALENT   removed  UnknownMandate (line 2731)
+               shadowed by line 2743: if (p == address(0)) revert UnknownMandate();
+               The loop's first iteration reads the same storage slot as this hoisted payer read,
+               and nothing between them can write it, because a view with no external call ahead of
+               the loop cannot. An empty list returned earlier, so that iteration always runs. The
+               contract says as much where the guard sits: the re-read at i == 0 is a deliberate
+               warm SLOAD, bought to keep the loop body uniform, and this redundancy is what the
+               purchase buys.
+  caught       removed  UnknownMandate (line 2743)
+               by: test_spendableAcross_unknownId_reverts   [1 failing]
+  caught       removed  MixedPayers (line 2744)
+               by: test_spendableAcross_mixedPayers_reverts   [1 failing]
+  caught       removed  DuplicateMandate (line 2752)
+               by: test_spendableAcross_duplicateIds_revert   [1 failing]
+
+OK — 4 of 5 mutants were caught by a named test, and 1
+     could not be by any test that could be written:
+       EQUIVALENT  UnknownMandate (line 2731)
+     Each removal there neuters a guard whose successor refuses the same input under
+     the same error name, and each hand case there drops a conjunct whose twin on the
+     same line already refuses everything it would have. Every shadow a removal leans
+     on was looked up above, and the exemption lapses if it disappears.
+
+================================================================ bare-withdrawCosign.log
+mutation gate (solidity): withdrawCosign
+  working copy: /tmp/remit-solmut-mudz6yr_   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  3 mutant(s) queued
+  baseline: 320 passed, 0 failed  (20s)
+
+  [ 1/3] removed  UnknownMandate (line 2097) ... caught  (20s)
+  [ 2/3] removed  BadConfig (line 2098) ... caught  (19s)
+  [ 3/3] removed  NotCosigner (line 2099) ... caught  (20s)
+
+mutation gate: withdrawCosign — 3 mutants, baseline 320 green
+
+  caught       removed  UnknownMandate (line 2097)
+               by: test_withdrawCosign_onUnknownMandate_reverts   [1 failing]
+  caught       removed  BadConfig (line 2098)
+               by: test_withdrawCosign_withoutTheCosignFlag_reverts   [1 failing]
+  caught       removed  NotCosigner (line 2099)
+               by: test_revoker_ATTACK_cannotWithdrawACosignature, test_revoker_ATTACK_theWholeMutableSurfaceMovesNothing, test_withdrawCosign_byAStranger_reverts   [3 failing]
+
+OK — all 3 mutants were caught by a named test.
+
+================================================================ hand-_cosignIsLive.log
+mutation gate (solidity): _cosignIsLive
+  working copy: /tmp/remit-solmut-2at78gxd   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  2 mutant(s) queued
+  baseline: 320 passed, 0 failed  (25s)
+
+  [ 1/2] hand     the deadline stops being read, so an expired approval reads as live ... caught  (23s)
+  [ 2/2] hand     the empty slot stops being distinguished from a live one ... EQUIVALENT  (24s)
+
+mutation gate: _cosignIsLive — 2 mutants, baseline 320 green
+
+  caught       hand     the deadline stops being read, so an expired approval reads as live
+               by: test_f39_aLapsedReservationNoLongerBlocksTheSpend, test_f39_onceAnApprovalLapsesTheCosignerCanApproveAReplacement   [2 failing]
+  EQUIVALENT   hand     the empty slot stops being distinguished from a live one
+               unkillable rather than untested:
+               `validUntil` is a uint40 and `nowTs` a uint256, so the comparison widens
+               `validUntil` to uint256 and a never-approved slot reads 0, which makes `nowTs < 0`
+               false for every clock value there is. The conjunct removed here therefore refuses
+               the identical input the one left behind refuses, and no test can separate them.
+               THREAT-MODEL.md records this mutant as unkillable rather than untested.
+
+OK — 1 of 2 mutants were caught by a named test, and 1
+     could not be by any test that could be written:
+       EQUIVALENT  the empty slot stops being distinguished from a live one
+     Each removal there neuters a guard whose successor refuses the same input under
+     the same error name, and each hand case there drops a conjunct whose twin on the
+     same line already refuses everything it would have. Every shadow a removal leans
+     on was looked up above, and the exemption lapses if it disappears.
+     SCOPE: hand cases only, and they are everything _cosignIsLive offers — it holds
+     no `revert` and has no injections, so this run does cover the whole target.
+
+================================================================ hand-_isUndebitable.log
+mutation gate (solidity): _isUndebitable
+  working copy: /tmp/remit-solmut-0ct1gpom   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  2 mutant(s) queued
+  baseline: 320 passed, 0 failed  (25s)
+
+  [ 1/2] hand     the identity registry falls out of the list ... caught  (24s)
+  [ 2/2] hand     the validation registry falls out of the list ... caught  (26s)
+
+mutation gate: _isUndebitable — 2 mutants, baseline 320 green
+
+  caught       hand     the identity registry falls out of the list
+               by: test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses, test_f43_theEnforcerRefusesTheSameSix, test_f38_approvingEitherRegistryAsRecipient_isRefused (+1 more)   [4 failing]
+  caught       hand     the validation registry falls out of the list
+               by: test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses, test_f43_theEnforcerRefusesTheSameSix, test_f38_approvingEitherRegistryAsRecipient_isRefused (+1 more)   [4 failing]
+
+OK — all 2 mutants were caught by a named test.
+     SCOPE: hand cases only, and they are everything _isUndebitable offers — it holds
+     no `revert` and has no injections, so this run does cover the whole target.
+
+================================================================ hand-approveCosignFor.log
+mutation gate (solidity): approveCosignFor
+  --hand is set, so the 5 injection(s) for approveCosignFor are skipped
+  --hand is set, so the 22 removal(s) for approveCosignFor are skipped
+  working copy: /tmp/remit-solmut-aibcvvzs   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  3 mutant(s) queued
+  baseline: 320 passed, 0 failed  (23s)
+
+  [ 1/3] hand     F40's window cap becomes exclusive, refusing an amount equal to the cap ... caught  (23s)
+  [ 2/3] hand     F40 reads only the first window, so a second window's cap goes unchecked ... caught  (23s)
+  [ 3/3] hand     F46's clock bound climbs back above the liveness pair ... caught  (24s)
+
+mutation gate: approveCosignFor — 3 mutants, baseline 320 green
+
+  caught       hand     F40's window cap becomes exclusive, refusing an amount equal to the cap
+               by: test_f17_approvingWhileAWindowIsFull_isAllowed, test_f40_approvingAboveAWindowCap_isRefused, test_f40_theBindingWindowIsFoundWhereverItSits   [3 failing]
+  caught       hand     F40 reads only the first window, so a second window's cap goes unchecked
+               by: test_f40_theBindingWindowIsFoundWhereverItSits   [1 failing]
+  caught       hand     F46's clock bound climbs back above the liveness pair
+               by: test_f46_deadMandateOutranksAStaleDeadline   [1 failing]
+
+OK — all 3 mutants were caught by a named test.
+     SCOPE: hand cases only. 27 removal(s) and injection(s) for approveCosignFor
+     were not built, so this run is not a census of the target.
+
+================================================================ hand-createMandate.log
+mutation gate (solidity): createMandate
+  --hand is set, so the 31 removal(s) for createMandate are skipped
+  working copy: /tmp/remit-solmut-2erfp3t6   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  7 mutant(s) queued
+  baseline: 320 passed, 0 failed  (28s)
+
+  [ 1/7] hand     F43 stops refusing the zero address ... caught  (25s)
+  [ 2/7] hand     F43 stops refusing the payer ... caught  (25s)
+  [ 3/7] hand     F43 stops refusing the four undebitable addresses ... caught  (23s)
+  [ 4/7] hand     F43 reads only the first allowlist entry, so a second one goes unchecked ... caught  (24s)
+  [ 5/7] hand     F45's boundary turns exclusive, accepting a mandate that dies this second ... caught  (23s)
+  [ 6/7] hand     F45 stops reading the flag, so an expiry-free mandate is refused ... caught  (23s)
+  [ 7/7] hand     F44's mask is written as a magnitude test instead ... EQUIVALENT  (23s)
+
+mutation gate: createMandate — 7 mutants, baseline 320 green
+
+  caught       hand     F43 stops refusing the zero address
+               by: test_createMandate_zeroAddressInAllowlist_reverts, test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses   [2 failing]
+  caught       hand     F43 stops refusing the payer
+               by: test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses   [1 failing]
+  caught       hand     F43 stops refusing the four undebitable addresses
+               by: test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses   [1 failing]
+  caught       hand     F43 reads only the first allowlist entry, so a second one goes unchecked
+               by: test_allowlist_multipleRecipients, test_createMandate_zeroAddressInAllowlist_reverts, test_f43_allowlistRefusesEveryAddressTheEnforcerRefuses (+1 more)   [4 failing]
+  caught       hand     F45's boundary turns exclusive, accepting a mandate that dies this second
+               by: test_f45_theBoundaryIsTheCurrentSecond   [1 failing]
+  caught       hand     F45 stops reading the flag, so an expiry-free mandate is refused
+               by: test_createMandate_aLifetimeBoundIsEitherATotalOrAnExpiry, test_createMandate_expiresAtWithoutTheFlag_reverts, test_f45_doesNotReachAMandateWithNoExpiry (+1 more)   [4 failing]
+  EQUIVALENT   hand     F44's mask is written as a magnitude test instead
+               unkillable rather than untested:
+               `flags` is a uint8 and `F_KNOWN` is 0x7F, so `flags & ~F_KNOWN != 0` and `flags >
+               F_KNOWN` are the same predicate: bit 7 is the only bit that can carry a uint8 above
+               0x7F. No test can separate them because no input separates them. The mask form is
+               kept for the version after this one — if an eighth flag is ever declared, `F_KNOWN`
+               gains a bit and the mask still reads correctly, while the magnitude test would
+               silently start admitting the new bit's absence as the boundary. That is a claim
+               about a contract this one cannot upgrade into, which is why it is checked here
+               rather than asserted in a comment.
+
+OK — 6 of 7 mutants were caught by a named test, and 1
+     could not be by any test that could be written:
+       EQUIVALENT  F44's mask is written as a magnitude test instead
+     Each removal there neuters a guard whose successor refuses the same input under
+     the same error name, and each hand case there drops a conjunct whose twin on the
+     same line already refuses everything it would have. Every shadow a removal leans
+     on was looked up above, and the exemption lapses if it disappears.
+     SCOPE: hand cases only. 31 removal(s) and injection(s) for createMandate
+     were not built, so this run is not a census of the target.

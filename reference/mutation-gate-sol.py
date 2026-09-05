@@ -671,8 +671,13 @@ if not mutants:
     die(f"{TARGET} contains no `revert` guards to mutate")
 
 # ---------------------------------------------------------------- the throwaway copy
-
-COPY = ("contracts", "test", "lib", "foundry.toml")
+#
+# `script` is here because test/Deploy.t.sol imports ../script/Deploy.s.sol, so a copy without it
+# does not compile and the baseline reports no summary line. Leaving that file behind instead would
+# be worse than it looks: the suite the census runs against would lose its 22 tests with nothing
+# in the output saying so, and the published figure would rest on a smaller suite than the one the
+# repo claims. Anything the test tree imports has to travel with it.
+COPY = ("contracts", "test", "script", "lib", "foundry.toml")
 for item in COPY:
     if not (ROOT / item).exists():
         die(f"missing {item} — cannot build a standalone copy of the project")
