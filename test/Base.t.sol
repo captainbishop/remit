@@ -245,6 +245,24 @@ abstract contract Base is Test {
         return p;
     }
 
+    /// Nominate the third address permitted to call `revoke`.
+    ///
+    /// NEW IN v2 (F51). No flag goes with it, and that is the one way this builder differs from
+    /// the four around it: `address(0)` already means "no one", so a bit saying the same thing
+    /// could disagree with the field and one of the two would then be wrong. Every other
+    /// optional feature needs its flag because its off value is a legal on value — a `perTxCap`
+    /// of zero is a mandate that can spend nothing, a `cosignThreshold` of zero is a mandate
+    /// that co-signs everything — where a revoker of `address(0)` cannot be a nominee, since
+    /// nothing on the EVM calls from it.
+    function withRevoker(MandateManager.MandateParams memory p, address revoker)
+        internal
+        pure
+        returns (MandateManager.MandateParams memory)
+    {
+        p.revoker = revoker;
+        return p;
+    }
+
     function withIdentity(MandateManager.MandateParams memory p, uint256 agentId, address expectedOwner)
         internal
         pure

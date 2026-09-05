@@ -383,9 +383,23 @@ contract MandateManager {
     /// timestamp is: `spendHash` is keccak over nine fields including this contract's own
     /// address, so a real hash of zero is not something a caller can arrange.
     ///
-    /// Last of the nine mappings, and it takes the next slot rather than sharing one,
+    /// Ninth of the ten mappings, and it takes the next slot rather than sharing one,
     /// since a mapping always occupies a full slot.
     mapping(bytes32 => mapping(bytes32 => bytes32)) private _cosignReservedNonce;
+
+    /// mandateId => the one address, besides the payer and the spender, permitted to call
+    /// `revoke`. Zero means none, which is v1's behaviour and the default.
+    ///
+    /// NEW IN v2 (F51), and a mapping rather than a `Mandate` field because that struct is
+    /// packed to 29 of its 32 bytes in slot 3 — three spare bytes cannot hold an address, so a
+    /// field would have cost every mandate a fourth slot whether or not it named anyone. Here
+    /// a mandate that names no one writes nothing and pays nothing.
+    ///
+    /// Read on exactly one path: `revoke`, and only after the payer and spender comparisons
+    /// have both failed, so neither of those two callers pays for the SLOAD. Nothing else in
+    /// this contract reads it, which is the whole of the role — see `revoke` for why that is
+    /// deliberate rather than incomplete.
+    mapping(bytes32 => address) private _revoker;
 
     // ---------------------------------------------------------------------
     // Events. The audit trail lives here and does not depend on the Memo
@@ -442,12 +456,23 @@ contract MandateManager {
     );
 
     /// @notice A mandate was killed, permanently. Revocation is a latch rather than a toggle,
-    /// so this can be emitted more than once for the same mandate and only the first one
-    /// changed anything.
+    /// and F11 moved the emit inside the latch, so this fires exactly once per mandate for the
+    /// whole life of the contract. v1 re-emitted it on a repeat call, which is why
+    /// `evidence/revoke-post.log` holds a second one from the live v1 address.
     /// @param mandateId The mandate.
-    /// @param by Whoever called `revoke` — the payer or the spender, both of which are
-    /// permitted.
+    /// @param by Whoever called `revoke`. Three addresses may: the payer, the spender, and the
+    /// revoker the payer nominated, if the payer nominated one.
     event MandateRevoked(bytes32 indexed mandateId, address indexed by);
+
+    /// @notice The payer named, replaced or removed this mandate's revoker.
+    ///
+    /// NEW IN v2 (F51). Emitted by `createMandate` when the grant carries a revoker, and by
+    /// `setRevoker` on every call it does not refuse, so one log stream carries every
+    /// nomination whichever path made it. A removal emits `address(0)`, which reads as what it
+    /// is rather than as an absence of news.
+    /// @param mandateId The mandate.
+    /// @param revoker The nominated address, or `address(0)` for none.
+    event RevokerSet(bytes32 indexed mandateId, address indexed revoker);
 
     /// @notice A co-signer pre-approved exactly one spend, named by its fields.
     ///
@@ -759,6 +784,15 @@ contract MandateManager {
         uint96 totalCap;
         address cosigner;
         uint96 cosignThreshold;
+        /// NEW IN v2 (F51). Optional; `address(0)` means no revoker and behaves exactly as v1.
+        /// Adding this field changes `createMandate`'s own selector from `0x9ab253da` to
+        /// `0x0ed62010`, so it is an ABI change and not an additive one. Both values were
+        /// computed with a keccak implementation validated first against `keccak256("")`, then
+        /// against two selectors this repository already knew from a live chain —
+        /// `NotPayer()` `0x1435e357` and `NotAuthorised()` `0x1648fd01`.
+        /// v1's calldata in `evidence/create-calldata.txt` stays exactly what v1's address
+        /// answers to.
+        address revoker;
         uint40 notBefore;
         uint40 expiresAt;
         uint8 flags;
@@ -1094,6 +1128,32 @@ contract MandateManager {
             _credential[mandateId] = p.credential;
         }
 
+        // ---- F51: the nominated revoker ----------------------------------------------
+        // Optional. The three refusals are one argument applied three times, and it is the
+        // argument that already refuses `spender == address(this)` at the top of this
+        // function and `cosigner == spender` above: a grant must not carry the appearance of a
+        // control without its substance. The role exists so that a payer whose USDC has been
+        // spent down to where their own gas is unaffordable still has someone able to switch
+        // the mandate off (F42), so the nominee has to be a party the delegate cannot drain and
+        // the payer does not have to be solvent to use.
+        //
+        //   address(this) — no path in this contract calls `revoke`, so it could never exercise
+        //                   the role.
+        //   msg.sender    — the payer holds this authority already, and the payer is the address
+        //                   the lockout strands. Naming themselves reads like an escape and is
+        //                   not one.
+        //   p.spender     — the spender holds it already too, and it is the spender's spending
+        //                   that creates the situation the role answers.
+        //
+        // The cosigner stays eligible deliberately: a party the payer already chose to hold a
+        // second signature is the obvious nominee, and co-signing touches none of this.
+        if (p.revoker != address(0)) {
+            if (p.revoker == address(this) || p.revoker == msg.sender || p.revoker == p.spender) {
+                revert BadConfig();
+            }
+            _revoker[mandateId] = p.revoker;
+        }
+
         emit MandateCreated(
             mandateId,
             msg.sender,
@@ -1105,6 +1165,11 @@ contract MandateManager {
             flags,
             uint8(p.windows.length)
         );
+
+        // Second half of the F51 block above, ordered after `MandateCreated` so a reader of the
+        // log stream learns the mandate exists before learning who may kill it. Skipped when no
+        // revoker was named, so a grant naming no one emits exactly what v1 emitted.
+        if (p.revoker != address(0)) emit RevokerSet(mandateId, p.revoker);
     }
 
     // =====================================================================
@@ -1583,7 +1648,27 @@ contract MandateManager {
      * The spender may also revoke. Giving up your own authority can never harm
      * the payer, and it lets a compromised agent shut itself off.
      *
-     * The error is named for authority rather than for a role, because two roles hold this
+     * NEW IN v2 (F51). A third address may revoke when the payer has named one, either through
+     * `MandateParams.revoker` at grant time or through `setRevoker` afterwards. The reason is
+     * F42: on Arc, USDC is the money and the gas at once, so a delegate spending a mandate down
+     * can leave the payer unable to afford the revocation. A nominee who pays their own gas is
+     * an escape the payer can arrange in advance, with no smart account and no relayer.
+     *
+     * This function is the whole of that role. `revoked` is written in exactly two places —
+     * `false` in `createMandate`, `true` here — and read on exactly two state-changing paths,
+     * where `spend` and `approveCosignFor` each revert `Revoked()`. So the worst a hostile or
+     * compromised nominee can do is stop payments the payer wanted continued, which costs the
+     * payer a fresh grant under a new salt and moves no USDC anywhere. The nominee cannot spend,
+     * cannot raise a cap, cannot add a recipient, cannot clear a reservation, cannot un-revoke,
+     * cannot name a different revoker, and cannot reach any other mandate. `test/Revoker.t.sol`
+     * attempts every one of those and asserts the payer's balance and allowance are unchanged
+     * after each attempt, because that list is a claim about this contract and not a promise.
+     *
+     * Not extended to `clearReservation`, which stays payer-only. A kill switch and the
+     * housekeeping around co-signing are different authorities, and only the first one was
+     * argued for here.
+     *
+     * The error is named for authority rather than for a role, because three roles hold this
      * one. v2 raises the same error in `clearReservation`, where the payer alone is
      * authorised, and the name still fits: it reports that the caller lacks authority for the
      * call they made, without claiming which role would have had it.
@@ -1597,7 +1682,16 @@ contract MandateManager {
     function revoke(bytes32 mandateId) external {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) revert UnknownMandate();
-        if (msg.sender != m.payer && msg.sender != m.spender) revert NotAuthorised();
+        // The nominated-revoker test sits last on purpose. `&&` short-circuits, so a payer or a
+        // spender revoking never reaches the SLOAD behind `_callerIsRevoker`; only a third-party
+        // caller pays to learn whether they are the nominee, and a caller who is no one pays it
+        // before being refused. What those two paths cost in total is a question for the gas
+        // report rather than for this comment, since adding functions moves the selector dispatch
+        // too. v1's measured figures are 30,808 for the payer and 32,945 for the spender, on Arc
+        // Testnet, in `evidence/revoke.log`.
+        if (msg.sender != m.payer && msg.sender != m.spender && !_callerIsRevoker(mandateId)) {
+            revert NotAuthorised();
+        }
         // F11. Idempotent and silent on a repeat, rather than idempotent and noisy.
         // A second call used to rewrite `true` over `true` and emit a second `MandateRevoked`,
         // so a reconciler counting revocations could see any number of them for one mandate,
@@ -1612,6 +1706,60 @@ contract MandateManager {
             m.revoked = true;
             emit MandateRevoked(mandateId, msg.sender);
         }
+    }
+
+    /**
+     * @notice Name, replace or remove this mandate's revoker. Payer only.
+     *
+     * NEW IN v2 (F51), selector `0x043af6a1`. `MandateParams.revoker` covers the grant, and this
+     * covers every mandate granted before the payer thought about it — which on a contract with
+     * no upgrade path is the difference between a protection every payer can reach and one only
+     * the payers who read the docs first can. A long-lived mandate is exactly the kind F42
+     * strands.
+     *
+     * Payer only, and not the spender, because this is the payer's own escape route: a spender
+     * able to replace the nominee could hand the role to an address it controls and revoke on its
+     * own schedule, or point it at a stranger and remove the escape, which the payer learns only
+     * by reading `RevokerSet`. `revoke` accepting the spender is safe for the reason above it —
+     * surrendering your own authority — and that reason does not carry over to choosing who else
+     * holds a kill switch.
+     *
+     * Refused on a revoked mandate, matching `approveCosignFor`, because a nominee on a dead
+     * mandate is a protection that reads as arranged and can never be used.
+     *
+     * The three refused values are the same three `createMandate` refuses, for the same reasons,
+     * read off the stored mandate rather than off calldata. `address(0)` is the removal value and
+     * skips them: it is the only way back to v1's behaviour, so it must never be refusable.
+     *
+     * @param mandateId The mandate.
+     * @param revoker The address to nominate, or `address(0)` to remove whoever holds it.
+     */
+    function setRevoker(bytes32 mandateId, address revoker) external {
+        Mandate storage m = _mandates[mandateId];
+        if (m.payer == address(0)) revert UnknownMandate();
+        if (msg.sender != m.payer) revert NotAuthorised();
+        if (m.revoked) revert Revoked();
+        if (revoker != address(0)) {
+            if (revoker == address(this) || revoker == m.payer || revoker == m.spender) {
+                revert BadConfig();
+            }
+        }
+        _revoker[mandateId] = revoker;
+        emit RevokerSet(mandateId, revoker);
+    }
+
+    /// Whether `msg.sender` is this mandate's nominated revoker.
+    ///
+    /// The zero test is not redundant defence. `_revoker` returns `address(0)` for every mandate
+    /// that named no one, which is most of them, so a guard written as `msg.sender == nominated`
+    /// alone would authorise `address(0)` on all of them. Nothing on the EVM can call from the
+    /// zero address today, which makes that a latent defect rather than a live one — and a latent
+    /// defect in a kill switch on a contract with no upgrade path is not worth the two opcodes
+    /// saved. The comparison is written so it cannot pass on an unset mapping, whatever the
+    /// caller is.
+    function _callerIsRevoker(bytes32 mandateId) private view returns (bool) {
+        address nominated = _revoker[mandateId];
+        return nominated != address(0) && msg.sender == nominated;
     }
 
     /**
@@ -2062,6 +2210,23 @@ contract MandateManager {
     /// `spendCount` are the running totals.
     function getMandate(bytes32 mandateId) external view returns (Mandate memory) {
         return _mandates[mandateId];
+    }
+
+    /// @notice This mandate's nominated revoker, or `address(0)` if it has none.
+    ///
+    /// NEW IN v2 (F51), selector `0x4091b238`. Not part of `Mandate`, so `getMandate` cannot
+    /// answer it — the value lives in its own mapping because the struct is packed to 29 of its
+    /// 32 bytes in slot 3 and three spare bytes cannot hold an address.
+    ///
+    /// An unknown mandate answers `address(0)`, the same value as a known mandate with no
+    /// revoker, and this view does not distinguish them. Read `getMandate(mandateId).payer`
+    /// first if the difference matters, which is the rule `getMandate` already states for every
+    /// other field.
+    ///
+    /// @param mandateId The mandate.
+    /// @return The nominated revoker, or `address(0)` for none.
+    function getRevoker(bytes32 mandateId) external view returns (address) {
+        return _revoker[mandateId];
     }
 
     /// @notice One rolling window's specification, as configured at grant time.

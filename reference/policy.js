@@ -273,6 +273,7 @@ function createMandate(spec) {
     expiresAt = null, // null = no expiry
     cosignThreshold = null, // amounts strictly above this need a co-signature
     cosigner = null,
+    revoker = null, // v2 (F51): a third address permitted to revoke; null = none
     identity = null, // { agentId, expectedOwner }
     credential = null, // { validator, requestHash, minResponse, maxStaleness }
   } = spec;
@@ -358,6 +359,48 @@ function createMandate(spec) {
       'createMandate(): the spender cannot be its own cosigner — it could approve its ' +
         'own spends, which is not a weaker control but the absence of one',
     );
+  }
+
+  // v2 (F51). The two ineligible revokers, which are two of the contract's three.
+  //
+  // The contract also refuses `revoker == address(this)`, and that rule has no analogue
+  // here rather than having been dropped: this model has no contract address, so the
+  // configuration it refuses cannot be written. `test/Revoker.t.sol` covers that third
+  // case, and it is named here so the gap reads as a difference in what the two languages
+  // can express rather than as a missing check.
+  //
+  // Both refusals below are the argument that already refuses a spender as its own
+  // cosigner: a grant must not carry the appearance of a control without its substance.
+  // The payer holds the power to revoke already and is the party the gas lockout strands,
+  // so naming them adds nothing; the spender holds it already and its spending is what
+  // creates the situation the role exists for. A payer who wrote either would believe they
+  // had arranged an escape.
+  //
+  // The cosigner stays eligible, deliberately. They cannot revoke without this, and they
+  // are an address the payer already trusted with a decision about this mandate.
+  //
+  // The zero address is folded to null first, because on-chain `address(0)` and an unset
+  // mapping entry are the same 32 bytes and both mean "no one". Here they are two
+  // spellings, and `if (revoker)` is true of the zero-address STRING — the trap that
+  // produced F28 one field over, where a truthiness test on `expectedOwner` made the model
+  // deny spends the chain would honour. Without this fold the model would store a revoker
+  // of the zero address and then compare callers against it, which is the same hole
+  // `_callerIsRevoker` tests for on-chain.
+  const revokerAddr =
+    revoker && normalizeAddr(revoker) !== ZERO_ADDRESS ? normalizeAddr(revoker) : null;
+  if (revokerAddr) {
+    if (revokerAddr === normalizeAddr(payer)) {
+      throw new Error(
+        'createMandate(): the payer cannot be their own revoker — they hold that power ' +
+          'already, and are the party a gas lockout strands',
+      );
+    }
+    if (revokerAddr === normalizeAddr(spender)) {
+      throw new Error(
+        'createMandate(): the spender cannot be the revoker — it holds that power ' +
+          'already, and its spending is what the role exists to escape',
+      );
+    }
   }
 
   // Grant-time refusals that mirror the contract's. Each of these is a configuration
@@ -520,6 +563,10 @@ function createMandate(spec) {
     expiresAt: expiresAt === null ? null : BigInt(expiresAt),
     cosignThreshold: cosignThreshold === null ? null : BigInt(cosignThreshold),
     cosigner: cosigner ? normalizeAddr(cosigner) : null,
+    // v2 (F51). Already normalized and already folded to null above, so no ternary here.
+    // On-chain this lives in the `_revoker` mapping rather than in the struct: `Mandate`
+    // packs to 29 of slot 3's 32 bytes and an address needs 20.
+    revoker: revokerAddr,
     identity,
     credential: credentialGate,
 
@@ -1040,7 +1087,18 @@ function spend(mandate, request, ctx) {
  * The spender is included on purpose. An agent that has finished its work, or that
  * detects it has been compromised, should be able to surrender its own authority
  * without waiting for a human to act — and it cannot hurt the payer, because the only
- * power revocation removes is the agent's own. No third party may call it.
+ * power revocation removes is the agent's own.
+ *
+ * WIDENED IN v2 (F51). A third address may also call this, when the payer named one at grant
+ * time or through `setRevoker`. Until v2 this docstring read "No third party may call it",
+ * and the sentence is replaced rather than deleted because the reasoning behind it still
+ * holds and now explains why the widening is narrow: a third party could not be trusted with
+ * anything here unless the power on offer is small, and it is exactly one bit. `revoked` is
+ * set true and read on two paths — `evaluate`, through `live`, and `approveCosignFor` — so a
+ * nominee can stop the next spend and can do nothing else. They cannot move money, raise a
+ * cap, add a recipient, reach a second mandate, or undo this, because none of those is
+ * reachable from the one field they write. The role is off by default at `null`, and
+ * `test/Revoker.t.sol` attempts each item on that list against the contract.
  *
  * On Arc this is stronger than on a probabilistic-finality chain: finality is
  * deterministic at one confirmation (arc/concepts/deterministic-finality.mdx),
@@ -1057,10 +1115,62 @@ function spend(mandate, request, ctx) {
  */
 function revoke(mandate, caller) {
   const who = normalizeAddr(caller);
-  if (who !== mandate.payer && who !== mandate.spender) {
-    throw new Error('revoke(): only the payer or the spender may revoke');
+  // v2 (F51): the nominee test sits last and reads the folded field, so it can never match a
+  // mandate that named no one. `mandate.revoker` is null there, and `who` is a normalized
+  // 42-character string, so the two cannot be equal — the same property the contract buys with
+  // `nominated != address(0) &&`.
+  if (who !== mandate.payer && who !== mandate.spender && who !== mandate.revoker) {
+    throw new Error('revoke(): only the payer, the spender or the nominated revoker may revoke');
   }
   mandate.revoked = true;
+  return mandate;
+}
+
+/**
+ * Nominate, replace, or remove the third address permitted to call `revoke`. Payer only.
+ *
+ * NEW IN v2 (F51). The grant-time field in `createMandate` covers the payer who plans ahead;
+ * this covers the payer who did not, and the payer whose nominee has become the wrong choice.
+ * Both matter, because the situation the role answers (F42: on Arc, gas and the spending
+ * budget are one USDC balance, so a mandate can be spent down to where the payer cannot
+ * afford to revoke it) is not one a payer predicts at grant time.
+ *
+ * `null` removes whoever holds it and is the way back to v1's behaviour, so it is never
+ * refused. Every other value goes through the same two refusals `createMandate` applies,
+ * read off the stored mandate rather than off the arguments.
+ *
+ * Refused on a revoked mandate. A nominee on a dead mandate is a protection that reads as
+ * arranged and can never be used, which is worse for the payer than no nominee at all.
+ *
+ * The contract's third refusal, `revoker == address(this)`, has no analogue here for the
+ * reason given in `createMandate`: this model has no contract address, so the configuration
+ * cannot be written. `test/Revoker.t.sol` covers that third refusal against the contract
+ * itself.
+ */
+function setRevoker(mandate, caller, revoker) {
+  if (normalizeAddr(caller) !== mandate.payer) {
+    throw new Error('setRevoker(): only the payer may name a revoker');
+  }
+  if (mandate.revoked) {
+    throw new Error('setRevoker(): the mandate is revoked — a nominee could never use the role');
+  }
+  const next =
+    revoker && normalizeAddr(revoker) !== ZERO_ADDRESS ? normalizeAddr(revoker) : null;
+  if (next) {
+    if (next === mandate.payer) {
+      throw new Error(
+        'setRevoker(): the payer cannot be their own revoker — they hold that power ' +
+          'already, and are the party a gas lockout strands',
+      );
+    }
+    if (next === mandate.spender) {
+      throw new Error(
+        'setRevoker(): the spender cannot be the revoker — it holds that power already, ' +
+          'and its spending is what the role exists to escape',
+      );
+    }
+  }
+  mandate.revoker = next;
   return mandate;
 }
 
@@ -1625,6 +1735,8 @@ module.exports = {
   commit,
   spend,
   revoke,
+  // NEW IN v2 (F51).
+  setRevoker,
   approveCosignFor,
   withdrawCosign,
   clearReservation,

@@ -26,6 +26,10 @@ const {
   window: win,
   createMandate,
   revoke,
+  // NEW IN v2 (F51). The payer names a third address that may revoke, so a payer whose USDC
+  // has been spent down to where their own gas is unaffordable is not the only party who can
+  // switch the mandate off. See F42 for the measurement behind that.
+  setRevoker,
   approveCosignFor,
   // NEW IN v2 (F30). The model gained a withdrawal because the nonce reservation needs a release
   // path; without one, a fix for one denial-of-service would have introduced another.
@@ -86,6 +90,11 @@ const AGENT = '0xAGENT000000000000000000000000000000000002';
 const VENDOR = '0xVENDOR00000000000000000000000000000000003';
 const OTHER = '0xOTHER000000000000000000000000000000000004';
 const BOSS = '0xBOSS0000000000000000000000000000000000005';
+// v2 (F51). The nominated revoker, and a second one so the replacement path has somewhere to
+// move the nomination to. Neither is the payer, the spender or the cosigner, because those three
+// are the values `createMandate` and `setRevoker` refuse and the tests below use them for that.
+const GUARD = '0xGUARD00000000000000000000000000000000000A';
+const GUARD2 = '0xGUARD20000000000000000000000000000000000B';
 // v2 (F29). The two addresses a payment can reach and never leave: the manager, which holds no
 // USDC by design and has no sweep function, and the token itself. They live in `ctx` rather than
 // on the mandate because they are facts about a deployment, not about a grant — see the note at
@@ -847,7 +856,7 @@ test('validity period: notBefore and exclusive expiry', () => {
   assert.equal(evaluate(m, req(usdc('1')), { now: 2000 }).reason, Denial.EXPIRED);
 });
 
-test('revocation: the payer or the spender may revoke, and nobody else', () => {
+test('revocation: the payer or the spender may revoke, and a stranger may not', () => {
   const byPayer = simpleMandate();
   revoke(byPayer, PAYER);
   assert.equal(evaluate(byPayer, req(usdc('1')), { now: 1 }).reason, Denial.REVOKED);
@@ -863,7 +872,10 @@ test('revocation: the payer or the spender may revoke, and nobody else', () => {
   assert.equal(evaluate(bySpender, req(usdc('1')), { now: 1 }).reason, Denial.REVOKED);
 
   const byStranger = simpleMandate();
-  assert.throws(() => revoke(byStranger, OTHER), /payer or the spender/);
+  // Until v2 (F51) the title of this test ruled out every third address. A third address can
+  // hold this now, but only one the payer named — an unnamed stranger is refused exactly as
+  // before, and that is what this mandate is. The nominated case has its own block below.
+  assert.throws(() => revoke(byStranger, OTHER), /only the payer, the spender or the nominated/);
   assert.equal(evaluate(byStranger, req(usdc('1')), { now: 1 }).allowed, true, 'still live');
 });
 
@@ -873,6 +885,147 @@ test('revocation outranks every other check, including a valid cosign', () => {
   approveCosignFor(m, BOSS, { ...r, validUntil: DAY }, { now: 1 });
   revoke(m, PAYER);
   assert.equal(evaluate(m, r, { now: 1 }).reason, Denial.REVOKED);
+});
+
+// ---------------------------------------------------------------------------
+// F51: the payer-nominated revoker.
+//
+// The role answers F42, which is a measurement rather than a theory: on Arc, gas and the
+// spending budget are the same USDC balance, so a mandate can be spent down to the point where
+// the payer cannot afford the 30,808 gas their own `revoke` costs. A third party who can switch
+// the mandate off costs the payer nothing to arrange and does not have to be solvent for the
+// payer to benefit.
+//
+// Adding a third holder of a kill switch is only acceptable if the switch is small, so these
+// tests are mostly about how little the nominee can reach. In this model the whole of their
+// power is `mandate.revoked`, which `evaluate` reads through `live` and `approveCosignFor` reads
+// directly, and there is no other field they can write. The Solidity twin —
+// `test/Revoker.t.sol` — walks all seven state-changing external functions as the nominee and
+// then asserts the payer's balance and allowance, which is the claim this model cannot
+// make because it moves no money.
+// ---------------------------------------------------------------------------
+test('F51: a grant records the nominee, and a grant without one records nobody', () => {
+  assert.equal(simpleMandate({ revoker: GUARD }).revoker, GUARD.toLowerCase());
+  assert.equal(simpleMandate().revoker, null, 'a grant naming nobody must be v1 exactly');
+});
+
+test('F51 ATTACK: the zero address is not a nominee, however it is spelled', () => {
+  // The trap F28 sprang one field over: the zero address as a STRING is truthy in JavaScript,
+  // so `if (revoker)` accepts it and the model would then hold a revoker of `0x000…0` on
+  // mandates whose payer named no one. The contract cannot express the difference at all —
+  // `address(0)` IS the empty mapping slot — which is why `_callerIsRevoker` tests for it
+  // rather than comparing the caller alone.
+  const m = simpleMandate({ revoker: ZERO_ADDRESS });
+  assert.equal(m.revoker, null, 'the zero address must fold to nobody');
+  assert.throws(() => revoke(m, ZERO_ADDRESS), /only the payer, the spender or the nominated/);
+  assert.equal(evaluate(m, req(usdc('1')), { now: 1 }).allowed, true, 'still live');
+
+  // The same value through `setRevoker`, which is the removal path.
+  const named = simpleMandate({ revoker: GUARD });
+  setRevoker(named, PAYER, ZERO_ADDRESS);
+  assert.equal(named.revoker, null);
+  assert.throws(() => revoke(named, ZERO_ADDRESS), /only the payer, the spender or the nominated/);
+});
+
+test('F51: a grant refuses the payer and the spender as nominee, and permits the cosigner', () => {
+  assert.throws(() => simpleMandate({ revoker: PAYER }), /payer cannot be their own revoker/);
+  assert.throws(() => simpleMandate({ revoker: AGENT }), /spender cannot be the revoker/);
+
+  // The cosigner stays eligible on purpose. They are an address the payer already trusted with
+  // a decision about this mandate, and co-signing gives them no power this role duplicates.
+  const m = simpleMandate({ cosigner: BOSS, cosignThreshold: usdc('10'), revoker: BOSS });
+  assert.equal(m.revoker, BOSS.toLowerCase());
+  revoke(m, BOSS);
+  assert.equal(evaluate(m, req(usdc('1')), { now: 1 }).reason, Denial.REVOKED);
+});
+
+test('F51: the nominee kills the mandate, and the views agree it is dead', () => {
+  const m = simpleMandate({ revoker: GUARD });
+  revoke(m, GUARD);
+  assert.equal(evaluate(m, req(usdc('1')), { now: 1 }).reason, Denial.REVOKED);
+  assert.equal(headroom(m, 1).live, false);
+  assert.equal(headroom(m, 1).maxSpendNow, 0n);
+  // Idempotent, matching F11's latch in the contract: a second call is not an error.
+  revoke(m, GUARD);
+  assert.equal(m.revoked, true);
+});
+
+test('F51 ATTACK: the nominee of one mandate cannot reach another', () => {
+  const guarded = createMandate({
+    id: 'f51a',
+    payer: PAYER,
+    spender: AGENT,
+    perTxCap: usdc('100'),
+    expiresAt: FAR,
+    revoker: GUARD,
+  });
+  const other = createMandate({
+    id: 'f51b',
+    payer: PAYER,
+    spender: AGENT,
+    perTxCap: usdc('100'),
+    expiresAt: FAR,
+  });
+  assert.throws(() => revoke(other, GUARD), /only the payer, the spender or the nominated/);
+  assert.equal(evaluate(other, req(usdc('1')), { now: 1 }).allowed, true, 'the second is live');
+  revoke(guarded, GUARD);
+  assert.equal(other.revoked, false, 'killing one must not kill the other');
+});
+
+test('F51 ATTACK: the nominee cannot spend, and revoking does not make them the spender', () => {
+  const m = simpleMandate({ revoker: GUARD });
+  const asGuard = { spender: GUARD, recipient: VENDOR, amount: usdc('1'), nonce: n() };
+  assert.equal(evaluate(m, asGuard, { now: 1 }).reason, Denial.WRONG_SPENDER);
+  revoke(m, GUARD);
+  // After revocation the code changes, and REVOKED is not a smaller refusal than WRONG_SPENDER.
+  assert.equal(evaluate(m, { ...asGuard, nonce: n() }, { now: 1 }).reason, Denial.REVOKED);
+});
+
+test('F51: setRevoker names, replaces and removes, and removal actually takes effect', () => {
+  const m = simpleMandate();
+  assert.equal(m.revoker, null);
+
+  setRevoker(m, PAYER, GUARD);
+  assert.equal(m.revoker, GUARD.toLowerCase());
+
+  setRevoker(m, PAYER, GUARD2);
+  assert.equal(m.revoker, GUARD2.toLowerCase());
+  // The replaced nominee must lose the role, not share it.
+  assert.throws(() => revoke(m, GUARD), /only the payer, the spender or the nominated/);
+
+  setRevoker(m, PAYER, null);
+  assert.equal(m.revoker, null, 'null is the way back to v1');
+  assert.throws(() => revoke(m, GUARD2), /only the payer, the spender or the nominated/);
+  assert.equal(evaluate(m, req(usdc('1')), { now: 1 }).allowed, true, 'still live after all that');
+});
+
+test('F51 ATTACK: only the payer may nominate — not the spender, the nominee or a stranger', () => {
+  const m = simpleMandate({ revoker: GUARD });
+
+  // The spender is the most valuable of these three. A spender who could remove the nominee
+  // would undo the payer's arrangement with nothing to tell the payer it happened, and the
+  // payer's next act — revoking once the budget is gone — is the one they cannot afford.
+  assert.throws(() => setRevoker(m, AGENT, GUARD2), /only the payer may name a revoker/);
+  assert.throws(() => setRevoker(m, AGENT, null), /only the payer may name a revoker/);
+  assert.throws(() => setRevoker(m, GUARD, GUARD2), /only the payer may name a revoker/);
+  assert.throws(() => setRevoker(m, OTHER, GUARD2), /only the payer may name a revoker/);
+  assert.equal(m.revoker, GUARD.toLowerCase(), 'the nomination must be untouched');
+
+  // A cosigner is eligible to HOLD the role and still may not hand it out.
+  const withBoss = simpleMandate({ cosigner: BOSS, cosignThreshold: usdc('10'), revoker: GUARD });
+  assert.throws(() => setRevoker(withBoss, BOSS, GUARD2), /only the payer may name a revoker/);
+});
+
+test('F51: setRevoker refuses a revoked mandate and the two ineligible values', () => {
+  const dead = simpleMandate();
+  revoke(dead, PAYER);
+  assert.throws(() => setRevoker(dead, PAYER, GUARD), /the mandate is revoked/);
+  assert.equal(dead.revoker, null, 'the refusal must not have written the field');
+
+  const live = simpleMandate();
+  assert.throws(() => setRevoker(live, PAYER, PAYER), /payer cannot be their own revoker/);
+  assert.throws(() => setRevoker(live, PAYER, AGENT), /spender cannot be the revoker/);
+  assert.equal(live.revoker, null);
 });
 
 // ---------------------------------------------------------------------------
@@ -1596,6 +1749,19 @@ test('cosign (F17): a revoked or expired mandate cannot be approved against', ()
     refusedWith(Denial.EXPIRED),
   );
   assert.equal(evaluate(expired, req(usdc('50')), { now: DAY }).reason, Denial.EXPIRED);
+});
+
+test('F51: a revocation by the nominee closes the cosign path too', () => {
+  // `revoked` is read on two paths, not one — `evaluate`, through `live`, and here. A nominee
+  // who could stop spends but not approvals would leave the cosigner able to record approvals
+  // against a mandate that is dead, and this is the assertion that the second path sees the
+  // nominee's write exactly as it sees the payer's.
+  const dead = cosignMandate({ revoker: GUARD });
+  revoke(dead, GUARD);
+  assert.throws(
+    () => approveCosignFor(dead, BOSS, { ...req(usdc('50')), validUntil: DAY }, { now: 1 }),
+    refusedWith(Denial.REVOKED),
+  );
 });
 
 test('cosign (F17): an approval at or below the threshold is refused', () => {

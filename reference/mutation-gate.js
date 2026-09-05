@@ -62,7 +62,7 @@
 // establish, so crash kills are counted and named instead of being folded into the total.
 //
 // `evaluate` has exactly two of them, decided on 2026-08-29 and not to be re-probed:
-// `reference/policy.js:675`'s `if (!mandate)` and `:801`'s `if (!att)`, both of which guard
+// `reference/policy.js:722`'s `if (!mandate)` and `:848`'s `if (!att)`, both of which guard
 // against an ABSENT object rather than a wrong value, so a fall-through immediately dereferences
 // null — `mandate.revoked`, `att.validator` — and no test can ever observe a returned denial to
 // assert on. Neither is a gap in the suite and neither can be converted into an assertion-kill

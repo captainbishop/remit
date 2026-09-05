@@ -50,7 +50,7 @@ Transaction hashes in these files remain independently checkable at
 |---|---|
 | `deploy-check.log` | On-chain code length **11,572 bytes**, and the three constructor immutables as actually stored. This is what corrected the long-published 11,964 figure, which matched neither the runtime nor the initcode column. |
 | `verify.log` | `forge build --sizes` (11,572 runtime / 11,868 initcode) and the Blockscout source verification. |
-| `create-calldata.txt` | The exact `createMandate` calldata for mandate 1, selector `0x9ab253da`. |
+| `create-calldata.txt` | The exact `createMandate` calldata for mandate 1, selector `0x9ab253da`. That selector is v1's. v2 adds a `revoker` field to `MandateParams`, which moves it to `0x0ed62010`, so this file remains what v1's deployed address answers to and is not v2 calldata. |
 | `expected-id.txt` | The mandate ID predicted off-chain *before* sending. Matching the on-chain result is what proves the `keccak256(DOMAIN, chainid, address(this), msg.sender, salt)` derivation was understood correctly rather than reverse-engineered afterwards. |
 
 ## Arc's own behaviour, verified by observation rather than from the docs
