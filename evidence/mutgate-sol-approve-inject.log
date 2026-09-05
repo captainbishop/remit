@@ -1,0 +1,28 @@
+mutation gate (solidity): approveCosignFor
+  --injections is set, so the 20 removal(s) for approveCosignFor are skipped
+  working copy: /tmp/remit-solmut-051cn1pw   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  5 mutant(s) queued
+  baseline: 212 passed, 0 failed  (17s)
+
+  [ 1/5] injected a notBefore in the future ... caught  (17s)
+  [ 2/5] injected a currently full rolling window ... caught  (18s)
+  [ 3/5] injected an unfiled ERC-8004 credential ... caught  (17s)
+  [ 4/5] injected the maximal wrong design: approve only what could be spent RIGHT NOW ... caught  (18s)
+  [ 5/5] injected F22: the spender refused as its own recipient, on the approval path ... caught  (17s)
+
+mutation gate: approveCosignFor — 5 mutants, baseline 212 green
+
+  caught       injected a notBefore in the future
+               by: test_f17_approvingBeforeTheMandateStarts_isAllowed, test_f17_theDeadlineMustOutliveNotBeforeAndDieByTheExpiry, test_f35_aStartInTheFutureIsAWaitRatherThanADeath   [3 failing]
+  caught       injected a currently full rolling window
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_approvingPastTheUint96AuditCeiling_isRefused, test_f17_approvingWhileAWindowIsFull_isAllowed (+1 more)   [4 failing]
+  caught       injected an unfiled ERC-8004 credential
+               by: test_f17_approvingWhileACredentialIsMissing_isAllowed   [1 failing]
+  caught       injected the maximal wrong design: approve only what could be spent RIGHT NOW
+               by: test_f17_approvingAZeroOrOversizeAmountOrZeroRecipient_isRefused, test_f17_approvingBeforeTheMandateStarts_isAllowed, test_f17_approvingOnAnExpiredMandate_isRefused (+6 more)   [9 failing]
+  caught       injected F22: the spender refused as its own recipient, on the approval path
+               by: test_f22_approvingTheSpenderAsRecipient_isAccepted   [1 failing]
+
+OK — all 5 mutants were caught by a named test.
+     SCOPE: injections only. approveCosignFor's 20 removal(s) were not built,
+     so this run is not a census of the target. Run it bare for that.

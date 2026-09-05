@@ -1,0 +1,16 @@
+mutation gate (solidity): spend
+  --injections is set, so the 19 removal(s) for spend are skipped
+  working copy: /tmp/remit-solmut-ilkv5nz9   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  1 mutant(s) queued
+  baseline: 212 passed, 0 failed  (18s)
+
+  [ 1/1] injected F22: the spender refused as its own recipient ... caught  (18s)
+
+mutation gate: spend — 1 mutants, baseline 212 green
+
+  caught       injected F22: the spender refused as its own recipient
+               by: test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid, test_f22_theSpenderMayBePaidByItsOwnMandate, test_f22_approvingTheSpenderAsRecipient_isAccepted   [3 failing]
+
+OK — the one mutant was caught by a named test.
+     SCOPE: injections only. spend's 19 removal(s) were not built,
+     so this run is not a census of the target. Run it bare for that.

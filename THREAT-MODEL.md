@@ -348,7 +348,8 @@ what it does not, and which areas remain unexamined.
 > is a regression check rather than a new result, and the fifth killed by exactly one case,
 > `test_f22_approvingTheSpenderAsRecipient_isAccepted`. **A single killer is a fact to record rather
 > than a result to be satisfied by** — delete that one case and the mirror injection survives again,
-> with nothing else among the 212 noticing.
+> with nothing else among the 212 noticing. The two runs are logged in `evidence/`, as
+> `mutgate-sol-spend-inject.log` and `mutgate-sol-approve-inject.log`.
 >
 > **Both runs were narrowed, and each log says so on its closing line.** `--injections` is new today
 > and builds a target's injection cases without its removals, taking these two questions from 45
@@ -4278,12 +4279,14 @@ still be hiding there.
   explain: **a mutant count is a property of the pair (contract, operator set)**, so a mutation gate
   learning a new property raises it exactly the way a new guard does. Both confirmations ran under a
   new `--injections` flag at baseline **212 passed, 0 failed**, and each returned every queued mutant
-  caught by a named test — 1 of 1 for `spend`, 5 of 5 for `approveCosignFor`. Each log closes with
-  the gate's own `SCOPE: injections only` block naming the 19 and 20 removals the run declined to
-  build, so neither is quotable as a census and the gate says so without being asked. What licenses
-  skipping those removals is directional rather than convenient: adding a test can only enlarge the
-  killer set, so the 84-mutant sweep recorded above cannot have regressed under three new tests. A
-  bare run of either target is still the only thing that re-establishes a census, and #14 owns it.
+  caught by a named test — 1 of 1 for `spend`, 5 of 5 for `approveCosignFor`. Both logs are in
+  `evidence/`, as `mutgate-sol-spend-inject.log` and `mutgate-sol-approve-inject.log`, and each
+  closes with the gate's own `SCOPE: injections only` block naming the 19 and 20 removals the run
+  declined to build, so neither is quotable as a census and the gate says so without being asked.
+  What licenses skipping those removals is directional rather than convenient: adding a test can
+  only enlarge the killer set, so the 84-mutant sweep recorded above cannot have regressed under
+  three new tests. A bare run of either target is still the only thing that re-establishes a
+  census, and #14 owns it.
   **A bare run happened on 2026-08-30, over four targets, and the census is 95.** #24 changed the
   bodies of `spend`, `approveCosignFor`, `withdrawCosign` and `revoke`, and those four were chosen by
   a code-only comparison of every target's body against `db1c08c` rather than by eye — which is what
