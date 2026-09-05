@@ -334,7 +334,7 @@ through precompiles within a single block; it does not say what a private USDC b
 looks like or whether one exists, and neither should be assumed. `CONFIDENTIAL-USDC.md`
 is the long form of that question: why the settlement half of this leak belongs to
 whoever issues the asset rather than to this application, three shapes a confidential
-balance could take, and the five questions worth putting to Circle.
+balance could take, and the six questions worth putting to Circle.
 
 **It is a different trust model, and neither model dominates.** L3 as specced asks you to
 trust mathematics and a circuit that no one has audited yet. APS asks you to trust

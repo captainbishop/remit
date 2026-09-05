@@ -17,6 +17,41 @@ exists.**
 Everything else here is an attempt to show why that single unanswered sentence decides more than
 it looks like it decides.
 
+## What the documentation says, and how far that was checked
+
+The claim above is a negative one, so it needs a method behind it rather than an impression.
+Arc's published documentation was swept for the pairing on 2026-09-05, and three results bound
+the answer.
+
+**Four pages mention the Arc Privacy Sector at all:** the chain overview, the execution-layer
+concept page, the system-overview concept page, and `/arc/concepts/opt-in-privacy` itself. The
+overview's mention is a navigation card. The two concept pages carry a paragraph each, mark the
+environment `Planned`, and sit beside a notice reading *"Arc Privacy Sector (APS) is on the
+roadmap and not yet available on Arc."* A search pairing the environment with USDC, assets,
+tokens, balances, bridging or precompiles returns no line that pairs the two subjects.
+
+**The precompile that would carry a crossing has no published address.** The execution-layer
+page enumerates Arc's five protocol precompiles at `0x1800…0000` through `0x1800…0004` — native
+coin authority, native coin control, system accounting, call-from, and post-quantum signature
+verification — and the privacy precompile that `/arc/concepts/opt-in-privacy` describes as
+receiving the encrypted payload is absent from that list. The contract-address reference lists
+no confidential predeploy either. The interface that question three below turns on therefore has
+no address to call and no signature to read.
+
+**The one asset example the privacy page offers cannot be applied to USDC.** That example is a
+standard OpenZeppelin ERC-20 deployed into the confidential environment with unmodified
+bytecode, its `transfer` left open to any caller and its `balanceOf` restricted to trusted
+contracts. Arc's USDC is a different object, because `0x3600…0000` is documented as an optional
+ERC-20 interface over the native balance and Arc's stablecoin-native page states that the two
+interfaces share one balance: `USDC.balanceOf(addr)` and `addr.balance` report the same value in
+six decimals and in eighteen. No USDC token contract exists to be redeployed anywhere, and an
+ERC-20 deployed into the confidential environment would be a separate asset keeping its own
+ledger.
+
+What this settles is what a reader may assume today, which is nothing. Whether a confidential
+USDC is planned stays a question only Circle can answer, which is why the list at the end of
+this document is addressed to them.
+
 ## Why Remit is the sharpest way to ask it
 
 Remit never holds money. A payer keeps their USDC in their own wallet, grants an ERC-20 allowance
@@ -52,12 +87,23 @@ one third never was, and it explains why every layer specced in `PRIVACY.md` bef
 a commitment scheme or a proof: on a public EVM a contract cannot keep a secret it has stored, only
 one it never stored.
 
-There is one settlement leak worth naming on its own, because it survives everything. **The
+Two settlement leaks are worth naming on their own, because they survive everything. **The
 payer's allowance is public.** `approve(remit, X)` sits on the token, in the clear, and X is an
 upper bound on every dollar that Remit deployment can ever move for that payer. A payer holding a
 single mandate publishes that mandate's ceiling by granting the allowance, on a contract no
 privacy environment can reach into, before any private state exists. Move the entire mandate
 record into a confidential environment and the bound still stands in public.
+
+**A private transaction also pays for itself in public.** Arc's execution pipeline deducts gas in
+USDC on every transaction, one step ahead of the module that would process a confidential call,
+so the fee for a private call leaves the same native balance the ERC-20 interface reads. The
+envelope carrying the encrypted payload is an ordinary transaction with an ordinary sender, which
+makes the caller and the fee visible while the payload stays opaque. Two details limit the leak
+and neither closes it: the fee emits no `Transfer` log, since Arc's system-events reference puts
+fees and block rewards out of scope for EIP-7708 and derives them from the receipt instead, and
+the privacy precompile returns a predefined cost with constant-time reporting, so the fee says
+nothing about the amount moved. What stays public is that an identified address paid to run
+something confidential, and when.
 
 ## The half APS closes is the larger half
 
@@ -95,9 +141,11 @@ individuals.
 
 **Confidential state on the token itself.** USDC's own balance mapping stored confidentially
 inside the private environment, with no separate escrow and no boundary to observe. This is the
-strongest shape and the one that needs the most from Circle, since it means the issuer deploying
-the token into the confidential environment and deciding what it means for one asset to have a
-public and a private representation at once.
+strongest shape and the one that needs the most from Circle, and the sweep above shows why it
+needs the protocol rather than a deployment: Arc's USDC has no token contract to move, the native
+balance and the ERC-20 view are one balance, and that same balance pays for gas. A confidential
+representation of it would be a change to how Arc accounts for its native asset, decided by
+whoever ships the chain rather than by whoever deploys a contract into it.
 
 **No private token at all.** The confidential environment holds application state only, and every
 value movement settles publicly. Policy goes dark, payments do not, and the article ends where the
@@ -153,7 +201,7 @@ and is building the chain, so both halves are in one place for the first time.
 
 ## What we are asking Circle
 
-Five questions, each answerable in a sentence, ordered by how much they change.
+Six questions, each answerable in a sentence, ordered by how much they change.
 
 1. Does a confidential representation of USDC exist on the private side, or is it planned?
 2. If value crosses the boundary through a precompile, is the crossing observable on the public
@@ -164,9 +212,14 @@ Five questions, each answerable in a sentence, ordered by how much they change.
    require the contract to hold the funds?
 5. Does either `Transfer` emitter fire for a movement that begins or ends inside the confidential
    environment — the ERC-20 view, the EIP-7708 native emitter, or both?
+6. Must the transaction carrying an encrypted payload be signed by the party whose private call
+   it carries, or may a relayer submit it, so that the public fee names the relayer instead?
 
 Question 3 is the one that decides whether this repository's contract is deployable into that
 environment as written. Questions 1 and 5 decide what it could promise once it is there.
+Question 6 decides whether the fee path undoes what the other five secure, and
+`GAS-ABSTRACTION.md` already records which sponsorship standards Arc supports, so the answer has
+somewhere to land.
 
 ## What this document does not claim
 
