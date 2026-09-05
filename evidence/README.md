@@ -6,11 +6,11 @@
 > v1's source is the thing being annotated. v2 work has shifted the working tree's
 > numbering; see FORGE.md.*
 
-Every number published in `DESIGN.md`, `CHANGELIST.md`, `PRIVACY.md`, `FORGE.md`,
-together with the comment block in `foundry.toml`, was measured rather than
-estimated. This folder is the raw output those numbers came from, kept so that a
-reader — or an auditor — can check a claim against the thing that produced it
-rather than taking it on trust.
+Documents across this repo publish figures that came out of this folder, as does
+the comment block in `foundry.toml`. Every figure here was measured rather than
+estimated: what is kept is the raw output, so that a reader — or an auditor — can
+check a claim against the thing that produced it rather than taking it on trust.
+The tables below say what each file establishes.
 
 Five files were deliberately left out of this curated folder because they are
 compiler and CLI chatter that regenerates identically on demand and records no
