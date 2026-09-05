@@ -108,13 +108,13 @@ The cost, stated plainly: `forge update` will fight this, and the diff on any fu
 forge-std bump will be large. Bump deliberately, in its own commit, and re-run the full
 suite plus `FOUNDRY_PROFILE=deep forge test` afterwards.
 
-**The same reasoning governs every line number in this repo.** Sixty `line NNN`
-references across `DESIGN.md`, `CHANGELIST.md`, `L3-VAULT.md`, `PRIVACY.md`,
-`GAS-ABSTRACTION.md`, `IMMUTABILITY.md` and `evidence/README.md` point into
-`contracts/MandateManager.sol`. All sixty were written against v1 and all sixty shifted
-the moment v2 edits began — the header banner alone moved everything below it by sixteen
-lines. **Unqualified line numbers therefore refer to the tagged v1 source**, which is
-where they are still exactly right:
+**The same reasoning governs every line number in this repo.** Eighty references across
+`DESIGN.md`, `CHANGELIST.md`, `L3-VAULT.md`, `PRIVACY.md`, `GAS-ABSTRACTION.md`,
+`IMMUTABILITY.md` and `evidence/README.md` point into `contracts/MandateManager.sol`,
+seventy-two of them written `line NNN` or `lines NNN` and eight naming the file. All
+eighty were written against v1 and all eighty shifted the moment v2 edits began — the
+header banner alone moved everything below it by sixteen lines. **Unqualified line numbers
+therefore refer to the tagged v1 source**, which is where they are still exactly right:
 
 ```
 git show v1.0.0-arc-testnet:contracts/MandateManager.sol
