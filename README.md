@@ -138,7 +138,7 @@ reference/policy.js        the normative spec — executable model of every deci
 reference/policy.test.js   102 tests, including boundary-aiming fuzzers
 reference/                 also holds the seven checkers, and the house style they enforce
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
-test/                      276 Forge tests in 12 files, against the real storage layout
+test/                      278 Forge tests in 12 files, against the real storage layout
 test/ArcParity.t.sol       the matched local control for the real testnet transactions
 test/Deploy.t.sol          the deploy script's own checks, exercised against mocks
 script/Deploy.s.sol        deploys with the constructor arguments pinned per chain
@@ -176,15 +176,17 @@ redirect, identity-NFT transfer, wrong-validator attestation, wrong-agent
 attestation) and property-based fuzzers that check accepted spends against a
 brute-force exact ledger across `K ∈ {2,3,4,6,12,24}` × 25 seeds × 200 steps.
 
-A second suite now exists in Solidity — 276 Forge tests in `test/` — covering the same
+A second suite now exists in Solidity — 278 Forge tests in `test/` — covering the same
 ground plus the three properties a JavaScript model structurally cannot express: a failed
 spend consumes nothing (real transaction rollback), rewinding onto the same physical ring
 slot accumulates rather than overwrites (real storage aliasing), and `totalSpent` panics
-rather than wrapping near 2^96 (real packed arithmetic). All 276 pass, under `solc` 0.8.28
+rather than wrapping near 2^96 (real packed arithmetic). All 278 pass, under `solc` 0.8.28
 — 2,048 fuzz runs and 49,152 invariant calls. `forge coverage` puts the contract at
 100% of lines (313/313), statements (565/565), branches (144/144) and functions
-(27/27), measured on the v2 tree at 276 tests rather than carried from an earlier one.
-Repo-wide the four columns read 98.90%, 97.99%, 92.16% and 97.85%. The deploy script was
+(27/27), measured on the v2 tree at 278 tests rather than carried from an earlier one.
+Repo-wide the four columns read 99.84%, 98.55%, 92.65% and 100.00%. One of the functions
+behind that last column is the USDC mock's plain `transfer`, which had no caller anywhere
+in the tree until the invariant handler's `donate` move called it. The deploy script was
 the one file with no coverage at all until `test/Deploy.t.sol` was written; the branches
 still unreached inside it are the eight comparisons that hold for every input while the
 source is correct, which the same file explains one by one.
@@ -225,7 +227,7 @@ encrypted keystore instead: the key is never printed and never written in plaint
 
 ```
 forge build                                    # clean; forge-std 1.16.2 vendored in lib/
-forge test                                     # 276 tests, all passing
+forge test                                     # 278 tests, all passing
 
 cast wallet new ~/.foundry/keystores remit-testnet   # prompts for a password;
                                                     # prints the address, never the key
@@ -561,7 +563,7 @@ launch. The gas question that used to sit here is answered above.
 
 ## Next
 
-The Forge port is written and runs — 276 tests, including exact-ledger property tests and
+The Forge port is written and runs — 278 tests, including exact-ledger property tests and
 a stateful invariant that lets the fuzzer choose the call sequence, and all of them pass.
 Gas is measured against Arc's real USDC, `K=24` is settled as affordable, and the contract
 is deployed and exercised on testnet.
