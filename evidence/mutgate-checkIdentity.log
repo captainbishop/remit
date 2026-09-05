@@ -1,0 +1,15 @@
+mutation gate (solidity): _checkIdentity
+  working copy: /tmp/remit-solmut-y_72bqiy   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  baseline: 207 passed, 0 failed  (17s)
+
+  [ 1/2] removed  IdentityNotHeld (line 1234) ... caught  (17s)
+  [ 2/2] removed  IdentityTransferred (line 1235) ... caught  (21s)
+
+mutation gate: _checkIdentity — 2 mutants, baseline 207 green
+
+  caught       removed  IdentityNotHeld (line 1234)
+               by: test_ATTACK_transferringTheAgentIdentity_killsTheMandate, test_bothGates_mustPassIndependently, test_identityGate_burnedIdentity_deniesLegibly   [3 failing]
+  caught       removed  IdentityTransferred (line 1235)
+               by: test_f33_forcingTheUnreachablePin_stillRefusesTheSpend   [1 failing]
+
+OK — every one of the 2 mutants was caught by a named test.

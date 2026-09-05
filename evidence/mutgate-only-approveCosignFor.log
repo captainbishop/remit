@@ -1,0 +1,14 @@
+mutation gate (solidity): approveCosignFor
+  --only is set, so the 4 injection(s) for approveCosignFor are skipped
+  working copy: /tmp/remit-solmut-utqfuee6   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  1 mutant(s) queued
+  baseline: 209 passed, 0 failed  (22s)
+
+  [ 1/1] removed  UnrecoverableRecipient (line 1479) ... caught  (22s)
+
+mutation gate: approveCosignFor — 1 mutants, baseline 209 green
+
+  caught       removed  UnrecoverableRecipient (line 1479)
+               by: test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused   [1 failing]
+
+OK — the one mutant was caught by a named test.

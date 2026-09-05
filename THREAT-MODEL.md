@@ -245,7 +245,7 @@ what it does not, and which areas remain unexamined.
 >
 > **The green figures are 207 Solidity cases and 92 model tests, and the Solidity one needs its
 > provenance stated rather than quoted.** It comes from `mutgate-checkIdentity.log`'s control line,
-> `baseline: 207 passed, 0 failed (17s)` — a real run of the whole suite, but one taken to be a
+> `baseline: 207 passed, 0 failed  (17s)` — a real run of the whole suite, but one taken to be a
 > *control* for a mutation gate rather than a measurement in its own right. #14 still owns a
 > standalone `forge test`. What has been done here instead is reconcile it against source two ways:
 > the tree declares **204 functions named `test*` plus 3 named `invariant_`**, which is 207 exactly,
@@ -4268,7 +4268,8 @@ still be hiding there.
   mutants attempted and eleven of eleven targets run, so no clean claim in this document now rests
   on a function the gate has never addressed. The logs are `mutgate-sol-<target>.log`, plus
   `mutgate-only-approveCosignFor.log` and `mutgate-only-createMandate.log` for the two `--only`
-  confirmations; they are on disk and they outrank this table.
+  confirmations; the two `--only` logs are in `evidence/` and the per-target ones are local working
+  captures, and all of them outrank this table.
   **The census moved 89 → 91 later the same day, with the contract byte-identical throughout.**
   F22's inversion was added to `INJECTIONS` for `spend`, which had none before, and as a fifth for
   `approveCosignFor`, so the totals are **91 mutants, 85 removals plus 6 injections** and the

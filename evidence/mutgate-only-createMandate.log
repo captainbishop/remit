@@ -1,0 +1,13 @@
+mutation gate (solidity): createMandate
+  working copy: /tmp/remit-solmut-inacplzq   (the tree at /mnt/c/Users/DELL/projects/remit is never written to)
+  1 mutant(s) queued
+  baseline: 209 passed, 0 failed  (23s)
+
+  [ 1/1] removed  BadConfig (line 873) ... caught  (24s)
+
+mutation gate: createMandate — 1 mutants, baseline 209 green
+
+  caught       removed  BadConfig (line 873)
+               by: test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused   [1 failing]
+
+OK — the one mutant was caught by a named test.
