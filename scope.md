@@ -42,7 +42,7 @@ self-contained and can be read start to finish without following a dependency.
 
 ## Out of scope
 
-- `test/` — 13 `.t.sol` files, 320 tests.
+- `test/` — 13 `.t.sol` files, 323 tests.
 - `lib/forge-std/` — forge-std 1.16.2, vendored as 68 tracked files. Test-only;
   `grep -rc forge-std contracts/` returns 0, so none of it reaches deployed bytecode.
   It is vendored rather than submoduled, so the upstream commit is recorded here instead

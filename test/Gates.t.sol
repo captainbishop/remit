@@ -171,6 +171,36 @@ contract GatesTest is Base {
         payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
     }
 
+    /**
+     * The test above and the ordinary passing case leave `response` at only 0 or 100, and on a
+     * two-point scale a floor cannot be told apart from a presence check. All three of
+     * `response < c.minResponse`, `response != c.minResponse` and `response == 0` agree on both
+     * points, so either of the last two could stand in for the real one and the suite would stay
+     * green. `evidence/mutgate-sol-census-320.log:87` shows why the census did not settle it: the
+     * run deleted the guard rather than changing its operator, and a deleted guard is caught.
+     * A middling score is what separates the three. Here 60 falls short of a floor of 100 and has
+     * to be refused, where a presence check would let it spend.
+     */
+    function test_credentialGate_aPartialScoreBelowTheFloor_denies() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 60, block.timestamp);
+        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+    }
+
+    /// The other half of the same pair: a score above the payer's floor spends. An equality
+    /// check would refuse it, while a payer who set a floor of 60 was asking for a floor, which
+    /// admits every score above it. With the test above, the comparison at
+    /// `MandateManager.sol:1618` is pinned as an ordering rather than as a match.
+    function test_credentialGate_aScoreAboveTheFloor_spends() public {
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
+        p.credential.minResponse = 60;
+        bytes32 id = grant(p);
+
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10), "a floor of 60 admits a 100");
+    }
+
     function test_credentialGate_staleAttestation_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         pay(id, usd(10)); // fresh: attested 100s ago

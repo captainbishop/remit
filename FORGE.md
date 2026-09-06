@@ -1,15 +1,15 @@
 # Running the Forge suite
 
-320 tests across thirteen files — which `forge test` reports as **15 suites**, for reasons
+323 tests across thirteen files — which `forge test` reports as **15 suites**, for reasons
 worked through under Layout — verifying `contracts/MandateManager.sol` against the real EVM:
 packed structs, the bucket ring in actual storage mappings, and transactional rollback. This
 is the port of `reference/policy.test.js`, which has 116 tests and verifies the *policy*.
 Both matter, and they are not redundant — the section on what Solidity can prove that
 JavaScript cannot is below.
 
-**Status: all 320 pass; `forge lint` at default severity is clean on the v2 tree.** First
+**Status: all 323 pass; `forge lint` at default severity is clean on the v2 tree.** First
 compiled and first run on 2026-08-24 at 140 tests, under `solc` 0.8.28 with the optimizer at
-200 runs, in about twelve seconds; the last timed run was 9.62 seconds at 320. That covers
+200 runs, in about twelve seconds; the last timed run was 9.51 seconds at 323. That covers
 2,048 fuzz runs across the four property tests and 49,152 calls across the three invariants.
 What the first compile and the first run each cost is recorded below, because a suite's
 first green is the only time you learn whether it was testing anything.
@@ -170,7 +170,10 @@ exit 0, in 15m51.857s wall.** Full output including the config dump is `evidence
 at 278 tests: 278 passed, 0 failed, 0 skipped, exit 0, in 10m50.560s wall** —
 `evidence/deep-v3.log`. **And on 2026-09-05 at 320 tests, after F51 added the payer-nominated
 revoker: 320 passed, 0 failed, 0 skipped, exit 0, in 9m21.166s wall** — `evidence/deep-v4.log`,
-which is the gate in force. Each supersedes the one before it without replacing it, since the
+which is the gate in force and is now three tests behind the suite: the audit of the two test
+doubles added three on 2026-09-06, and none of them is a fuzz or invariant test, so the campaign
+they are missing from is the one measured above and the next deep run is owed rather than urgent.
+Each supersedes the one before it without replacing it, since the
 first is the campaign the deployed v1 bytecode was cleared by. Every
 later run beats the 140-test one despite carrying twice the tests or more; `deep-v3.log`
 accounts for its own margin over `deep-v2.log`, `deep-v4.log` records a further 87.70s margin
@@ -228,9 +231,9 @@ test/Creation.t.sol        56  grant-time validation — every way a mandate is 
 test/Bounds.t.sol          32  per-tx, lifetime, allowlist, spender, time, revocation
 test/Revoker.t.sol         42  the payer's nominated revoker, and all it cannot touch
 test/Windows.t.sol         20  the rolling-window ring, by hand, with the boundary probes
-test/Gates.t.sol           26  ERC-8004 identity and credential gates
+test/Gates.t.sol           28  ERC-8004 identity and credential gates
 test/Cosign.t.sol          66  what a co-signature actually commits to
-test/Idempotency.t.sol     13  nonce replay, and that a denial consumes nothing
+test/Idempotency.t.sol     14  nonce replay, and that a denial consumes nothing
 test/Views.t.sol           28  the pre-flight views an agent decides on
 test/WindowFuzz.t.sol       4  exact-ledger property tests, bounded loops
 test/WindowInvariant.t.sol  7  the same property, fuzzed sequences, and a stray donation
@@ -239,7 +242,7 @@ test/Deploy.t.sol          22  script/Deploy.s.sol: the chain pin, the probes, a
 test/mocks/                    USDC with Arc's failure modes; the two registries
 ```
 
-The column sums to 320, which is the check worth running on it: a suite count swept in the
+The column sums to 323, which is the check worth running on it: a suite count swept in the
 prose above and not here leaves a table that disagrees with its own headline. On 2026-09-02
 this file still said 225 throughout, table included, so the column agreed with the headline
 while both were stale against the suite, which is the version of the problem that reads as
@@ -248,9 +251,12 @@ correct. Getting from 225 to 254 moved four cells: `Creation` 44 → 56, `Cosign
 deploy script stopped being the one file in the repository with no coverage at all. Reaching
 278 moved one cell, `WindowInvariant` 5 → 7, on the day the claim that this contract never
 holds funds acquired a handler move able to falsify it. Reaching 320 took another whole row,
-`Revoker` at 42, when the payer gained a nominee able to revoke on their behalf.
+`Revoker` at 42, when the payer gained a nominee able to revoke on their behalf. Reaching 323
+moved two cells, `Gates` 26 → 28 and `Idempotency` 13 → 14, and those three tests came from
+auditing the test doubles rather than the contract: the two mock files had never been
+swept, because the audit tool's own scope rule drops anything under `mocks/`.
 
-Twenty-seven of the 320 are named attack simulations, with `ATTACK` in the function name, and
+Twenty-seven of the 323 are named attack simulations, with `ATTACK` in the function name, and
 fifteen of those sit in `Revoker.t.sol`, where a third party able to revoke had to be shown
 unable to do anything else. Three are regressions (`test_REGRESSION_*`) — one for a bug that
 shipped into the model, two for the self-comparing
@@ -263,7 +269,7 @@ Thirteen files hold eighteen non-abstract contracts; `ArcParity.t.sol` alone dec
 one per measured transaction, because each needs cold storage. Subtract the three that
 declare no test functions of their own — `WindowHandler`, a fuzzing handler, and
 `Token18` and `TransposedRun` in `Deploy.t.sol` — and you get 15. `Base.t.sol` and
-`ArcParityBase` are `abstract` and contribute nothing. In total: 13 files, 15 suites, 320
+`ArcParityBase` are `abstract` and contribute nothing. In total: 13 files, 15 suites, 323
 tests, and all three numbers are correct at the same time.
 
 ## What this proves that the JavaScript model cannot
@@ -573,7 +579,7 @@ of them is a naming or file-layout convention rather than a defect:
 | --- | --- | --- |
 | `multi-contract-file` | `MandateManager.sol` :147, :156, :164, :200 | 4 |
 | `screaming-snake-case-immutable` | `MandateManager.sol` :211, :216, :220 | 3 |
-| `screaming-snake-case-const` | `MockUSDC.sol` :52, :53, :54 | 3 |
+| `screaming-snake-case-const` | `MockUSDC.sol` :69, :70, :71 | 3 |
 | `multi-contract-file` | `MockRegistries.sol` :16, :74 | 2 |
 
 `multi-contract-file` objects to the four declarations in one file, which is the zero-import

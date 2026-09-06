@@ -2316,7 +2316,7 @@ three together are the argument for F13's fix being an *eager* check rather than
 **Severity: none as code, medium as a trap · Status: FIXED in #28, 2026-08-28 — a `WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU` block in the mock's header plus a note at the `emit` itself · Confidence: certain.**
 
 `MockUSDC._move` emits `Transfer(from, to, amount)` **unconditionally** at
-`test/mocks/MockUSDC.sol:106`, including when `from == to`, whereas Arc's `usdc-system-events`
+`test/mocks/MockUSDC.sol:161`, including when `from == to`, whereas Arc's `usdc-system-events`
 reference states the opposite for the system emitter:
 *"Self-transfers (`from == to`) emit no log."*
 
@@ -2337,7 +2337,7 @@ metadata hash.
 
 **What shipped, 2026-08-28, alongside F19 rather than after it.** A titled block in the mock's
 header — `WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU (F25)` — plus a three-line
-note at the `emit` itself, now at `test/mocks/MockUSDC.sol:127-130`. Two decisions inside it
+note at the `emit` itself, now at `test/mocks/MockUSDC.sol:158-161`. Two decisions inside it
 are worth naming because both could reasonably have gone the other way:
 
 **The mock was left divergent on purpose; it was not corrected to match Arc.** Adding
@@ -2663,7 +2663,7 @@ repository's history, and the suite in that same commit asserted exactly that. T
 hazard is therefore real once rather than twice: `expectedOwner` is the only field where the model
 ever read a zero as a value, and F28's own evidence, both behaviours executed, is untouched by
 this. The citation `test/Gates.t.sol:143-162` was correct at `d4f15ac`, where this row was
-written, and the two lines carrying the claim now sit at `test/Gates.t.sol:262-263`, where the
+written, and the two lines carrying the claim now sit at `test/Gates.t.sol:293-294`, where the
 model is recorded as agreeing. `CHANGELIST.md:954` keeps the "second instance" phrasing, because
 it describes a shared hazard class rather than a live divergence, and this layer is where its
 correction lives.
@@ -3995,7 +3995,7 @@ still be hiding there.
   a throwaway `contracts/LintProbe.sol` carrying four deliberate violations made the same
   bare invocation report two warnings, and a second run against a warm cache printed
   `No files changed, compilation skipped` *together with* both warnings, so linting does not
-  depend on compiling. `FORGE.md:544-577` carries the method and the numbers.
+  depend on compiling. `FORGE.md:550-583` carries the method and the numbers.
 
   The commenting asymmetry is real and the reason for it is not established. Both casts have
   the same shape — `uint64` of a `uint256` divided by a `uint32` `subLength` — and only the

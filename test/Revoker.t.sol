@@ -40,6 +40,15 @@ contract RevokerTest is Base {
         guardian = makeAddr("guardian");
         guardian2 = makeAddr("guardian2");
         vm.label(guardian, "guardian");
+
+        // `Base` approves the maximum, which `MockUSDC` leaves undecremented, so every
+        // allowance reading in this file would compare the maximum to itself and hold
+        // whatever the spend did. A finite approval is what makes the second half of
+        // `_payerState` able to fail. The ceiling is more than four times the 1,118 USDC
+        // that every amount in this file sums to, so it never binds on a legitimate
+        // spend, and ArcParity.t.sol uses the same device for the same reason.
+        vm.prank(payer);
+        token.approve(address(mm), usd(5000));
     }
 
     // -- helpers -----------------------------------------------------------
@@ -676,6 +685,14 @@ contract RevokerTest is Base {
      * `evidence/revoke.log`, against a balance that is also the spending budget. F42 holds that
      * reasoning. What this test can show is that the escape works without the payer, which is the
      * half F51 adds.
+     *
+     * The same fiction covers the nominee, and there it costs more. `guardian` is never minted
+     * anything in this suite, so the address whose whole job is to revoke when the payer cannot pay
+     * is itself unfunded, and it revokes here only because Foundry lets it. On Arc the nominee needs
+     * USDC of its own to pay for the revocation, and a blocklisted nominee cannot submit the
+     * transaction at all. Naming a nominee is therefore two obligations rather than one: name an
+     * address, and keep it able to act. F51's own remedy for starvation is exposed to
+     * starvation, and only Arc Testnet can measure that.
      */
     function test_f51_theMandateDiesWithoutThePayerActing() public {
         bytes32 id = _guarded();

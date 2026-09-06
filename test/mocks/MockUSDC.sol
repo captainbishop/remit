@@ -13,9 +13,18 @@ pragma solidity 0.8.28;
  *     contract that lets address(0) through fails at runtime after consuming gas.
  *     MandateManager rejects it up front; this mock
  *     exists so that claim can be tested rather than asserted.
- *   - A blocklisted sender or recipient REVERTS at runtime. There is no way to
- *     pre-check it. The correct outcome is that the whole spend unwinds — no cap
- *     consumed, no nonce burned — and `setBlocklisted` is how that gets tested.
+ *   - A blocklisted sender or recipient REVERTS at runtime, and Arc publishes
+ *     `isBlacklisted(address)` so a caller can ask before sending. The correct
+ *     outcome is that the whole spend unwinds — no cap consumed, no nonce
+ *     burned — and `setBlocklisted` is how that gets tested.
+ *   - `setBlocklisted` reaches that runtime check and nothing else. Arc enforces
+ *     the blocklist at three points, and the other two decide whether a
+ *     transaction is admitted at all: a blocklisted address cannot submit ANY
+ *     transaction to Arc, and an address blocklisted between submission and
+ *     execution reverts on execution. Foundry reproduces neither, and both matter
+ *     here, because a blocklisted payer cannot send `approve(remit, 0)` or
+ *     `revoke`, and a blocklisted delegate produces no transaction rather than a
+ *     reverting one. Any claim about who can still act belongs on Arc Testnet.
  *   - `returnFalseOnTransfer` models the other ERC-20 failure convention: a token
  *     that returns false instead of reverting. MandateManager checks the return
  *     value and raises TransferFailed. Without a token that can exercise it, that
@@ -26,6 +35,14 @@ pragma solidity 0.8.28;
  * balance) is NOT modelled, because MandateManager only ever touches the ERC-20
  * interface. That is the whole reason the native path is out of scope: see the
  * SCOPE block in MandateManager.sol.
+ *
+ * WHAT `balanceOf` HERE DOES NOT TELL YOU
+ * On Arc one balance pays for the transfer and for the gas that carries it, because
+ * USDC is the gas token. `balanceOf` in this file is the ERC-20 side alone, and
+ * Foundry never debits a caller for gas, so `mint` decides what an address can send
+ * and says nothing about whether it can send at all. Every address in this suite
+ * acts for free. F42 and F51 both turn on an address running out of gas, so the
+ * tests that carry them assert the escape route and leave the starvation to Arc.
  *
  * WHERE THIS MOCK DIVERGES FROM ARC AND WILL MISLEAD YOU (F25)
  * `_move` emits `Transfer(from, to, amount)` UNCONDITIONALLY, including when
@@ -92,6 +109,15 @@ contract MockUSDC {
 
     // --- ERC-20 -----------------------------------------------------------
 
+    /// Arc publishes this view on USDC at 0x3600...0000, and its exchange guide tells
+    /// an integrator to call it before submitting a withdrawal. The mapping above is
+    /// public, so this is the same answer under the name production uses. The two
+    /// spellings are both Arc's: its prose says blocklist, its function says
+    /// `isBlacklisted`.
+    function isBlacklisted(address account) external view returns (bool) {
+        return blocklisted[account];
+    }
+
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
@@ -108,7 +134,12 @@ contract MockUSDC {
 
         uint256 allowed = allowance[from][msg.sender];
         if (allowed < amount) revert InsufficientAllowance(allowed, amount);
-        // Infinite approval is not decremented, matching Circle's implementation.
+        // An infinite approval is left alone here. Arc documents `approve` and
+        // `transferFrom` without saying whether the maximum is exempt, so the exemption
+        // is this mock's choice rather than a fact about Arc. It has one consequence for
+        // tests: an assertion reading the allowance across a spend proves nothing while
+        // the approval is the maximum. A test that means to watch the allowance move
+        // approves a finite amount, the way ArcParity.t.sol and RevokerTest do.
         if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
 
         _move(from, to, amount);

@@ -142,11 +142,12 @@ contract IdempotencyTest is Base {
     // ------------------------------------------ token-layer failures unwind
 
     /**
-     * Arc enforces the USDC blocklist at RUNTIME, and there is no view to pre-check
-     * it. A spend to a newly blocklisted vendor therefore fails inside the token,
-     * after this contract has already written the nonce and the window bucket. The
-     * only correct outcome is that all of it unwinds — and then the same nonce works
-     * once the recipient is cleared.
+     * Arc enforces the USDC blocklist at RUNTIME. A caller can ask `isBlacklisted`
+     * first, and that answer can go stale before the transaction executes, which is
+     * Arc's own second enforcement point. A spend to a newly blocklisted vendor
+     * therefore fails inside the token, after this contract has already written the
+     * nonce and the window bucket. The only correct outcome is that all of it
+     * unwinds — and then the same nonce works once the recipient is cleared.
      */
     function test_blocklistedRecipient_unwindsTheEntireSpend() public {
         bytes32 id = grant(simpleParams());
@@ -180,6 +181,35 @@ contract IdempotencyTest is Base {
 
         assertFalse(mm.isNonceUsed(id, nonce));
         assertEq(mm.getMandate(id).spendCount, 0);
+    }
+
+    /**
+     * `spendable` quotes a number the blocklist will refuse, and Arc's own pre-check is the
+     * only way to see it coming. The view is `isBlacklisted`, published on USDC at
+     * 0x3600...0000, and Arc's exchange guide tells an integrator to call it before sending.
+     * `spendable` deliberately does not, because its answer would go stale in the same block
+     * it was computed — Arc re-checks the status at execution, so a quote that filtered on it
+     * would be no more trustworthy and would read as a promise the token can break. The
+     * honest arrangement is the one asserted here: `spendable` stays silent, the spend
+     * unwinds, and a caller wanting the earlier warning asks the token directly.
+     */
+    function test_spendable_quotesAnAmountTheBlocklistWillRefuse() public {
+        bytes32 id = grant(simpleParams());
+        bytes32 nonce = bytes32("quoted-then-refused");
+        assertEq(mm.spendable(id), usd(100), "the whole perTxCap is quotable to begin with");
+
+        token.setBlocklisted(vendor, true);
+        assertTrue(token.isBlacklisted(vendor), "Arc's pre-check answers under production's name");
+        assertEq(mm.spendable(id), usd(100), "spendable is unmoved, because it never looks");
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MockUSDC.AccountBlocklisted.selector, vendor));
+        mm.spend(id, vendor, usd(100), REF, nonce);
+
+        token.setBlocklisted(vendor, false);
+        assertFalse(token.isBlacklisted(vendor), "the pre-check clears when the status clears");
+        payWithNonce(id, vendor, usd(100), nonce);
+        assertEq(token.balanceOf(vendor), usd(100), "the quote was right about everything else");
     }
 
     /**
