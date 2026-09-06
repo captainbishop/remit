@@ -11,13 +11,15 @@ re-derive these numbers against whatever commit is handed over.
 
 ## In scope
 
-The in-scope code is one file, 2,764 lines, **17,888 bytes of runtime bytecode**
+The in-scope code is one file, 2,767 lines, **17,888 bytes of runtime bytecode**
 (initcode 18,370), leaving 6,688 bytes under the EIP-170 limit.
 
 That figure describes the tree named above rather than the deployed contract, and it comes
 from the `forge build --sizes` run recorded in `evidence/sizes-v2.log`, made on 2026-09-05
 against the same warm `out/` the 320-test campaign in `evidence/deep-v4.log` used, so it
-measures the bytecode those tests exercised. Deployed v1 is 11,572 bytes, confirmed by its
+measures the bytecode those tests exercised. The line count moved from 2,764 to 2,767 on
+2026-09-06, when three comment lines were added to `spendable`'s `@return` tag. The byte
+figures are unchanged by that, because a comment leaves no bytecode behind. Deployed v1 is 11,572 bytes, confirmed by its
 own on-chain code length, and that is the number most of this repo's other documents quote.
 v2 is 6,316 bytes larger than what is deployed. The co-signature rework and `spendableAcross`
 are the bulk of that, with `clearReservation` and the payer-nominated revoker the most recent
