@@ -4290,7 +4290,10 @@ still be hiding there.
   What licenses skipping those removals is directional rather than convenient: adding a test can
   only enlarge the killer set, so the 84-mutant sweep recorded above cannot have regressed under
   three new tests. A bare run of either target is still the only thing that re-establishes a
-  census, and #14 owns it.
+  census, and the paragraph directly below is the one that supplies it. [**That clause used to
+  assign the run to #14**, which is wrong twice over: the bare run had already happened by the time
+  the sentence was read back, on the next line, and #14 turned out to be a sweep of the two test
+  doubles that never owed a census. #11's census at 320 supersedes both.]
   **A bare run happened on 2026-08-30, over four targets, and the census is 95.** #24 changed the
   bodies of `spend`, `approveCosignFor`, `withdrawCosign` and `revoke`, and those four were chosen by
   a code-only comparison of every target's body against `db1c08c` rather than by eye — which is what
@@ -4411,14 +4414,34 @@ still be hiding there.
   response, then one `cast call`, converts it into an observation.
 - **Whether Arc's USDC applies its blocklist to the *spender* leg, not only to payer and
   recipient.** New on 2026-08-29, and it comes out of the mock rather than the contract:
-  `MockUSDC` has no blocklist at all, so `spend` has never run against a token that could refuse
-  on account of the delegate. Arc's porting guide says a local EVM cannot reproduce blocklist
-  enforcement, which makes this unanswerable here by construction. It matters because the answer
-  decides whether a blocked delegate produces a clean `TransferFailed` or a mandate that looks
-  live in every view and refuses every spend — the same display-versus-enforcement split F35 and
-  F36 describe, arriving from outside the contract. One `cast call` against
-  `0x3600…0000` for whatever blocklist view it exposes, plus one `spend` attempt from a blocked
-  delegate if the faucet will produce one, settles it.
+  `MockUSDC` checks `from` and `to` and never `msg.sender`, so `spend` has never run against a
+  token that could refuse on account of the delegate. **The sentence here used to say the mock had
+  no blocklist at all, and that was false on the day it was written**: `mapping(address => bool)
+  public blocklisted` has been in the file since the root commit, and the two checks it feeds have
+  been in `_move` just as long — what the mock lacks is the *spender* leg, which is a narrower and
+  more useful complaint. The mock has since grown `isBlacklisted(address)`, the view Arc publishes,
+  so the surface is wider than this bullet once claimed and the gap it names is still open. It
+  matters because the answer decides whether a blocked delegate produces a clean
+  `TransferFailed` or a mandate that looks live in every view and refuses every spend — the same
+  display-versus-enforcement split F35 and F36 describe, arriving from outside the contract. One
+  `cast call` against `0x3600…0000` for whatever blocklist view it exposes, plus one `spend`
+  attempt from a blocked delegate if the faucet will produce one, settles it.
+
+  **What "unanswerable here by construction" was missing, and it is an instrument rather than an
+  argument.** The porting guide's step this repository quotes — run the suite against Arc Testnet,
+  not a local simulator — is followed immediately by **"Exercise the revert paths"**, which names a
+  seeded blocklisted address Arc Testnet maintains for exactly this purpose:
+  `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`, index 1 of the public test mnemonic, with its
+  derivation command published at `/arc/references/contract-addresses.mdx:189`.
+  So the local half stays unanswerable while the *testnet* half has a documented tool, and the
+  repository quoted the first step and stopped one step short of it.
+
+  **That address exercises the `from` and `to` legs and cannot exercise the spender leg**, which is
+  a second reason beyond the faucet reason given below. Arc's pre-mempool stage rejects any
+  transaction from a blocklisted sender at the RPC node, so the seeded address cannot send a
+  `spend` at all — it can only appear as a payer or a recipient inside someone else's transaction.
+  Answering the spender question needs a delegate that Arc blocklists while some other address
+  pays for the gas, which the seeded address cannot supply on its own.
 
 - **Whether Arc's USDC precompile answers `EXTCODESIZE` with anything.** Added 2026-09-02 with F49.
   The constructor refuses a non-zero ERC-8004 registry with no code, and it deliberately leaves
@@ -4432,7 +4455,10 @@ still be hiding there.
 self-transfer `Transfer` emit, the precompile `transferFrom` against a logging recipient, the
 unanswered `validationRequest` plus its `cast call`, and the spender-leg blocklist question. The
 first three are each a single observation that turns a documented argument into a measurement; the
-fourth may not be reachable on a faucet-funded account, and if it is not, it stays on this list.
+fourth is harder than a faucet problem, for the reason its own bullet now gives — Arc's seeded
+blocklisted address cannot be the sender of anything, so it reaches the `from` and `to` legs and
+not the spender leg. If no separately funded blocklisted delegate can be arranged, it stays on
+this list.
 
 **A fifth item joined the list on 2026-09-02 and it is a read rather than a transaction**: the
 `cast code` above. It is grouped here because it shares the property that makes the other four
