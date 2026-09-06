@@ -1019,7 +1019,7 @@ contract MandateManager {
         // WHY THE OBVIOUS TEST IS WRONG TWICE. `perTxCap < cosignThreshold` fails on both
         // counts. It has the comparison backwards — equality is dead too, since
         // `amount > threshold` and `amount <= perTxCap` cannot both hold when the two are
-        // equal, and this repository already held the receipt: `DESIGN.md:981` records a
+        // equal, and this repository already held the receipt: `DESIGN.md:985` records a
         // 50,000 spend against a 50,000 threshold not tripping the gate on Arc Testnet.
         // `perTxCap` is also not the only ceiling — with F_PER_TX unset, `totalCap = 100`
         // with `cosignThreshold = 100` is equally dead and passes both spellings of the

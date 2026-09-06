@@ -234,7 +234,7 @@ error while doing so.
 correction is a v2 input rather than a note.** This file said `perTxCap <
 cosignThreshold`. Line 492 tests `amount > m.cosignThreshold` *strictly* while line 476
 caps `amount <= perTxCap`, so equality is dead too — and this repository already held
-the receipt proving it, at `DESIGN.md:981`: a 50,000 spend against a 50,000 threshold
+the receipt proving it, at `DESIGN.md:985`: a 50,000 spend against a 50,000 threshold
 required no co-signature on Arc Testnet. `perTxCap <= cosignThreshold` is the correct
 comparison, and it remains incomplete: with `F_PER_TX` unset the ceiling on a single spend is
 `min(totalCap, window caps)` rather than `perTxCap`, so `totalCap = 100` with
@@ -363,7 +363,7 @@ trail with no error, which is worse than a cliff no caller can reach.
 **How it went missing.** This is one of three "documented soft spots" that the real-money
 decision of 2026-08-24 turned from curiosities into real decisions. The other two — the
 unreachable cosign requirement and the misleading `NotPayer()` — are both above. This one is
-recorded in `README.md:481`, `FORGE.md:288` and the test's own header, and was named in the
+recorded in `README.md:481`, `FORGE.md:292` and the test's own header, and was named in the
 same breath as the other two when the decision was made, and it still reached this file's
 "changelist" section in none of them. All three were documented and two of the three were
 listed. **A list assembled by remembering what belongs on it will be short by about a
@@ -456,7 +456,7 @@ would be inventing a behaviour to test. `THREAT-MODEL.md`'s F1 entry says so, so
 asymmetry reads as a decision rather than an omission. The Solidity suite was **157** test
 functions by static count across eleven files at #22, up two net — a static count, not a
 `forge test` count, and therefore **unverified** then, because forge did not run in the
-environment these edits were made in, and `forge test` reports **323** today.
+environment these edits were made in, and `forge test` reports **325** today.
 
 **What it broke.** `DESIGN.md`'s flagship worked example and the narrative `THREAT-MODEL.md`
 F2 is built on are now un-creatable for a *second and independent* reason:
@@ -572,7 +572,7 @@ and v2 is a different contract at a different address, so nothing that decodes v
 affected by renaming the error here. Both selectors were computed with this repository's own
 keccak implementation, which was **validated against three values already known** — the ERC-20
 `Transfer` topic0, Remit's own `Spend` topic0, and `keccak256("Remit:v1")` — before being
-trusted on new ones; `0x1435e357` was then independently corroborated by `DESIGN.md:1193`,
+trusted on new ones; `0x1435e357` was then independently corroborated by `DESIGN.md:1197`,
 which records it from a real testnet revert. That check earned its keep: two fabricated
 selectors had already been written into a contract comment and had to be removed. British
 spelling was chosen to match the contract, which already says "authorises"; the American

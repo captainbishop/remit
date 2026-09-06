@@ -271,7 +271,7 @@ test('construction: a cosign gate that can never fire is refused, measured again
   // The gate tests `amount > threshold` STRICTLY, so equality is dead: an amount both
   // above the threshold and within a per-transaction cap of the same value cannot exist.
   // Confirmed on Arc Testnet before it was ever fixed — a 50,000 spend against a 50,000
-  // threshold did not trip the gate (DESIGN.md:981).
+  // threshold did not trip the gate (DESIGN.md:985).
   assert.throws(() => gate({ perTxCap: usdc('50'), cosignThreshold: usdc('50') }), /can never fire/);
   // One base unit lower and the gate is alive, which is what makes the bound exact rather
   // than merely conservative.

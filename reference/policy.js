@@ -532,7 +532,7 @@ function createMandate(spec) {
   //
   // The obvious test, `perTxCap < cosignThreshold`, is wrong twice over: the comparison
   // is backwards, since equality is dead too (`amount > threshold` and `amount <= perTxCap`
-  // cannot both hold when they are equal — confirmed on Arc Testnet, DESIGN.md:981), and
+  // cannot both hold when they are equal — confirmed on Arc Testnet, DESIGN.md:985), and
   // perTxCap is not the only ceiling, since `totalCap = 100` with `cosignThreshold = 100` and
   // no per-transaction cap is equally dead.
   if (cosignThreshold !== null) {

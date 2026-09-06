@@ -2362,7 +2362,7 @@ no one took.
 
 **Severity: informational · Status: open, one comment · Confidence: certain, and this is the weakest finding in the document.**
 
-`MockRegistries.sol:88` declares `error NoSuchRequest(bytes32 requestHash)` and reverts with it
+`MockRegistries.sol:124` declares `error NoSuchRequest(bytes32 requestHash)` and reverts with it
 for an unknown request. Its **own header** records that the live registry does something
 different: on 2026-08-24 three non-existent request hashes were queried directly and all three
 reverted with the standard `Error(string)` selector `0x08c379a0` and the string `"unknown"`.
@@ -2378,13 +2378,17 @@ narrowing looks like it would do. Narrowing either arm to
 `catch Error(string memory)` — an obvious legibility improvement an auditor might well suggest
 — would **fail loudly** rather than pass while wrong: the mock's custom error would no longer
 be caught, it would propagate, and the gate tests would report the wrong error. The suite
-defends itself here. `tag` and `responseHash` are the two tuple components the mock invents
-(`tag: "compliance"` hardcoded, `responseHash` a `keccak256` of its own arguments), and
-`v2:853` discards both with unnamed placeholders, so their fidelity cannot matter.
+defends itself here. `tag` and `responseHash` are the two tuple components no check reads, because
+`v2:853` discards both with unnamed placeholders, so their fidelity cannot matter to a verdict.
+It did matter to what the mock claimed: until 2026-09-06 `setStatus` hardcoded `tag: "compliance"`
+and derived `responseHash` as a `keccak256` of its own arguments, and the live record decoded in
+`evidence/registry.log` has neither — the tag reads `"verified"` and the hash reads zero beside a
+non-zero response, so the derivation was a relation no measurement supports. Both now carry the
+measured values, and `setStatusFull` lets a test set them by hand.
 
-The residue is one comment in `MockRegistries.sol` recording that the divergence is deliberate
-and that the bare catch is what absorbs it — so the next person to tidy the catch knows what
-they are trading.
+The residue is one comment in `MockRegistries.sol` recording that the divergence in the revert
+*shape* is deliberate and that the bare catch is what absorbs it — so the next person to tidy the
+catch knows what they are trading.
 
 ---
 
@@ -2602,7 +2606,7 @@ because it means the mandate's assumptions changed rather than that the agent lo
 assumptions did not change: the test's mandate was born unspendable at grant time, so the test was
 asserting the brick, not a transfer. `createMandate` now refuses that configuration, the test is
 `test_identityGate_expectedOwnerNotTheSpender_isRefusedAtGrantTime` asserting `BadConfig`, and
-`test/Gates.t.sol:63-69` keeps the whole lesson where a reader of the test will meet it.
+`test/Gates.t.sol:96-110` keeps the whole lesson where a reader of the test will meet it.
 
 ---
 
@@ -2628,7 +2632,7 @@ bricked when the chain would honour it — and F27 above means a reader who is h
 `IDENTITY_TRANSFERRED` has every reason to believe it.
 
 **This is the second instance of one hazard, and the file already knows about it.**
-`test/Gates.t.sol:143-162` documents the first — `maxStaleness == 0` means "no freshness
+`test/Gates.t.sol:352-363` documents the first — `maxStaleness == 0` means "no freshness
 requirement" in the contract, and it says in as many words that *"reference/policy.js currently
 encodes zero the other way. The model is wrong; the contract is right."* A zero the contract
 reads as **unset** and the model reads as a **value** has now appeared twice in the same two
@@ -2662,8 +2666,8 @@ treated `maxStaleness == 0` as "no freshness requirement" from the first line of
 repository's history, and the suite in that same commit asserted exactly that. The zero-as-unset
 hazard is therefore real once rather than twice: `expectedOwner` is the only field where the model
 ever read a zero as a value, and F28's own evidence, both behaviours executed, is untouched by
-this. The citation `test/Gates.t.sol:143-162` was correct at `d4f15ac`, where this row was
-written, and the two lines carrying the claim now sit at `test/Gates.t.sol:293-294`, where the
+this. The citation read `test/Gates.t.sol:143-162` when this row was written at `d4f15ac`, which
+was correct there, and the two lines carrying the claim now sit at `test/Gates.t.sol:361-362`, where the
 model is recorded as agreeing. `CHANGELIST.md:954` keeps the "second instance" phrasing, because
 it describes a shared hazard class rather than a live divergence, and this layer is where its
 correction lives.
@@ -2942,7 +2946,7 @@ it read that `getValidationStatus(0)` names no request, so it answers with an em
 zero-validator check refuses it, and `CredentialMissing` is the only outcome that mandate can reach.
 **Corrected 2026-09-02**, from evidence this repository already held. The live probe of 2026-08-24 found
 a real record filed under `bytes32(0)` — validator `0xB152c3B6436318aD340153f1d30C9BBb8634681A`, agentId
-`16330`, response `1`, tag `"verified"` — which `test/mocks/MockRegistries.sol:68-72` keeps and
+`16330`, response `1`, tag `"verified"` — which `test/mocks/MockRegistries.sol:92-96` keeps and
 `DESIGN.md` reads as a failed attestation carrying a passing label.
 
 Zero is therefore an occupied key, and a mandate keyed there reads whatever a stranger filed. Usually the
@@ -3995,7 +3999,7 @@ still be hiding there.
   a throwaway `contracts/LintProbe.sol` carrying four deliberate violations made the same
   bare invocation report two warnings, and a second run against a warm cache printed
   `No files changed, compilation skipped` *together with* both warnings, so linting does not
-  depend on compiling. `FORGE.md:550-583` carries the method and the numbers.
+  depend on compiling. `FORGE.md:554-587` carries the method and the numbers.
 
   The commenting asymmetry is real and the reason for it is not established. Both casts have
   the same shape — `uint64` of a `uint256` divided by a `uint32` `subLength` — and only the

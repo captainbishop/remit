@@ -308,7 +308,7 @@ that disables the depositor's own control with no error. The condition is **not*
 
 Line 492 tests `amount > m.cosignThreshold`, strictly, and line 476 caps
 `amount ≤ perTxCap`, so `perTxCap == cosignThreshold` is *also* dead, and this repo has
-a live receipt proving it: `DESIGN.md:981` records a 50,000 spend against a 50,000
+a live receipt proving it: `DESIGN.md:985` records a 50,000 spend against a 50,000
 threshold that did not trip the cosign check on Arc Testnet. The test is `perTxCap <=
 cosignThreshold`.
 
@@ -610,7 +610,7 @@ least true.
 
 **The cosign check was off by one**, and this repository already held a live Arc
 receipt disproving it — a 50,000 spend against a 50,000 threshold that did not require
-a cosignature, recorded at `DESIGN.md:981`. The correct operator is `<=`, and the check
+a cosignature, recorded at `DESIGN.md:985`. The correct operator is `<=`, and the check
 is incomplete without `F_PER_TX` anyway. `CHANGELIST.md` carries the same error and needs
 correcting before v2.
 

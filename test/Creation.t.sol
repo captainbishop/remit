@@ -474,7 +474,7 @@ contract CreationTest is Base {
      *
      * WHY THE CHANGELIST'S CONDITION WAS WRONG TWICE. It proposed `perTxCap <
      * cosignThreshold`. The comparison is backwards — equality is dead too, and this
-     * repository already held the receipt for that, at `DESIGN.md:981`, where a 50,000
+     * repository already held the receipt for that, at `DESIGN.md:985`, where a 50,000
      * spend against a 50,000 threshold did not trip the requirement on Arc Testnet.
      * `perTxCap` is also not the only ceiling, so the check misses whole families of
      * dead configuration. `L3-VAULT.md` inherited the same error from the changelist.

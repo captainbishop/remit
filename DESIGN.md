@@ -471,10 +471,10 @@ correctness evidence for the whole project.
 `contracts/MandateManager.sol` is the on-chain implementation, written to mirror the
 model, with every deliberate deviation commented at the point it occurs.
 
-`test/` is the Forge port: 323 tests against the real storage layout, covering the same
+`test/` is the Forge port: 325 tests against the real storage layout, covering the same
 ground plus the three properties a model structurally cannot express — transactional
 rollback, storage aliasing in the bucket ring, and packed-`uint96` arithmetic. See
-FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 323 pass now.
+FORGE.md. It first compiled on 2026-08-24 at 140 tests, and all 325 pass now.
 
 ## Status and limits
 
@@ -517,7 +517,7 @@ about case by case.
 **The Solidity compiles and passes its suite, and first did so on 2026-08-24.** It was
 authored with no `solc` and no network access, so that was its first mechanical check.
 Under `solc` 0.8.28 with the optimizer at 200 runs it compiles with no errors, and `forge
-test` reported 140 of 140 then and reports 323 of 323 now: 2,048 fuzz runs across four
+test` reported 140 of 140 then and reports 325 of 325 now: 2,048 fuzz runs across four
 property tests and 49,152 calls across three stateful invariants, with both anti-vacuity
 guards green — so the suite is exercising the engine rather than agreeing with itself.
 
@@ -890,8 +890,12 @@ That last row was an open question this design hedged on rather than resolved, a
 hedge is why nothing needs changing now. `_checkCredential` wraps the registry call in
 `try/catch` and converts either failure shape into `CredentialMissing()`, and
 `MockValidationRegistry` carries a `revertOnUnknown` flag so both shapes are covered by
-tests. The live chain has now picked one. Both stay tested regardless — the registries
-sit behind upgradeable proxies, so today's answer is not permanently today's answer.
+tests. The live chain has now picked one, and since 2026-09-06 the flag defaults to it,
+so the whole suite runs against the arm production takes and the one test that wants the
+zero-tuple shape asks for it by name. It defaulted the other way for the three weeks
+after the probe, which left a single test on the measured arm. Both stay tested
+regardless — the registries sit behind upgradeable proxies, so today's answer is not
+permanently today's answer.
 
 Two incidental findings came out of the same probe. There is a real
 attestation filed under `requestHash == bytes32(0)` — validator

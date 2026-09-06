@@ -51,13 +51,46 @@ contract GatesTest is Base {
      *
      * ERC-721 `ownerOf` REVERTS for a nonexistent token rather than returning the
      * zero address. Without the try/catch an agent sees `ERC721NonexistentToken`
-     * from a contract it has never heard of and cannot tell a burned identity from a
-     * broken registry.
+     * from a contract it has never heard of, and gets a denial it cannot act on.
+     *
+     * What the try/catch does NOT give is the ability to tell a burned identity from a
+     * registry that failed for some other reason — this docstring claimed it did until
+     * 2026-09-06. The test below asserts the confusion instead of denying it.
      */
     function test_identityGate_burnedIdentity_deniesLegibly() public {
         bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, agent));
         identity.burn(AGENT_ID);
         payReverts(id, usd(10), MandateManager.IdentityNotHeld.selector);
+    }
+
+    /**
+     * The catch arm flattens every registry failure into one error, so a burned identity and a
+     * broken registry are indistinguishable to the agent. Both denials are correct — a check
+     * that cannot read the registry must refuse — and the cost is diagnosis: an agent told
+     * `IdentityNotHeld` cannot tell whether to stop asking or to retry later, and a payer
+     * reading the same error cannot tell whether their agent lost the identity or Arc's
+     * registry is having a bad day.
+     *
+     * `RegistryUnavailable` is an error neither `MockRegistries` nor `MandateManager` mentions
+     * anywhere else, and the identity is still held by the spender throughout, so the only way
+     * this can produce `IdentityNotHeld` is the catch arm mapping an unrecognised failure onto
+     * it. The registry is reachable at all here because it is upgradeable in production: the
+     * live one sits behind an ERC-1967 proxy, so "answers differently than it did yesterday" is
+     * a live shape rather than a hypothetical.
+     */
+    function test_identityGate_aBrokenRegistryIsIndistinguishableFromABurnedIdentity() public {
+        bytes32 id = grant(withIdentity(simpleParams(), AGENT_ID, agent));
+        pay(id, usd(10)); // healthy while the registry answers
+
+        identity.setRevertOnOwnerOf(true);
+        assertEq(identity.revertOnOwnerOf(), true, "the registry is now failing, not the identity");
+        payReverts(id, usd(10), MandateManager.IdentityNotHeld.selector);
+
+        // The identity never moved, so the denial was about the registry alone.
+        identity.setRevertOnOwnerOf(false);
+        assertEq(identity.ownerOf(AGENT_ID), agent, "still held by the spender the whole time");
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(20), "and it spends again once the registry answers");
     }
 
     /// CHANGED IN v2 (F33). This test used to grant a mandate pinning `expectedOwner` to `boss`
@@ -146,19 +179,32 @@ contract GatesTest is Base {
         assertEq(token.balanceOf(vendor), usd(10));
     }
 
+    /// With the mock defaulting to Arc's measured shape, this is the reverting-registry path:
+    /// the cleared hash is unknown, the registry fails the call, and `_checkCredential`'s catch
+    /// arm turns that into `CredentialMissing`. Until 2026-09-06 the default was the other way
+    /// round and this test took the zero-tuple path instead, which no measurement supports.
     function test_credentialGate_missingAttestation_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.clear(KYC_HASH);
         payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
     }
 
-    /// Whether the real registry reverts or returns a zero tuple for an unknown hash
-    /// has not been verified against a deployed contract, so both behaviours must
-    /// deny. The try/catch covers one; the `gotValidator == address(0)` check the other.
-    function test_credentialGate_revertingRegistry_alsoDenies() public {
+    /// Which shape the real registry uses for an unknown hash IS verified: three nonexistent
+    /// hashes were queried on Arc Testnet on 2026-08-24 and all three reverted, recorded in
+    /// `test/mocks/MockRegistries.sol` and in `evidence/registry.log`.
+    /// The mock defaults to that arm, so `test_credentialGate_missingAttestation_denies`
+    /// above already covers it,
+    /// and this test carries the other shape — a registry that answers a zero tuple instead
+    /// of failing. Both must deny, because the registries sit behind upgradeable proxies and
+    /// today's answer is not permanently today's answer. The try/catch covers the reverting
+    /// shape; the `gotValidator == address(0)` check covers this one.
+    ///
+    /// This docstring said the opposite until 2026-09-06, claiming the behaviour "has not been
+    /// verified against a deployed contract" three weeks after the probe that verified it.
+    function test_credentialGate_zeroTupleRegistry_alsoDenies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.clear(KYC_HASH);
-        validation.setRevertOnUnknown(true);
+        validation.setRevertOnUnknown(false);
         payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
     }
 
@@ -172,14 +218,37 @@ contract GatesTest is Base {
     }
 
     /**
-     * The test above and the ordinary passing case leave `response` at only 0 or 100, and on a
-     * two-point scale a floor cannot be told apart from a presence check. All three of
-     * `response < c.minResponse`, `response != c.minResponse` and `response == 0` agree on both
-     * points, so either of the last two could stand in for the real one and the suite would stay
-     * green. `evidence/mutgate-sol-census-320.log:87` shows why the census did not settle it: the
-     * run deleted the guard rather than changing its operator, and a deleted guard is caught.
+     * The live registry's one real record, replayed: response 1 under the tag "verified".
+     *
+     * `evidence/registry.log` holds it, filed under `requestHash == bytes32(0)` on Arc Testnet —
+     * validator 0xB152…681A, agent 16330, response 1, tag "verified", responseHash zero. Under the
+     * ERC-8004 convention Arc's own tutorial states, 100 means passed, so a response of 1 is a
+     * failure wearing a reassuring label. That is the shape `MockValidationRegistry`'s header
+     * gives as its own reason for being, and no test could stage it until `setStatusFull`
+     * landed, because `setStatus` hardcoded the tag to "compliance".
+     *
+     * The number decides and the label is never read. A check that trusted the tag would
+     * authorise this spend; the gate refuses it, because 1 falls below the floor of 100.
+     */
+    function test_credentialGate_aReassuringTagOverAFailingScore_denies() public {
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+        validation.setStatusFull(KYC_HASH, boss, AGENT_ID, 1, bytes32(0), "verified", block.timestamp);
+        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+    }
+
+    /**
+     * `test_credentialGate_failingAttestation_denies` and the ordinary passing case leave
+     * `response` at only 0 or 100, and on a two-point scale a floor cannot be told apart from a
+     * presence check. All three of `response < c.minResponse`, `response != c.minResponse` and
+     * `response == 0` agree on both points, so either of the last two could stand in for the real
+     * one and the suite would stay green. `evidence/mutgate-sol-census-320.log:87` shows why the
+     * census did not settle it: the run deleted the guard rather than changing its operator, and
+     * a deleted guard is caught.
+     *
      * A middling score is what separates the three. Here 60 falls short of a floor of 100 and has
-     * to be refused, where a presence check would let it spend.
+     * to be refused, where a presence check would let it spend. The live record replayed just
+     * above rules out `== 0` on its own, since 1 is not zero and still has to be refused, and it
+     * arrived from a measurement rather than from choosing a number to make a point.
      */
     function test_credentialGate_aPartialScoreBelowTheFloor_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
