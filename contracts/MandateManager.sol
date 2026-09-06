@@ -2614,7 +2614,10 @@ contract MandateManager {
     /// @return The largest single spend that would actually go through right now, in USDC base
     /// units — `policyHeadroom` clamped at `type(uint96).max`, then by the payer's allowance to
     /// this contract and their USDC balance. Still silent on the allowlist, the co-signature
-    /// threshold, the two ERC-8004 gates and nonce reuse, all of which `spend` also applies.
+    /// threshold, the two ERC-8004 gates, nonce reuse and Arc's own blocklist, all of which
+    /// `spend` also applies. The blocklist is the one an integrator can check ahead of time,
+    /// by calling `isBlacklisted` on USDC, and the reason this view does not is that Arc
+    /// re-checks the status at execution, so a filtered quote would be no more trustworthy.
     function spendable(bytes32 mandateId) external view returns (uint256) {
         Mandate storage m = _mandates[mandateId];
         if (m.payer == address(0)) return 0;
