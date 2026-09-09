@@ -1,10 +1,16 @@
 # Remit
 
-Bounded, revocable, non-custodial spending authority for autonomous agents on Arc.
+Bounded, revocable, non-custodial spending authority over USDC on Arc.
 
-A payer grants an agent capped, rate-limited, allowlisted, expiring authority to spend
+A payer grants a delegate capped, rate-limited, allowlisted, expiring authority to spend
 the payer's USDC, and the funds stay in the payer's wallet throughout. Every spend carries
 an idempotency nonce and emits a reconcilable event, and the payer can revoke at any time.
+
+The delegate is usually an autonomous agent, which is the case arriving with a deadline
+attached. The contract names a spender address and applies the same rules whatever holds
+it, so a checkout provider, a supplier-payment system and a trading bot are the same
+object to it as an agent is. **[Who grants a mandate](#who-grants-a-mandate)** works those
+through.
 
 ## The problem
 
@@ -81,17 +87,122 @@ Arc has deterministic finality, so once the revocation is included it cannot be 
 spend already sitting in the mempool can still be included ahead of it, which makes
 revocation immediate on inclusion rather than on submission.
 
+## Who grants a mandate
+
+The contract's vocabulary is a spender address, caps, windows, an allowlist, a validity
+window and an optional co-signer. None of those words says "agent", so the same seven
+bounds describe several arrangements that today use different infrastructure for each.
+
+**A person delegating to their own agent.** The case the design was written for. A
+research assistant with a 50 USDC monthly window and an allowlist of three API providers
+can pay for what it needs and cannot pay anyone else, including itself.
+
+**A company delegating to a system.** Supplier payments, contractor payouts, expense
+reimbursement. The window is the department's monthly budget, the allowlist is the
+approved-vendor file, and the co-signature threshold is the amount above which a human
+signs. The delegate holding the key can be a payment service rather than a model.
+
+**A platform that moves other people's money.** A checkout provider, a marketplace paying
+sellers, a payroll processor. What changes here is that each payer grants their own mandate,
+so the platform's authority over any one customer is that customer's own policy rather than a
+blanket approval — and the customer can end it without asking the platform, because
+`approve(usdc, remit, 0)` is enforced by USDC.
+
+**A trading bot.** [Traders on-chain](#traders-on-chain) covers this one, because the
+right configuration is different enough to be worth its own section.
+
+What these share is the reason for putting the policy on-chain rather than in the
+delegate's configuration: the payer, the delegate and anyone auditing later read the same
+rules and the same history, and none of them has to accept the others' word for what was
+permitted.
+
+## When a payment gets refunded
+
+A cancelled flight, a returned order, a job the agent paid for and never received. This is
+ordinary, and it starts from a fact about the contract: a refund and a spend are unrelated
+events to it. The refund is a plain USDC transfer from the merchant back to the payer's
+wallet, which restores the payer's *balance* with no help from Remit. What it does not
+restore is the mandate's *headroom*: `totalSpent` is monotonic — written once per spend and
+only upward — so an 800 USDC ticket that was refunded in full has still consumed 800 USDC
+of a lifetime cap.
+
+Two things follow, and the first is a configuration choice available today.
+
+**Shape the mandate so the loss heals.** A rolling window's counters age out; a lifetime
+total never does. For any flow with refunds in it — travel, retail, marketplaces — make the
+windows the real control, set a distant `expiresAt`, and omit the lifetime cap. That
+satisfies the requirement that every mandate carry either a lifetime total or an expiry
+while leaving only self-healing counters in the enforcement path, so a refunded booking
+costs the delegate one window's worth of room and gets it back when the window rolls past.
+A mandate with a lifetime cap and no expiry is the configuration that pays the full cost of
+a refund, and the one to avoid when refunds are expected.
+
+**Reconcile the refund against the payment.** `spend` carries `ref`, a `bytes32` the
+spender chooses and the contract logs without interpreting. Putting the booking reference
+in it means a `Spend` event and the merchant's later refund can be matched by whatever
+reads the chain — an accounting system, an indexer, the payer's own dashboard. This
+repository publishes no convention for what goes in `ref`, which is a gap rather than a
+feature; anything reconciling Remit payments today has to agree on one with its
+counterparty.
+
+What Remit does not have is a `refund` entry point that returns money and decrements the
+counters in one transaction. The design has been worked through and it is not in this
+contract, and the reason it is not is an attack it opens: a function that decrements
+`totalSpent` when USDC arrives lets a third party restore spending authority the payer
+believed was consumed. Paying 50 USDC into the payer's wallet would hand a delegate 50 USDC
+of fresh room, which against a compromised delegate is an attacker choosing when the
+mandate comes back to life. Closing that requires a per-recipient ledger of what each
+address was actually paid, written on the hottest function in the contract, plus a change
+to the meaning of a counter that every document here and every reader of the `Spend` event
+currently treats as one-directional. It is a v2-or-later decision with a test suite behind
+it, not something to describe as safe in advance.
+
+## Traders on-chain
+
+A trading bot is a delegate with an unusually specific failure mode: the key sits on a
+machine that is online continuously, and if it leaks, the loss is the whole balance the bot
+can reach. Memecoin buying, NFT minting and any automated strategy on Arc are the same
+shape, and the degen end of that spectrum carries the most exposure, since it is where the
+most keys sit on the most machines running the most unattended code. A trading bot already
+holds a key and already sends transactions, so adopting a mandate changes one thing on the
+bot's side: the USDC it spends comes from the payer's wallet through `spend` rather than
+from its own balance.
+
+**Allowlist the venue, not the asset.** The token of the hour changes daily; a router
+address or a mint contract does not. `F_ALLOWLIST` over the contracts the bot is permitted
+to pay means a stolen bot key cannot send the payer's USDC to the thief's own address at
+all. It can only trade badly against a venue the payer chose, which turns a total loss into
+a bounded one. Combined with the rule that a spend to the payer's own address reverts, the
+mandate has no path that routes value anywhere the payer did not name.
+
+The rest of the bounds map onto trading directly. `perTxCap` is the maximum position size,
+and a rolling window is maximum capital deployed per day or per week, which also throttles a
+bot that has started behaving strangely without requiring anyone to notice first. The
+co-signature threshold puts a human above a chosen size while leaving everything under it
+automatic. `revoke` is the kill switch, and naming a separate revoker means the address that
+can stop the bot is not the address the bot uses — a cold key can hold it.
+
+Two limits belong here rather than in a footnote. Remit is outbound-only: it sees USDC
+leaving the payer and knows nothing about what comes back, so `totalSpent` measures gross
+USDC deployed rather than net profit or loss. A bot that recycles the same capital ten times
+consumes ten times its position size against a lifetime cap, which is the same conclusion
+the refund case arrives at from the other direction — for anything that recycles capital,
+the windows are the control and a lifetime total is a blunt instrument. The second limit is
+scope: this contract is one token on one chain, USDC on Arc, and much of the activity
+described here happens elsewhere today.
+
 ## The limits
 
 A payer who does not know these will over-trust the primitive.
-[THREAT-MODEL.md](THREAT-MODEL.md) §2 states all seven in full, with the reasoning.
+[THREAT-MODEL.md](THREAT-MODEL.md) §2 states the trust boundaries in full, with the
+reasoning for each.
 
-Remit bounds what the *agent* can do through *this contract*. It cannot bound what the
+Remit bounds what the *delegate* can do through *this contract*. It cannot bound what the
 payer's own account does. If the payer is a smart account, any module with execution
 rights on it can move the same USDC without consulting Remit at all.
 
-A mandate names an address, so whoever holds that key is the agent. Without an allowlist,
-the agent can pay itself, up to the caps.
+A mandate names an address, so whoever holds that key is the delegate. Without an
+allowlist, the delegate can pay itself, up to the caps.
 
 Circle can freeze either side of a payment, and both ERC-8004 registry addresses are
 fixed at deployment and can never be changed.
@@ -125,8 +236,9 @@ decisions behind each field.
 
 Two documents are about the limits rather than the capabilities, and they are the ones to
 read before trusting anything here with money. **[THREAT-MODEL.md](THREAT-MODEL.md)** is the
-adversarial review — what Remit protects, what it does not, and twenty-eight findings against the
-current surface. **[IMMUTABILITY.md](IMMUTABILITY.md)** answers the question a payer should
+adversarial review — what Remit protects, what it does not, and fifty-one findings against the
+current surface, counted from that file's own headings.
+**[IMMUTABILITY.md](IMMUTABILITY.md)** answers the question a payer should
 ask second: the deployed contract has no admin, no pause and no upgrade path, so what happens
 when something is wrong with it? It includes the migration runbook and the two kill switches,
 one of which lives in USDC rather than in this codebase.
