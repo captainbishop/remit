@@ -2243,10 +2243,13 @@ test('credential gate: requires a passing, fresh attestation', () => {
   // no attestation at all
   assert.equal(evaluate(m, req(usdc('10')), withCred(() => null)).reason, Denial.CREDENTIAL_MISSING);
 
-  // failing response (100 = passed per the ERC-8004 tutorial)
+  // failing response (100 = passed per the ERC-8004 tutorial). F13 makes this a DIFFERENT
+  // code from the absence above, and the two assertions sitting four lines apart is the
+  // point of the split: they asserted the same string until then, so this test could not
+  // tell a validator who has not filed yet from one who filed a refusal.
   assert.equal(
     evaluate(m, req(usdc('10')), withCred(attestation({ response: 0n }))).reason,
-    Denial.CREDENTIAL_MISSING,
+    Denial.CREDENTIAL_FAILED,
   );
 
   // passing but stale
@@ -2384,6 +2387,109 @@ test('ATTACK: an attestation about a different agent does not satisfy the gate',
   const d = evaluate(m, req(usdc('10')), withCred(attestation({ agentId: 999n })));
   assert.equal(d.allowed, false);
   assert.equal(d.reason, Denial.CREDENTIAL_WRONG_AGENT);
+});
+
+// --- F13 grant-time registry reads: the model mirror of the contract's two helpers ---------
+// These call createMandate with its SECOND argument, the ctx that wires the registry resolvers,
+// and assert the writer reaches the same verdict the enforcer would at the same instant. The
+// ~24 construction sites above pass no ctx and are unchanged: a resolver-less grant is the
+// pre-F13 pure constructor, which is why adding the read churned none of them.
+test('grant-time identity: createMandate mirrors _requireIdentityAtGrant', () => {
+  const spec = {
+    id: n(), payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+    windows: [win(DAY, usdc('500'), 12)], expiresAt: FAR,
+    identity: { agentId: 42n, expectedOwner: AGENT },
+  };
+
+  // owner == spender: the grant stands.
+  assert.doesNotThrow(() => createMandate(spec, { resolveIdentityOwner: () => AGENT }));
+
+  // owner is someone else: refused now, not minted for evaluate to deny on every spend.
+  assert.throws(() => createMandate(spec, { resolveIdentityOwner: () => OTHER }), /identity not held at grant/);
+
+  // owner absent — ownerOf reverts (burned/unregistered token) or answers address(0). The
+  // contract folds both into `owner == address(0) || owner != spender`; so does this.
+  assert.throws(() => createMandate(spec, { resolveIdentityOwner: () => null }), /identity not held/);
+  assert.throws(() => createMandate(spec, { resolveIdentityOwner: () => ZERO_ADDRESS }), /identity not held/);
+
+  // No resolver wired: the pre-F13 pure constructor. The grant stands — the caller asked for no
+  // registry read. This is the one documented divergence from evaluate's resolver-less DENY, and
+  // it is safe: the mandate is not dead, only its early warning is skipped, because evaluate
+  // re-reads the registry at spend and denies IDENTITY_NOT_HELD there. Proven on the next line.
+  const ungated = createMandate(spec);
+  assert.equal(
+    evaluate(ungated, req(usdc('10')), { now: 1, resolveIdentityOwner: () => OTHER }).reason,
+    Denial.IDENTITY_NOT_HELD,
+  );
+});
+
+test('grant-time credential: mirrors _requireCredentialAtGrant — identifiers now, verdict at spend', () => {
+  const spec = (over = {}) => ({
+    id: n(), payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+    windows: [win(DAY, usdc('500'), 12)], expiresAt: FAR,
+    identity: { agentId: 42n, expectedOwner: AGENT },
+    credential: { validator: BOSS, requestHash: '0xkyc', minResponse: 100n, maxStaleness: 30n * BigInt(DAY), ...over },
+  });
+  const ctx = (resolveCredential) => ({ resolveIdentityOwner: () => AGENT, resolveCredential });
+
+  // A correct, filed attestation: identifiers agree, grant stands.
+  assert.doesNotThrow(() => createMandate(spec(), ctx(attestation())));
+
+  // ABSENCE is PERMITTED — the asymmetry with identity above, and the whole of F43. The validator
+  // may file between this grant and the first spend, and `spend` would honour that, so refusing
+  // here would withhold a mandate the enforcer accepts. Identity refuses absence because
+  // owner-not-spender is permanent; a missing attestation is a delay that resolves itself.
+  assert.doesNotThrow(() => createMandate(spec(), ctx(() => null)));
+
+  // A zero-validator tuple is the registry's other "never seen" shape (the contract's explicit
+  // `gotValidator == address(0)` return), treated exactly like the revert: permitted.
+  assert.doesNotThrow(() => createMandate(spec(), ctx(attestation({ validator: ZERO_ADDRESS }))));
+
+  // A FILED, FAILING attestation is PERMITTED at grant: minResponse is the verdict evaluate
+  // re-asks every spend, not an identifier createMandate owns. It is deliberately unread here.
+  assert.doesNotThrow(() => createMandate(spec(), ctx(attestation({ response: 0n }))));
+
+  // Wrong validator is an IDENTIFIER: refused now, because every spend would answer it too.
+  assert.throws(() => createMandate(spec(), ctx(attestation({ validator: OTHER }))), /CREDENTIAL_WRONG_VALIDATOR/);
+
+  // Wrong agent is an IDENTIFIER: refused now (the fallback inherits identity's agent 42).
+  assert.throws(() => createMandate(spec(), ctx(attestation({ agentId: 999n }))), /CREDENTIAL_WRONG_AGENT/);
+
+  // No resolver wired: pre-F13 pure constructor, grant stands.
+  assert.doesNotThrow(() => createMandate(spec()));
+});
+
+test('grant-time credential: agentId fallback and the documented no-binding gap', () => {
+  const base = {
+    id: n(), payer: PAYER, spender: AGENT, perTxCap: usdc('100'),
+    windows: [win(DAY, usdc('500'), 12)], expiresAt: FAR,
+  };
+
+  // Explicit credential.agentId 0 WITH an identity gate: the check inherits agent 42 (the same
+  // `c.agentId != 0 ? c.agentId : fallbackAgentId` the contract computes), so an attestation
+  // about a stranger is refused at grant, and one about 42 is accepted.
+  const withIdentity = {
+    ...base,
+    identity: { agentId: 42n, expectedOwner: AGENT },
+    credential: { validator: BOSS, requestHash: '0xkyc', minResponse: 100n, maxStaleness: null, agentId: 0n },
+  };
+  const idCtx = (rc) => ({ resolveIdentityOwner: () => AGENT, resolveCredential: rc });
+  assert.doesNotThrow(() => createMandate(withIdentity, idCtx(attestation({ agentId: 42n }))));
+  assert.throws(() => createMandate(withIdentity, idCtx(attestation({ agentId: 999n }))), /CREDENTIAL_WRONG_AGENT/);
+
+  // DOCUMENTED GAP: both ids unset (no identity gate, credential.agentId 0). With no id to bind
+  // to, the grant accepts an attestation about anyone — the same weakening evaluate carries at
+  // spend, and refused to be closed at either site because a grant the enforcer honours must not
+  // be refused by the writer. What keeps it bounded: the validator is still checked, same tuple.
+  const unbound = {
+    ...base,
+    credential: { validator: BOSS, requestHash: '0xkyc', minResponse: 100n, maxStaleness: null, agentId: 0n },
+  };
+  assert.doesNotThrow(() => createMandate(unbound, { resolveCredential: attestation({ agentId: 999n }) }));
+  assert.throws(
+    () => createMandate(unbound, { resolveCredential: attestation({ agentId: 999n, validator: OTHER }) }),
+    /CREDENTIAL_WRONG_VALIDATOR/,
+  );
 });
 
 // ---------------------------------------------------------------------------

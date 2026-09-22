@@ -463,6 +463,42 @@ contract CreationTest is Base {
     }
 
     /**
+     * F52. The rule the two tests above state, on the third role field — the one both missed.
+     *
+     * `approveCosignFor` authorises on `msg.sender == m.cosigner`, and no path in this contract
+     * makes an external call to itself, so no approval can ever be written for a mandate that
+     * names the manager as its cosigner. The failure is total rather than partial: there is no
+     * `setCosigner`, and no path anywhere clears a mandate, so the salt answers `MandateExists`
+     * forever while every spend above the threshold answers `CosignRequired` for the life of the
+     * grant. `getMandate` reports F_COSIGN set and a plausible cosigner throughout.
+     *
+     * That is the same defect the self-cosigner test names — a grant carrying the appearance of a
+     * control and none of its substance — arrived at from the opposite direction. There the
+     * supervision was real and worthless because one party wore both hats; here it is unreachable
+     * because the party named cannot act. A payer reading `getMandate` cannot tell either from a
+     * supervised mandate, which is why both are refused at the grant rather than documented.
+     */
+    function test_f52_theContractAsItsOwnCosigner_reverts() public {
+        MandateManager.MandateParams memory p = withCosign(simpleParams(), address(mm), usd(10));
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.BadConfig.selector);
+        mm.createMandate(bytes32("ct3"), p);
+
+        // The guard reaches exactly one address, pinned against the same three that
+        // `test_f48_theContractAsItsOwnSpender_reverts` uses, and either registry sits behind an
+        // upgradeable proxy that could one day hold an implementation calling `approveCosignFor`,
+        // so refusing them here would refuse a configuration that could work — which is the line
+        // between this guard and an over-reach.
+        address[3] memory stillLegal = [address(token), address(identity), address(validation)];
+        for (uint256 i = 0; i < stillLegal.length; i++) {
+            MandateManager.MandateParams memory q = withCosign(simpleParams(), stillLegal[i], usd(10));
+            vm.prank(payer);
+            bytes32 id = mm.createMandate(bytes32(uint256(0xf52) + i), q);
+            assertEq(mm.getMandate(id).cosigner, stillLegal[i], "refused as a recipient, legal as a cosigner");
+        }
+    }
+
+    /**
      * The requirement must be able to FIRE, measured against the whole policy.
      *
      * `spend` demands a signature when `amount > cosignThreshold`, strictly, so the

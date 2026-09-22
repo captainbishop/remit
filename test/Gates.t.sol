@@ -3,17 +3,17 @@ pragma solidity 0.8.28;
 
 import {Base} from "./Base.t.sol";
 import {MandateManager} from "../contracts/MandateManager.sol";
-import {SilentRegistry} from "./mocks/MockRegistries.sol";
+import {SilenceableRegistry, SilentRegistry} from "./mocks/MockRegistries.sol";
 
 /**
  * The two ERC-8004 checks: does the spender still hold the agent identity the payer
  * delegated to, and does a named validator still vouch for it?
  *
- * Both checks are read at SPEND time, not at grant time. That is the entire value:
- * a mandate granted to an agent whose compliance attestation later lapses stops
- * working without the payer having to notice. The cost is two external calls per
- * spend, and an external call to a registry that can revert — so both are wrapped
- * in try/catch and both failure modes are tested rather than assumed.
+ * Both checks are read at every SPEND, which is the entire value: a mandate granted to an
+ * agent whose compliance attestation later lapses stops working without the payer having to
+ * notice. Since F13 the grant validates each check's IDENTIFIERS as well, never its verdict;
+ * the F13 section at the foot of this file asserts that division arm by arm. The cost is two
+ * external calls per spend to registries that can revert, so both arms are wrapped and tested.
  */
 contract GatesTest is Base {
     // ================================================== identity gate
@@ -211,10 +211,15 @@ contract GatesTest is Base {
     /// A FAILED attestation differs from a missing one and must be just as fatal.
     /// ERC-8004 encodes failure as a low response value, so a check that looked only
     /// for presence would treat "this agent failed KYC" as authorisation.
+    ///
+    /// The error names that difference as of F13. This test asserted `CredentialMissing`
+    /// until then, which contradicted the line above it: the docstring claimed failure and
+    /// absence were distinct while the assertion accepted the error for absence. `CredentialFailed`
+    /// is the more precise expectation, and it is what makes the first sentence checkable.
     function test_credentialGate_failingAttestation_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.setStatus(KYC_HASH, boss, AGENT_ID, 0, block.timestamp);
-        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+        payReverts(id, usd(10), MandateManager.CredentialFailed.selector);
     }
 
     /**
@@ -233,7 +238,7 @@ contract GatesTest is Base {
     function test_credentialGate_aReassuringTagOverAFailingScore_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.setStatusFull(KYC_HASH, boss, AGENT_ID, 1, bytes32(0), "verified", block.timestamp);
-        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+        payReverts(id, usd(10), MandateManager.CredentialFailed.selector);
     }
 
     /**
@@ -253,13 +258,13 @@ contract GatesTest is Base {
     function test_credentialGate_aPartialScoreBelowTheFloor_denies() public {
         bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
         validation.setStatus(KYC_HASH, boss, AGENT_ID, 60, block.timestamp);
-        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+        payReverts(id, usd(10), MandateManager.CredentialFailed.selector);
     }
 
     /// The other half of the same pair: a score above the payer's floor spends. An equality
     /// check would refuse it, while a payer who set a floor of 60 was asking for a floor, which
     /// admits every score above it. With the test above, the comparison at
-    /// `MandateManager.sol:1618` is pinned as an ordering rather than as a match.
+    /// `MandateManager.sol:1683` is pinned as an ordering rather than as a match.
     function test_credentialGate_aScoreAboveTheFloor_spends() public {
         MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
         p.credential.minResponse = 60;
@@ -511,13 +516,18 @@ contract GatesTest is Base {
      * is raised while decoding, inside MandateManager's own frame, so the catch arm never runs and
      * what reaches the agent carries no selector at all.
      *
-     * The mock holds code and returns zero bytes for whatever is asked, which is what an address
-     * with no code does as well — every call to it succeeds with empty returndata. That is the
-     * version a deployer reaches by mistake, by pasting an address from the wrong chain, and the
-     * constructor's `RegistryHasNoCode` guard refuses it before the deployment exists. This mock is
-     * past that guard by having code, which is why it is a contract rather than an EOA address:
-     * it stands for the case the guard cannot reach, a registry upgraded into returning the wrong
-     * shape.
+     * RE-STAGED BY F13, and the staging is now part of the argument. This test used
+     * `SilentRegistry` — code present, zero bytes returned to every selector — until
+     * `createMandate` began reading both registries itself, at which point no mandate could be
+     * granted against such a registry at all and the spend under test here stopped being
+     * reachable. The registry used now answers properly, is granted against, and is then told to
+     * stop, which is the one route left to the gap F49 documents: a registry upgraded, behind a
+     * proxy, into returning the wrong shape. Both registry addresses are `immutable`, so the
+     * change has to come from inside the registry rather than from repointing this contract.
+     *
+     * Each path spends once before the flip. That is not scene-setting: without it, a refusal
+     * afterwards would be equally consistent with a mandate that was never spendable, and the
+     * assertion would pin nothing to the decode.
      *
      * That residual case is documented rather than handled. Covering it means replacing both typed
      * calls with a raw STATICCALL and validating the answer's length by hand, and the spend is
@@ -526,16 +536,38 @@ contract GatesTest is Base {
      * failing assertion to read instead.
      */
     function test_f49_aRegistryThatAnswersUndecodably_revertsPastTheCatch() public {
-        SilentRegistry silent = new SilentRegistry();
-        assertTrue(address(silent).code.length > 0, "past the constructor guard, which is the point");
+        SilenceableRegistry reg = new SilenceableRegistry();
+        assertTrue(address(reg).code.length > 0, "past the constructor guard, which is the point");
+        reg.mint(AGENT_ID, agent);
+        reg.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp);
 
-        // The identity path decodes an address, so 32 bytes are needed and none arrive.
-        MandateManager mmIdentity = new MandateManager(address(token), address(silent), address(validation));
+        // The identity path decodes an address, so 32 bytes are needed and none will arrive.
+        MandateManager mmIdentity = new MandateManager(address(token), address(reg), address(validation));
         vm.prank(payer);
         token.approve(address(mmIdentity), type(uint256).max);
         MandateManager.MandateParams memory idParams = withIdentity(simpleParams(), AGENT_ID, agent);
         vm.prank(payer);
         bytes32 idGate = mmIdentity.createMandate(bytes32("f49-identity"), idParams);
+
+        // The credential path decodes six fields including a dynamic string, so it needs at
+        // least 192 bytes, and the empty answer fails it the same way. Both paths are
+        // asserted because the two calls sit in different helpers.
+        MandateManager mmCredential = new MandateManager(address(token), address(identity), address(reg));
+        vm.prank(payer);
+        token.approve(address(mmCredential), type(uint256).max);
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
+        vm.prank(payer);
+        bytes32 credGate = mmCredential.createMandate(bytes32("f49-credential"), p);
+
+        // Both mandates work while the registry is answering, which is what makes the refusals
+        // below attributable to the answer changing shape and to nothing else.
+        vm.prank(agent);
+        mmIdentity.spend(idGate, vendor, usd(10), REF, nextNonce());
+        vm.prank(agent);
+        mmCredential.spend(credGate, vendor, usd(10), REF, nextNonce());
+        assertEq(token.balanceOf(vendor), usd(20), "both gates passed before the upgrade");
+
+        reg.goSilent();
 
         vm.prank(agent);
         (bool ok, bytes memory err) =
@@ -543,20 +575,188 @@ contract GatesTest is Base {
         assertFalse(ok, "the spend is refused, which is the half that was never in doubt");
         assertEq(err.length, 0, "F49: a decode failure carries no selector, so `catch` did not run");
 
-        // The credential path decodes six fields including a dynamic string, so it needs at
-        // least 192 bytes, and the empty answer fails it the same way. Both paths are
-        // asserted because the two calls sit in different helpers.
-        MandateManager mmCredential = new MandateManager(address(token), address(identity), address(silent));
-        vm.prank(payer);
-        token.approve(address(mmCredential), type(uint256).max);
-        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
-        vm.prank(payer);
-        bytes32 credGate = mmCredential.createMandate(bytes32("f49-credential"), p);
-
         vm.prank(agent);
         (ok, err) = address(mmCredential)
             .call(abi.encodeCall(MandateManager.spend, (credGate, vendor, usd(10), REF, nextNonce())));
         assertFalse(ok);
         assertEq(err.length, 0, "F49: and the six-field tuple decodes no better than the address");
+    }
+
+    /**
+     * The staging F13 retired, kept for the assertion it can still make.
+     *
+     * A registry that returns zero bytes to everything is what an address holding no code does as
+     * well, and it is the version a deployer reaches by mistake, by pasting an address from the
+     * wrong chain. The constructor's `RegistryHasNoCode` guard refuses that one before the
+     * deployment exists, and this mock is past the guard by having code, so what it stands for is
+     * the case the guard cannot reach.
+     *
+     * F13 moved where that failure lands. `createMandate` reads both registries itself now, so
+     * the decode revert meets a registry like this one at the GRANT rather than at the spend.
+     * For the payer that is strictly better, since the refusal arrives before any authority is
+     * written; what it does not change is that the revert carries no selector, so nothing
+     * distinguishes an unreachable registry from a mistyped agent id.
+     */
+    function test_f49_aRegistrySilentFromTheStart_isRefusedAtGrantWithoutASelector() public {
+        SilentRegistry silent = new SilentRegistry();
+        assertTrue(address(silent).code.length > 0, "past the constructor guard, which is the point");
+
+        MandateManager mmIdentity = new MandateManager(address(token), address(silent), address(validation));
+        MandateManager.MandateParams memory idParams = withIdentity(simpleParams(), AGENT_ID, agent);
+        bytes memory idGrant = abi.encodeCall(MandateManager.createMandate, (bytes32("f49-grant-id"), idParams));
+        vm.prank(payer);
+        (bool ok, bytes memory err) = address(mmIdentity).call(idGrant);
+        assertFalse(ok, "the grant is refused, not the spend");
+        assertEq(err.length, 0, "F49 at grant: the address decode reverts past the catch arm too");
+
+        MandateManager mmCredential = new MandateManager(address(token), address(identity), address(silent));
+        MandateManager.MandateParams memory p = withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days);
+        bytes memory credGrant = abi.encodeCall(MandateManager.createMandate, (bytes32("f49-grant-cred"), p));
+        vm.prank(payer);
+        (ok, err) = address(mmCredential).call(credGrant);
+        assertFalse(ok);
+        assertEq(err.length, 0, "F49 at grant: and the six-field tuple decodes no better here either");
+    }
+
+    // ================================================== F13: the grant-time half
+
+    /**
+     * NEW IN v2 (F13). `createMandate` validates what the credential check POINTS AT, once, and
+     * leaves what that attestation currently SAYS to `spend`. `_requireCredentialAtGrant` is
+     * where the division is argued; this section is where each of its arms is asserted.
+     *
+     * The section exists because of a count derived from the call sites rather than assumed. Of
+     * the thirty `withCredential` sites in this suite, every one except `test/Cosign.t.sol:1913`
+     * names the validator and the agent id that `setUp` staged, so every one of them reaches the
+     * helper's fall-through and returns. Three of the five arms had no grant that touched them,
+     * and two of those three are refusals — which is exactly the shape a mutation census reports
+     * as a survivor, since deleting the line turns nothing red.
+     *
+     * The identity half is deliberately absent here. `_requireIdentityAtGrant` REFUSES an absent
+     * record while this helper PERMITS one, and whether that asymmetry is correct is an open
+     * question for the payer-facing design rather than one an assertion here should foreclose.
+     */
+
+    /// Arc's measured shape for a hash the registry has never seen is a revert, so a payer who
+    /// grants before the validator files arrives at the `catch` arm. The grant has to stand:
+    /// the attestation is a third party's to file and the payer cannot wait on it.
+    ///
+    /// `test/Cosign.t.sol:1913` already reaches this arm on its way to an F17 assertion. It is
+    /// restated here as the thing being tested rather than as a precondition of something else.
+    function test_f13_grantingBeforeTheAttestationIsFiled_isAllowed() public {
+        bytes32 unfiled = bytes32("f13-nothing-here-yet");
+        bytes32 id = grant(withCredential(simpleParams(), boss, unfiled, AGENT_ID, 1 days));
+
+        // Permitted at grant, refused at spend, and the two are consistent: the grant fixed the
+        // identifiers and the spend asked the question the identifiers name.
+        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+
+        validation.setStatus(unfiled, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10), "the mandate was waiting, not broken");
+    }
+
+    /// The other shape a registry uses for "never seen" is a zero tuple, and the grant has to
+    /// treat it the same way for the same reason. No test in this suite had ever staged that
+    /// answer BEFORE a grant, so the `gotValidator == address(0)` return was uncovered.
+    function test_f13_grantingAgainstAZeroTupleRegistry_isAllowed() public {
+        validation.setRevertOnUnknown(false);
+        bytes32 unfiled = bytes32("f13-zero-tuple");
+        bytes32 id = grant(withCredential(simpleParams(), boss, unfiled, AGENT_ID, 1 days));
+
+        payReverts(id, usd(10), MandateManager.CredentialMissing.selector);
+
+        validation.setStatus(unfiled, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// The verdict is deferred, and this is the test that says so. A filed attestation whose
+    /// response is BELOW the payer's floor is a real record under the right hash by the right
+    /// validator about the right agent, so every identifier the grant checks agrees. Refusing
+    /// here would refuse a mandate that the validator can revive without the payer acting.
+    function test_f13_grantingWhileTheAttestationFails_isAllowed() public {
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 0, block.timestamp);
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+
+        payReverts(id, usd(10), MandateManager.CredentialFailed.selector);
+
+        // The revival is the argument. A grant refused above could not reach this line without
+        // the payer noticing the failure and granting a second time.
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// Staleness is the other half of the verdict, and it is the half that makes the grant-time
+    /// reading actively wrong: the same configuration would be accepted on Friday and refused on
+    /// Monday for no change in anything the payer controls.
+    function test_f13_grantingWhileTheAttestationIsStale_isAllowed() public {
+        vm.warp(block.timestamp + 2 days); // `setUp` attested 100 seconds in, against a 1-day rule
+        bytes32 id = grant(withCredential(simpleParams(), boss, KYC_HASH, AGENT_ID, 1 days));
+
+        payReverts(id, usd(10), MandateManager.CredentialStale.selector);
+
+        validation.setStatus(KYC_HASH, boss, AGENT_ID, 100, block.timestamp);
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10));
+    }
+
+    /// An identifier the payer got wrong is what F13 is for. `setUp` filed this record under
+    /// `boss`, so a grant naming a different validator describes an attestation that does not
+    /// exist and never will, and every spend on it would answer `CredentialWrongValidator`
+    /// forever. The refusal moves that answer to the one transaction the payer is watching.
+    function test_f13_grantNamingAValidatorTheRecordDoesNotCarry_isRefused() public {
+        grantReverts(
+            withCredential(simpleParams(), other, KYC_HASH, AGENT_ID, 1 days),
+            MandateManager.CredentialWrongValidator.selector
+        );
+    }
+
+    /// The same argument for the agent id. The record `setUp` filed is about `AGENT_ID`, so a
+    /// grant naming any other agent is born dead in the sense F34 refuses.
+    function test_f13_grantNamingAnAgentTheRecordDoesNotCarry_isRefused() public {
+        grantReverts(
+            withCredential(simpleParams(), boss, KYC_HASH, 999, 1 days), MandateManager.CredentialWrongAgent.selector
+        );
+    }
+
+    /**
+     * The fallback is wired at grant time too, and this is the only test that proves it.
+     *
+     * With `credential.agentId` left at zero the check inherits the identity gate's agent id, which
+     * `_requireCredentialAtGrant` receives as an argument rather than reading it from storage.
+     * The call site passes it THROUGH the `F_IDENTITY` flag, and a ternary that returned the
+     * wrong side of that test would be invisible to every other test in this file, because they
+     * all name the same agent in both places.
+     *
+     * Here the two disagree: agent 999 is minted and pinned by the identity gate, while the
+     * filed record is about agent 42. The grant must refuse, and it can only refuse if the
+     * inherited id reached the comparison.
+     */
+    function test_f13_theInheritedAgentIdIsTheOneComparedAtGrant() public {
+        identity.mint(999, agent);
+        MandateManager.MandateParams memory p = withIdentity(simpleParams(), 999, agent);
+        p = withCredential(p, boss, KYC_HASH, 0, 1 days); // agentId 0 = inherit 999
+
+        vm.prank(payer);
+        vm.expectRevert(MandateManager.CredentialWrongAgent.selector);
+        mm.createMandate(bytes32("f13-inherited-agent"), p);
+    }
+
+    /// F43 in the direction that matters: a grant the enforcer would honour must not be refused by
+    /// the writer, and `test_DOCUMENTED_GAP_credentialWithNoAgentBinding_acceptsAnyAgent` above
+    /// shows `spend` honouring an attestation about an agent the mandate never named, which is a
+    /// weakening the repository keeps on purpose. The grant therefore has to accept it as well:
+    /// closing the gap on this side alone would refuse a mandate that the enforcer still spends.
+    function test_f43_theGrantKeepsTheSameAgentBindingGapAsTheSpend() public {
+        validation.setStatus(KYC_HASH, boss, 999, 100, block.timestamp);
+
+        MandateManager.MandateParams memory p = simpleParams();
+        p = withCredential(p, boss, KYC_HASH, 0, 1 days); // no agentId, and no identity gate
+        bytes32 id = grant(p);
+
+        pay(id, usd(10));
+        assertEq(token.balanceOf(vendor), usd(10), "the writer refuses nothing the enforcer allows");
     }
 }

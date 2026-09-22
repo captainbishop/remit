@@ -1091,6 +1091,59 @@ contract CosignTest is Base {
         assertEq(token.balanceOf(vendor), usd(50), "the view was telling the truth");
     }
 
+    /**
+     * F53. The fourth term of `_isPermanentlyDead`, and the one the comment above could not have
+     * enumerated because it did not exist yet.
+     *
+     * That comment divides the helper's terms by whether this view can reach them: revocation
+     * can, and the test above pins it; expiry cannot, because `approveCosignFor` already refuses a
+     * deadline past `expiresAt`. The spend-count ceiling belongs to the first group, and nothing
+     * about an approval's deadline constrains the counter, so an approval written one spend short
+     * of the ceiling outlives the spend that consumes the last of the room — and until F53 the
+     * view called it honourable for the rest of its deadline.
+     *
+     * WHY TWO APPROVALS RATHER THAN ONE. The damage needs a survivor. The F3 test further down this
+     * file already shows that no approval can be WRITTEN once the counter is at its ceiling, which
+     * closes the door going forward; what it cannot show is what happens to authority that was
+     * already legal when it was written. Two approvals against one remaining spend is the smallest
+     * arrangement that produces one, and it is not contrived: the co-signer has no way to
+     * know which of the payments it signed for will arrive first.
+     *
+     * The counter is placed rather than reached, for the reason `Base.placeSpendCount` gives, and
+     * `cosignThreshold: 0` so that every spend here needs a signature.
+     */
+    function test_f53_isCosignApproved_isFalseOnceTheMandateIsAtTheSpendCountCeiling() public {
+        bytes32 id = grant(withCosign(windowOnlyParams(DAY, type(uint96).max, 12), boss, 0));
+        placeSpendCount(id, type(uint32).max - 1);
+
+        // Two approvals, both written while one spend of room remains. Only one can ever be
+        // consumed, and nothing stored in either one says which.
+        bytes32 doomed = nextNonce();
+        bytes32 lucky = nextNonce();
+        vm.prank(boss);
+        bytes32 doomedHash = mm.approveCosignFor(id, vendor, usd(1), REF, doomed, uint40(block.timestamp + DAY));
+        vm.prank(boss);
+        bytes32 luckyHash = mm.approveCosignFor(id, vendor, usd(1), REF, lucky, uint40(block.timestamp + DAY));
+        assertTrue(mm.isCosignApproved(id, doomedHash), "honourable while the room lasts");
+        assertTrue(mm.isCosignApproved(id, luckyHash), "honourable while the room lasts");
+
+        // The room goes to whichever spend arrives first, and the other approval is untouched.
+        payWithNonce(id, vendor, usd(1), lucky);
+        assertEq(uint256(mm.getMandate(id).spendCount), uint256(type(uint32).max), "the counter is at its ceiling");
+
+        // F53: the survivor can never be consumed, and the view now says so. It reported `true`
+        // here until the fourth term was added, for authority no caller could exercise.
+        assertFalse(mm.isCosignApproved(id, doomedHash), "F53: unconsumable, and it says so");
+        assertEq(mm.cosignApprovalDeadline(id, doomedHash), uint40(block.timestamp + DAY), "the raw slot is unchanged");
+        assertFalse(mm.isLive(id), "and the mandate carrying it reads dead too");
+
+        // The view and the payment agree, which is the whole claim. The refusal is the ceiling and
+        // not a missing signature, which this nonce proves by carrying a live approval into it.
+        (bool ok, bytes memory err) = trySpend(id, vendor, usd(1), doomed);
+        assertFalse(ok);
+        assertRevertedWith(err, MandateManager.SpendCountCeiling.selector, "the ceiling answers, not the cosign check");
+    }
+
     // ------------------------------------------------------------ ordering
 
     /**

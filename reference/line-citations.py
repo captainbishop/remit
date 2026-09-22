@@ -190,6 +190,16 @@ QUOTED = (
     "Expired (line 1136)",
     "? (line 420)",
     "at lines 217",
+    # The five survivors the first all-targets mutation run found, quoted in the
+    # `mutgate-js-all.log` row of `evidence/README.md`. That sentence names its own blob —
+    # "in git history at `1a27a93`" — and `git show 1a27a93:reference/policy.js` puts the
+    # `window()` length guard at 238, so the number is correct as written. It first reported
+    # drifted on 2026-09-15, when F13 added a 27th `Denial` reason twelve lines above it.
+    # Renumbering it to the current 250 would have claimed the survivor was found at a line
+    # holding a doc comment at the revision the sentence cites, which is the failure
+    # THREAT-MODEL.md:138-140 describes: the numbers are right against the blob they name,
+    # and rewriting them to match the working tree is what would make them wrong.
+    "`window` at `reference/policy.js:238`, 239 and 241",
 )
 
 # Placeholder names this file's own documentation uses to show a citation shape. No file

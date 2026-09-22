@@ -1,5 +1,5 @@
 # reference/mutation-gate.js, every throw-bearing function in reference/policy.js.
-# Run 2026-09-05, at the tree that carries the four tests this run's own survivors demanded.
+# Run 2026-09-22, at the tree where F13 added createMandate()'s grant-time registry reads.
 # Targets derived by scanning policy.js for 'throw refuse(' and 'throw new Error(', not remembered.
 
 ################ usdc
@@ -14,131 +14,137 @@ OK — every one of the 1 mutants was caught by a named test.
 ################ window
 mutation gate: window  (baseline green, 5 mutants)
 
-  caught       removed   lengthSeconds must be positive (line 238)
+  caught       removed   lengthSeconds must be positive (line 250)
                by: construction: a window length and a bucket count must both be positive
-  caught       removed   buckets must be positive (line 239)
+  caught       removed   buckets must be positive (line 251)
                by: construction: a window length and a bucket count must both be positive
-  caught       removed   buckets must be <= ${MAX_BUCKETS} to bound the gas cost … (line 241)
+  caught       removed   buckets must be <= ${MAX_BUCKETS} to bound the gas cost … (line 253)
                by: construction: a bucket count above MAX_BUCKETS is refused, and the ceiling is inclusive
-  caught       removed   lengthSeconds (${L}) must be divisible by buckets (${K})… (line 244)
+  caught       removed   lengthSeconds (${L}) must be divisible by buckets (${K})… (line 256)
                by: construction: window length must divide evenly into buckets
-  caught       removed   cap must be positive (line 251)
+  caught       removed   cap must be positive (line 263)
                by: construction: every grant-time refusal the contract makes, the model makes too
 
 OK — every one of the 5 mutants was caught by a named test.
    exit: 0
 
 ################ createMandate
-mutation gate: createMandate  (baseline green, 22 mutants)
+mutation gate: createMandate  (baseline green, 25 mutants)
 
-  caught       removed   id required (line 281)
+  caught       removed   id required (line 309)
                by: construction: id, payer and spender are required, and the zero address is not one
-  caught       removed   payer required (line 282)
+  caught       removed   payer required (line 310)
                by: construction: id, payer and spender are required, and the zero address is not one
-  caught       removed   spender required (line 283)
+  caught       removed   spender required (line 311)
                by: construction: id, payer and spender are required, and the zero address is not one
-  caught       removed   payer cannot be the zero address — on-chain the payer is (line 299)
+  caught       removed   payer cannot be the zero address — on-chain the payer is (line 327)
                by: construction: id, payer and spender are required, and the zero address is not one
-  caught       removed   spender cannot be the zero address — the contract refuse… (line 305)
+  caught       removed   spender cannot be the zero address — the contract refuse… (line 333)
                by: construction: id, payer and spender are required, and the zero address is not one
-  caught       removed   refusing to create a mandate with no lifetime bound — se… (line 328)
+  caught       removed   refusing to create a mandate with no lifetime bound — se… (line 356)
                by: construction: a mandate with no LIFETIME bound is refused, and a perTxCap is not one
-  caught       removed   cosignThreshold requires a cosigner (line 335)
+  caught       removed   cosignThreshold requires a cosigner (line 363)
                by: construction: cosignThreshold without a cosigner is refused
-  caught       removed   a cosigner requires a cosignThreshold — use 0 to require… (line 346)
+  caught       removed   a cosigner requires a cosignThreshold — use 0 to require… (line 374)
                by: construction: a cosigner without a threshold is refused, because the contract cannot store it
-  caught       removed   the spender cannot be its own cosigner — it could approv… (line 358)
+  caught       removed   the spender cannot be its own cosigner — it could approv… (line 386)
                by: construction: the spender cannot be its own cosigner
-  caught       removed   the payer cannot be their own revoker — they hold that p… (line 393)
+  caught       removed   the payer cannot be their own revoker — they hold that p… (line 421)
                by: F51: a grant refuses the payer and the spender as nominee, and permits the cosigner
-  caught       removed   the spender cannot be the revoker — it holds that power (line 399)
+  caught       removed   the spender cannot be the revoker — it holds that power (line 427)
                by: F51: a grant refuses the payer and the spender as nominee, and permits the cosigner
-  caught       removed   expiresAt must be after notBefore, or the mandate is nev… (line 411)
+  caught       removed   expiresAt must be after notBefore, or the mandate is nev… (line 439)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   credential requires a validator — the on-chain flag is d… (line 415)
+  caught       removed   credential requires a validator — the on-chain flag is d… (line 443)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   credential minResponse must be positive — 0 accepts a FA… (line 425)
+  caught       removed   credential minResponse must be positive — 0 accepts a FA… (line 453)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   credential minResponse cannot exceed 100 — ERC-8004 scor… (line 437)
+  caught       removed   credential minResponse cannot exceed 100 — ERC-8004 scor… (line 465)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   credential requires a non-zero requestHash — it is the w… (line 447)
+  caught       removed   credential requires a non-zero requestHash — it is the w… (line 475)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   identity requires a non-zero agentId — agent 0 is not re… (line 466)
+  caught       removed   identity requires a non-zero agentId — agent 0 is not re… (line 494)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   identity expectedOwner must be the spender or unset — th… (line 476)
+  caught       removed   identity expectedOwner must be the spender or unset — th… (line 504)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   the zero address cannot be on an allowlist (line 486)
+  caught       removed   the zero address cannot be on an allowlist (line 514)
                by: construction: every grant-time refusal the contract makes, the model makes too
-  caught       removed   windows must be built with window() — got a raw object (line 512)
+  caught       removed   windows must be built with window() — got a raw object (line 540)
                by: construction: windows must come from window(), and at most MAX_WINDOWS of them
-  caught       removed   at most ${MAX_WINDOWS} windows (gas bound) (line 516)
+  caught       removed   at most ${MAX_WINDOWS} windows (gas bound) (line 544)
                by: construction: windows must come from window(), and at most MAX_WINDOWS of them
-  caught       removed   the cosign gate can never fire — the policy permits at m… (line 546)
+  caught       removed   the cosign gate can never fire — the policy permits at m… (line 574)
                by: construction: a cosign gate that can never fire is refused, measured against the whole policy
+  caught       removed   identity not held at grant — the registry must report th… (line 599)
+               by: grant-time identity: createMandate mirrors _requireIdentityAtGrant
+  caught       removed   credential names a validator the registry disagrees with… (line 623)
+               by: grant-time credential: mirrors _requireCredentialAtGrant — identifiers now, verdict at spend
+  caught       removed   credential attests a different agent than the mandate na… (line 639)
+               by: grant-time credential: mirrors _requireCredentialAtGrant — identifiers now, verdict at spend
 
-OK — every one of the 22 mutants was caught by a named test.
+OK — every one of the 25 mutants was caught by a named test.
    exit: 0
 
 ################ evaluate
 mutation gate: evaluate  (baseline green, 35 mutants)
 
-  caught       removed   Denial.UNKNOWN_MANDATE (line 722)
+  caught       removed   Denial.UNKNOWN_MANDATE (line 817)
                by: evaluate refuses a mandate that does not exist (the gate found this one unasserted)
                and NO killer asserted — every failure was a TypeError
-  caught       removed   Denial.REVOKED (line 723)
+  caught       removed   Denial.REVOKED (line 818)
                by: revocation: the payer or the spender may revoke, and a stranger may not
-  caught       removed   Denial.NOT_YET_VALID (line 727)
+  caught       removed   Denial.NOT_YET_VALID (line 822)
                by: validity period: notBefore and exclusive expiry
-  caught       removed   Denial.EXPIRED (line 734)
+  caught       removed   Denial.EXPIRED (line 829)
                by: validity period: notBefore and exclusive expiry
-  caught       removed   Denial.WRONG_SPENDER (line 739)
+  caught       removed   Denial.WRONG_SPENDER (line 834)
                by: only the named spender may spend
-  caught       removed   Denial.ZERO_RECIPIENT (line 746)
+  caught       removed   Denial.ZERO_RECIPIENT (line 841)
                by: zero recipient and zero amount are refused before touching the chain
-  caught       removed   Denial.SELF_PAYMENT (line 752)
+  caught       removed   Denial.SELF_PAYMENT (line 847)
                by: F19: paying the payer is refused, and refused as SELF_PAYMENT
-  caught       removed   Denial.UNRECOVERABLE_RECIPIENT (line 764)
+  caught       removed   Denial.UNRECOVERABLE_RECIPIENT (line 859)
                by: F29: the manager and the token are refused as recipients, because nobody can send it back
-  caught       removed   Denial.RECIPIENT_NOT_ALLOWED (line 767)
+  caught       removed   Denial.RECIPIENT_NOT_ALLOWED (line 862)
                by: recipient allowlist blocks anyone not named at grant time
-  caught       removed   Denial.ZERO_AMOUNT (line 770)
+  caught       removed   Denial.ZERO_AMOUNT (line 865)
                by: zero recipient and zero amount are refused before touching the chain
-  caught       removed   Denial.AMOUNT_TOO_LARGE (line 775)
+  caught       removed   Denial.AMOUNT_TOO_LARGE (line 870)
                by: an amount that does not fit in uint96 is refused before any cap is consulted
-  caught       removed   nonce is required (line 783)
+  caught       removed   nonce is required (line 878)
                by: a request with no nonce is refused by BOTH entry points, not stored or evaluated
-  caught       removed   Denial.NONCE_ALREADY_USED (line 786)
+  caught       removed   Denial.NONCE_ALREADY_USED (line 881)
                by: nonce replay is refused — a resubmitted spend does not pay twice
-  caught       removed   Denial.IDENTITY_NOT_HELD (line 803)
+  caught       removed   Denial.IDENTITY_NOT_HELD (line 898)
                by: identity gate: spender must currently hold the bound ERC-8004 agentId
-  caught       removed   Denial.IDENTITY_TRANSFERRED (line 820)
+  caught       removed   Denial.IDENTITY_TRANSFERRED (line 915)
                by: identity gate: IDENTITY_TRANSFERRED is unreachable by construction, and denies if reached
-  caught       removed   Denial.CREDENTIAL_MISSING (line 848)
+  caught       removed   Denial.CREDENTIAL_MISSING (line 943)
                by: cosign (F17): what must NOT be refused — notBefore, a full window, a missing credential
                and NO killer asserted — every failure was a TypeError
-  caught       removed   Denial.CREDENTIAL_WRONG_VALIDATOR (line 851)
+  caught       removed   Denial.CREDENTIAL_WRONG_VALIDATOR (line 946)
                by: credential gate: agentId of 0 means unset, and unset with no identity skips the check
-  caught       removed   Denial.CREDENTIAL_WRONG_AGENT (line 879)
+  caught       removed   Denial.CREDENTIAL_WRONG_AGENT (line 974)
                by: credential gate: agentId of 0 means unset, and unset with no identity skips the check
-  caught       removed   Denial.CREDENTIAL_MISSING (line 886)
+  caught       removed   Denial.CREDENTIAL_FAILED (line 985)
                by: credential gate: requires a passing, fresh attestation
-  caught       removed   Denial.CREDENTIAL_STALE (line 908)
+  caught       removed   Denial.CREDENTIAL_STALE (line 1007)
                by: credential gate: requires a passing, fresh attestation
-  caught       removed   Denial.OVER_PER_TX_CAP (line 919)
+  caught       removed   Denial.OVER_PER_TX_CAP (line 1018)
                by: per-transaction cap blocks an oversized single spend
-  caught       removed   Denial.OVER_TOTAL_CAP (line 922)
+  caught       removed   Denial.OVER_TOTAL_CAP (line 1021)
                by: total lifetime cap blocks the spend that would cross it
-  caught       removed   Denial.TOTAL_SPENT_CEILING (line 936)
+  caught       removed   Denial.TOTAL_SPENT_CEILING (line 1035)
                by: the uint96 audit counter denies by name rather than overflowing, and only without a total cap
-  caught       removed   Denial.SPEND_COUNT_CEILING (line 952)
+  caught       removed   Denial.SPEND_COUNT_CEILING (line 1051)
                by: the uint32 spend counter denies by name rather than wrapping, whatever the amount
-  caught       removed   Denial.OVER_WINDOW_CAP (line 964)
+  caught       removed   Denial.OVER_WINDOW_CAP (line 1063)
                by: ATTACK: tumbling-window boundary burst is blocked
-  caught       removed   Denial.NONCE_RESERVED (line 1002)
+  caught       removed   Denial.NONCE_RESERVED (line 1101)
                by: ATTACK: a cosign approval cannot be redirected to another recipient or amount
-  caught       removed   Denial.COSIGN_REQUIRED (line 1009)
+  caught       removed   Denial.COSIGN_REQUIRED (line 1108)
                by: construction: a cosigner without a threshold is refused, because the contract cannot store it
-  caught       removed   Denial.COSIGN_EXPIRED (line 1013)
+  caught       removed   Denial.COSIGN_EXPIRED (line 1112)
                by: cosign (F16): an approval expires, and expiry is a DIFFERENT denial from absence
   caught       injected  F22: a spend to the mandate own spender — a delegate paying itself — must stay ALLOWED
                by: F22: a delegate may be paid by its own mandate — recipient == spender stays ALLOWED
@@ -160,14 +166,14 @@ caught with NO killer reaching an assertion: every failing test threw instead.
 That is a weaker result and not a failure — a fall-through past a guard whose whole
 job was to reject unusable state often cannot reach an answer at all. Read each one
 and decide whether a test should pin the DENIAL rather than merely provoke it:
-  - Denial.UNKNOWN_MANDATE (line 722)  (TypeError)
-  - Denial.CREDENTIAL_MISSING (line 848)  (TypeError)
+  - Denial.UNKNOWN_MANDATE (line 817)  (TypeError)
+  - Denial.CREDENTIAL_MISSING (line 943)  (TypeError)
    exit: 0
 
 ################ commit
 mutation gate: commit  (baseline green, 1 mutants)
 
-  caught       removed   refusing to apply a denied decision (${decision.reason}) (line 1033)
+  caught       removed   refusing to apply a denied decision (${decision.reason}) (line 1132)
                by: commit() refuses a denied decision instead of applying it
 
 OK — every one of the 1 mutants was caught by a named test.
@@ -176,7 +182,7 @@ OK — every one of the 1 mutants was caught by a named test.
 ################ revoke
 mutation gate: revoke  (baseline green, 1 mutants)
 
-  caught       removed   only the payer, the spender or the nominated revoker may… (line 1123)
+  caught       removed   only the payer, the spender or the nominated revoker may… (line 1222)
                by: revocation: the payer or the spender may revoke, and a stranger may not
 
 OK — every one of the 1 mutants was caught by a named test.
@@ -185,13 +191,13 @@ OK — every one of the 1 mutants was caught by a named test.
 ################ setRevoker
 mutation gate: setRevoker  (baseline green, 4 mutants)
 
-  caught       removed   only the payer may name a revoker (line 1152)
+  caught       removed   only the payer may name a revoker (line 1251)
                by: F51 ATTACK: only the payer may nominate — not the spender, the nominee or a stranger
-  caught       removed   the mandate is revoked — a nominee could never use the r… (line 1155)
+  caught       removed   the mandate is revoked — a nominee could never use the r… (line 1254)
                by: F51: setRevoker refuses a revoked mandate and the two ineligible values
-  caught       removed   the payer cannot be their own revoker — they hold that p… (line 1161)
+  caught       removed   the payer cannot be their own revoker — they hold that p… (line 1260)
                by: F51: setRevoker refuses a revoked mandate and the two ineligible values
-  caught       removed   the spender cannot be the revoker — it holds that power … (line 1167)
+  caught       removed   the spender cannot be the revoker — it holds that power … (line 1266)
                by: F51: setRevoker refuses a revoked mandate and the two ineligible values
 
 OK — every one of the 4 mutants was caught by a named test.
@@ -200,53 +206,53 @@ OK — every one of the 4 mutants was caught by a named test.
 ################ approveCosignFor
 mutation gate: approveCosignFor  (baseline green, 28 mutants)
 
-  caught       removed   Denial.UNKNOWN_MANDATE (line 1270)
+  caught       removed   Denial.UNKNOWN_MANDATE (line 1369)
                by: cosign (F17): the prologue answers WHY nobody may approve, not just that you may not
-  caught       removed   ApprovalRefusal.BAD_CONFIG (line 1277)
+  caught       removed   ApprovalRefusal.BAD_CONFIG (line 1376)
                by: cosign (F17): the prologue answers WHY nobody may approve, not just that you may not
-  caught       removed   ApprovalRefusal.NOT_COSIGNER (line 1280)
+  caught       removed   ApprovalRefusal.NOT_COSIGNER (line 1379)
                by: cosign: only the named cosigner may approve
-  caught       removed   ctx.now is required to bound the deadline (line 1283)
+  caught       removed   ctx.now is required to bound the deadline (line 1382)
                by: cosign (F16): ctx.now is required, so a deadline can never go unchecked
-  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1289)
+  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1388)
                by: cosign (F16): a deadline in the past, at now, or beyond MAX_COSIGN_TTL is refused
-  caught       removed   Denial.REVOKED (line 1309)
+  caught       removed   Denial.REVOKED (line 1408)
                by: cosign (F17): a revoked or expired mandate cannot be approved against
-  caught       removed   Denial.EXPIRED (line 1311)
+  caught       removed   Denial.EXPIRED (line 1410)
                by: cosign (F17): a revoked or expired mandate cannot be approved against
-  caught       removed   Denial.ZERO_RECIPIENT (line 1316)
+  caught       removed   Denial.ZERO_RECIPIENT (line 1415)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   Denial.SELF_PAYMENT (line 1322)
+  caught       removed   Denial.SELF_PAYMENT (line 1421)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   Denial.UNRECOVERABLE_RECIPIENT (line 1329)
+  caught       removed   Denial.UNRECOVERABLE_RECIPIENT (line 1428)
                by: F29: a cosigner cannot approve one either, so the refusal is not only on the spend path
-  caught       removed   Denial.RECIPIENT_NOT_ALLOWED (line 1339)
+  caught       removed   Denial.RECIPIENT_NOT_ALLOWED (line 1438)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   Denial.ZERO_AMOUNT (line 1343)
+  caught       removed   Denial.ZERO_AMOUNT (line 1442)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   Denial.AMOUNT_TOO_LARGE (line 1345)
+  caught       removed   Denial.AMOUNT_TOO_LARGE (line 1444)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   nonce is required (line 1355)
+  caught       removed   nonce is required (line 1454)
                by: a request with no nonce is refused by BOTH entry points, not stored or evaluated
-  caught       removed   Denial.NONCE_ALREADY_USED (line 1358)
+  caught       removed   Denial.NONCE_ALREADY_USED (line 1457)
                by: cosign (F17): a malformed recipient, amount or nonce is refused
-  caught       removed   Denial.OVER_PER_TX_CAP (line 1365)
+  caught       removed   Denial.OVER_PER_TX_CAP (line 1464)
                by: cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not
-  caught       removed   Denial.OVER_TOTAL_CAP (line 1368)
+  caught       removed   Denial.OVER_TOTAL_CAP (line 1467)
                by: cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not
-  caught       removed   Denial.TOTAL_SPENT_CEILING (line 1371)
+  caught       removed   Denial.TOTAL_SPENT_CEILING (line 1470)
                by: cosign (F17): a PERMANENT cap shortfall is refused; a temporary one is not
-  caught       removed   Denial.SPEND_COUNT_CEILING (line 1377)
+  caught       removed   Denial.SPEND_COUNT_CEILING (line 1476)
                by: cosign (F3): an approval on a mandate at the spend-count ceiling is refused
-  caught       removed   Denial.OVER_WINDOW_CAP (line 1394)
+  caught       removed   Denial.OVER_WINDOW_CAP (line 1493)
                by: cosign (F40): an amount above a window cap is refused, and one that merely does not fit now is not
-  caught       removed   ApprovalRefusal.COSIGN_NOT_REQUIRED (line 1415)
+  caught       removed   ApprovalRefusal.COSIGN_NOT_REQUIRED (line 1514)
                by: cosign (F17): an approval at or below the threshold is refused
-  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1431)
+  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1530)
                by: cosign (F17): the deadline must outlive notBefore and die by the expiry
-  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1443)
+  caught       removed   ApprovalRefusal.BAD_DEADLINE (line 1542)
                by: cosign (F17): the deadline must outlive notBefore and die by the expiry
-  caught       removed   Denial.NONCE_RESERVED (line 1475)
+  caught       removed   Denial.NONCE_RESERVED (line 1574)
                by: F30: two different approvals on one nonce are refused, and replacing one is explicit
   caught       injected  a notBefore in the future
                by: F47: the payer can free a nonce the cosigner is holding, and the approval survives
@@ -263,9 +269,9 @@ OK — every one of the 28 mutants was caught by a named test.
 ################ withdrawCosign
 mutation gate: withdrawCosign  (baseline green, 2 mutants)
 
-  caught       removed   unknown mandate (line 1507)
+  caught       removed   unknown mandate (line 1606)
                by: F30: only the cosigner may withdraw, and withdrawing nothing is not an error
-  caught       removed   ApprovalRefusal.NOT_COSIGNER (line 1511)
+  caught       removed   ApprovalRefusal.NOT_COSIGNER (line 1610)
                by: F30: only the cosigner may withdraw, and withdrawing nothing is not an error
 
 OK — every one of the 2 mutants was caught by a named test.
@@ -274,11 +280,11 @@ OK — every one of the 2 mutants was caught by a named test.
 ################ clearReservation
 mutation gate: clearReservation  (baseline green, 3 mutants)
 
-  caught       removed   unknown mandate (line 1549)
+  caught       removed   unknown mandate (line 1648)
                by: F47: only the payer may clear a reservation, and without a cosigner there is none to clear
-  caught       removed   ApprovalRefusal.BAD_CONFIG (line 1559)
+  caught       removed   ApprovalRefusal.BAD_CONFIG (line 1658)
                by: F47: only the payer may clear a reservation, and without a cosigner there is none to clear
-  caught       removed   only the payer may clear a reservation (line 1562)
+  caught       removed   only the payer may clear a reservation (line 1661)
                by: F47: only the payer may clear a reservation, and without a cosigner there is none to clear
 
 OK — every one of the 3 mutants was caught by a named test.
@@ -287,11 +293,11 @@ OK — every one of the 3 mutants was caught by a named test.
 ################ headroomAcross
 mutation gate: headroomAcross  (baseline green, 3 mutants)
 
-  caught       removed   mandates must be an array (line 1673)
+  caught       removed   mandates must be an array (line 1772)
                by: joint ceiling: a caller who hands over something that is not a list is refused by name
-  caught       removed   all mandates must share one payer — ${mandates[0].id} is… (line 1688)
+  caught       removed   all mandates must share one payer — ${mandates[0].id} is… (line 1787)
                by: joint ceiling: mandates held against different payers are refused, not summed
-  caught       removed   mandate ${m.id} named more than once. Its headroom exist… (line 1696)
+  caught       removed   mandate ${m.id} named more than once. Its headroom exist… (line 1795)
                by: joint ceiling: naming the same mandate twice is refused
 
 OK — every one of the 3 mutants was caught by a named test.

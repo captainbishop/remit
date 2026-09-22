@@ -68,7 +68,16 @@ SKIP = {"node_modules", "lib", ".git", "out", "cache", "broadcast"}
 # so the exemption is visible here rather than hidden in the file being skipped.
 # This file joined the list when Python docstrings came into scope, for the same
 # reason and no other: the category descriptions above quote every banned word.
-SKIP_FILES = {"HOUSE-STYLE.md", "prose-check.py"}
+#
+# The third entry is a raw-capture file: it preserves the verbatim output of the
+# adversarial-sweep agents so that a partial run is not lost, and the same rule the
+# QUOTED tuple below states applies to the whole of it — a quotation cannot be
+# reworded without becoming a misquotation. Rewriting an agent's finding into house
+# style would make the evidence say something the agent did not say. The orchestrator's
+# own prose in that file is held to the rules anyway and currently passes; what the
+# exemption covers is the quoted agent text. Any future raw capture belongs here for
+# the same reason, and nothing that is merely inconvenient to reword does.
+SKIP_FILES = {"HOUSE-STYLE.md", "prose-check.py", "sweep-2026-09-15-PARTIAL.md"}
 
 GATE_OK = re.compile(
     r"mutation[- ]gate|mutation gate|Gates\.t\.sol|gate-sol|gate\.js|identity gate|"

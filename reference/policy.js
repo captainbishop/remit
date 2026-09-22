@@ -102,6 +102,18 @@ const Denial = {
   IDENTITY_NOT_HELD: 'IDENTITY_NOT_HELD',
   IDENTITY_TRANSFERRED: 'IDENTITY_TRANSFERRED',
   CREDENTIAL_MISSING: 'CREDENTIAL_MISSING',
+  // NEW IN v2 (F13). Split from CREDENTIAL_MISSING for the reason COSIGN_EXPIRED was split
+  // from COSIGN_REQUIRED: the two ask different things of whoever reads the denial.
+  // CREDENTIAL_MISSING says the registry holds no attestation under this requestHash, and
+  // the remedy is that someone files one. CREDENTIAL_FAILED says an attestation exists and
+  // records a score below the payer's floor, which no amount of waiting will change.
+  // ERC-8004 encodes failure as a low response rather than as an absence, so one code for
+  // both let a FAILED attestation read to whoever received it as a paperwork delay.
+  //
+  // This names a VERDICT, so it is a spend refusal and belongs here rather than among the
+  // grant-time throws. F13's grant-time half validates the identifiers the payer pinned and
+  // leaves the verdict to `evaluate`, which re-asks it on every payment.
+  CREDENTIAL_FAILED: 'CREDENTIAL_FAILED',
   CREDENTIAL_STALE: 'CREDENTIAL_STALE',
   CREDENTIAL_WRONG_VALIDATOR: 'CREDENTIAL_WRONG_VALIDATOR',
   CREDENTIAL_WRONG_AGENT: 'CREDENTIAL_WRONG_AGENT',
@@ -259,8 +271,24 @@ function window(lengthSeconds, cap, buckets = 12) {
  *
  * A mandate with no bounds at all is rejected — refusing to mint an unbounded
  * authority is the entire point of the primitive.
+ *
+ * NEW IN v2 (F13). The second argument mirrors the contract's grant-time registry reads.
+ * When the caller wires `ctx.resolveIdentityOwner` / `ctx.resolveCredential`, this function
+ * consults the registry at grant, exactly as `_requireIdentityAtGrant` and
+ * `_requireCredentialAtGrant` do on-chain: it validates the gate's IDENTIFIERS (the identity
+ * owner is the spender; the credential's validator and agent match what the payer pinned) and
+ * leaves its VERDICT (`minResponse` / `maxStaleness`) to `evaluate`, which re-asks it on every
+ * spend. An absent credential attestation leaves the grant PERMITTED — that is F43's rule, and
+ * the whole reason absence is not a grant-time refusal is argued at the guard below.
+ *
+ * When no resolver is wired the model is the pre-F13 pure constructor and touches no registry,
+ * which is the same resolver-optional convention `evaluate` uses. That is sound rather than a
+ * hole: `evaluate` re-checks every one of these at spend and denies a mandate whose agent is
+ * not held or whose validator disagrees, so a resolver-less grant is early-warning skipped, not
+ * a dead mandate minted undetected. The contract always reads because its registry is an
+ * immutable address present in every call; the model reads when a registry is simulated.
  */
-function createMandate(spec) {
+function createMandate(spec, ctx = {}) {
   const {
     id,
     payer,
@@ -363,11 +391,11 @@ function createMandate(spec) {
 
   // v2 (F51). The two ineligible revokers, which are two of the contract's three.
   //
-  // The contract also refuses `revoker == address(this)`, and that rule has no analogue
-  // here rather than having been dropped: this model has no contract address, so the
-  // configuration it refuses cannot be written. `test/Revoker.t.sol` covers that third
-  // case, and it is named here so the gap reads as a difference in what the two languages
-  // can express rather than as a missing check.
+  // The contract refuses the manager's own address in all three role fields — `spender`
+  // (F45), `revoker` (F51), `cosigner` (F52) — and none has an analogue here rather than
+  // having been dropped: this model has no contract address, so the configurations they
+  // refuse cannot be written. `Creation.t.sol` and `Revoker.t.sol` carry all three, named
+  // here so the gap reads as a difference in expressiveness, not as a missing check.
   //
   // Both refusals below are the argument that already refuses a spender as its own
   // cosigner: a grant must not carry the appearance of a control without its substance.
@@ -548,6 +576,73 @@ function createMandate(spec) {
           `${effectiveMax} per spend and the threshold is ${cosignThreshold}, so no amount ` +
           `is strictly above it. Lower the threshold or raise a cap.`,
       );
+    }
+  }
+
+  // ---- F13: grant-time registry reads, mirroring the contract's two helpers ----------------
+  // Placed last, after every pure-spec refusal above, for the reason the contract states at the
+  // same point: a payer who mistyped the struct gets that diagnosis without the cost of a
+  // registry read, and this is where `createMandate` stops touching nothing outside itself. Each
+  // arm consults the registry only when the caller wired the matching resolver.
+
+  // Identity. Mirrors `_requireIdentityAtGrant` line for line: the registry must already report
+  // the SPENDER as the owner of the pinned agent. A resolver answering null models the on-chain
+  // `ownerOf` reverting for a burned or unregistered token, or answering address(0); both land on
+  // IDENTITY_NOT_HELD. The zero arm is redundant — `spender` was required non-zero above — and is
+  // kept because a silent divergence in this exact comparison is what the grant-time and
+  // spend-time identity checks must never develop. Strict on absence: a missing owner is a typo
+  // the payer can fix now, not a delay that resolves itself. That is the asymmetry with the
+  // credential arm below, and it is F43 read at one instant rather than across time.
+  if (identity && typeof ctx.resolveIdentityOwner === 'function') {
+    const owner = ctx.resolveIdentityOwner(identity.agentId) ?? null;
+    if (!owner || normalizeAddr(owner) !== normalizeAddr(spender)) {
+      throw new Error(
+        'createMandate(): identity not held at grant — the registry must report the spender as ' +
+          `owner of agent ${identity.agentId}, so a mandate every spend would deny is refused ` +
+          'now rather than minted dead',
+      );
+    }
+  }
+
+  // Credential. Mirrors `_requireCredentialAtGrant`: validate the IDENTIFIERS the payer pinned
+  // and leave the VERDICT to `evaluate`. The guard sequence is the contract's, in its order: a
+  // null attestation is the `catch` arm (absence, the arm a never-seen hash takes on Arc); a
+  // zero validator is the explicit `gotValidator == address(0)` return (the other "never seen"
+  // shape) — both leave the grant PERMITTED. Only past those two does a mismatch throw. This is
+  // where F43 bites: absence and a typo are one observation at grant time, and `spend` honours a
+  // mandate whose validator files afterwards, so refusing here would withhold a mandate the
+  // enforcer would accept. `minResponse` is deliberately NOT read — a validator who files a
+  // FAILING attestation before the first spend is the verdict `evaluate` re-asks, not an
+  // identifier this function owns.
+  if (credentialGate && typeof ctx.resolveCredential === 'function') {
+    const att = ctx.resolveCredential(credentialGate.requestHash) ?? null;
+    if (att) {
+      const gotValidator = normalizeAddr(att.validator ?? ZERO_ADDRESS);
+      if (gotValidator !== ZERO_ADDRESS) {
+        if (gotValidator !== normalizeAddr(credentialGate.validator)) {
+          throw new Error(
+            'createMandate(): credential names a validator the registry disagrees with — the ' +
+              'attestation under this requestHash was filed by another validator, so every spend ' +
+              'would answer CREDENTIAL_WRONG_VALIDATOR',
+          );
+        }
+        // Same fallback as the spend-time site and the same documented gap: with both ids unset
+        // the comparison is skipped and the gate binds to a request rather than an agent. Not
+        // closed here — a grant the enforcer would honour must not be refused by the writer.
+        const expectedAgent =
+          credentialGate.agentId !== 0n
+            ? credentialGate.agentId
+            : identity && identity.agentId !== undefined && identity.agentId !== null
+              ? BigInt(identity.agentId)
+              : 0n;
+        if (expectedAgent !== 0n && BigInt(att.agentId) !== expectedAgent) {
+          throw new Error(
+            'createMandate(): credential attests a different agent than the mandate names — the ' +
+              'registry record under this requestHash is about another agentId, so every spend ' +
+              'would answer CREDENTIAL_WRONG_AGENT',
+          );
+        }
+      }
     }
   }
 
@@ -882,8 +977,12 @@ function evaluate(mandate, request, ctx) {
       });
     }
 
+    // F13 split this from CREDENTIAL_MISSING, and the `!att` return above is what makes the
+    // split honest: an attestation EXISTS by the time control reaches here, and what it says
+    // is that the agent scored below the floor the payer set. The contract's twin raises
+    // `CredentialFailed` at the matching guard for the same reason.
     if (BigInt(att.response) < BigInt(minResponse)) {
-      return deny(Denial.CREDENTIAL_MISSING, { requestHash, got: BigInt(att.response) });
+      return deny(Denial.CREDENTIAL_FAILED, { requestHash, got: BigInt(att.response) });
     }
     // Freshness. maxStaleness of null OR 0 means "no freshness requirement" — the
     // on-chain field is a uint40 with no null, so 0 is the unset value and it must

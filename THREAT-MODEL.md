@@ -2294,8 +2294,10 @@ other construction, using zero.
 The test that settles it is four lines and belongs in #23, and the fix changed its shape.
 `new MandateManager(address(token), address(0xdead), address(0xdead))` reverts at construction now, so
 that call becomes `vm.expectRevert(RegistryHasNoCode.selector)` and proves the guard. Settling what
-`catch` does needs the other half: a stub registry that holds code and answers with zero bytes,
-reached through a mandate with a registry flag set, then a spend, asserting whichever revert comes back.
+`catch` does needs the other half: a stub registry that holds code and answers with zero bytes. F13
+closed the route this paragraph first described — a mandate with a registry flag set, then a spend.
+`createMandate` reads the registries itself now and refuses the grant before any spend exists, so the
+landed test reaches the decode through a registry that answered at grant time and stopped afterwards.
 F49 states the expected answer and the two routes that remain reachable. Note the same class
 applies to `_usdc`, which `v2:359` zero-checks and does not code-check — a codeless non-zero USDC
 makes every spend fail at `v2:713` instead — and the constructor deliberately leaves that third check
@@ -2424,7 +2426,7 @@ was added to `spend` and to `approveCosignFor`. **This note said 7 for the JS mu
 2026-09-05, and 7 was never a total**: `d4f15ac` took the mutation gate from 4 injections to 11, so
 what got written down was the increment F27 and F28 brought. Both figures are counted from the two
 files now rather than remembered, and the JS one is confirmed a second way by
-`evidence/mutgate-js-all.log`, where 94 removals and 11 injections sum to the 105 mutants its eleven
+`evidence/mutgate-js-all.log`, where 97 removals and 11 injections sum to the 108 mutants its eleven
 target headers declare. The count has moved out of the sentence and into this note, where going
 stale costs a reader nothing, which is the discipline F10 exists to argue for.]
 
@@ -2461,9 +2463,11 @@ suite and the thing a green run hides best. The contract's own equivalents were 
 four of them as `BadWindow` in `test/Creation.t.sol`, so the hole was in the model's tests and not
 in the policy either side implements. That is the milder of the two possible readings and it is
 still a real cost: a model whose own guards go untested cannot contradict the contract, and
-contradicting the contract is the only reason the model exists. Four tests closed all five, and the
-run recorded in `evidence/mutgate-js-all.log` is the one after them — 105 mutants over eleven
-targets, 105 caught, none surviving, at 116 tests.
+contradicting the contract is the only reason the model exists. Four tests closed all five, and
+the run then recorded 105 mutants over eleven targets, 105 caught, none surviving, at 116 tests.
+`evidence/mutgate-js-all.log` at that path now holds 108, three `createMandate` mutants more,
+F13's grant-time registry mirror having added them on 2026-09-22 at 119 tests, with
+`evidence/README.md` carrying that regeneration.
 
 What the mutation gates still cannot mean: neither performs operator swaps, so a `>` becoming
 `>=` is invisible to both and only a boundary-tight assertion catches it. That is why the ceiling
@@ -2632,7 +2636,7 @@ bricked when the chain would honour it — and F27 above means a reader who is h
 `IDENTITY_TRANSFERRED` has every reason to believe it.
 
 **This is the second instance of one hazard, and the file already knows about it.**
-`test/Gates.t.sol:352-363` documents the first — `maxStaleness == 0` means "no freshness
+`test/Gates.t.sol:357-368` documents the first — `maxStaleness == 0` means "no freshness
 requirement" in the contract, and it says in as many words that *"reference/policy.js currently
 encodes zero the other way. The model is wrong; the contract is right."* A zero the contract
 reads as **unset** and the model reads as a **value** has now appeared twice in the same two
@@ -2667,7 +2671,7 @@ repository's history, and the suite in that same commit asserted exactly that. T
 hazard is therefore real once rather than twice: `expectedOwner` is the only field where the model
 ever read a zero as a value, and F28's own evidence, both behaviours executed, is untouched by
 this. The citation read `test/Gates.t.sol:143-162` when this row was written at `d4f15ac`, which
-was correct there, and the two lines carrying the claim now sit at `test/Gates.t.sol:361-362`, where the
+was correct there, and the two lines carrying the claim now sit at `test/Gates.t.sol:367-368`, where the
 model is recorded as agreeing. `CHANGELIST.md:954` keeps the "second instance" phrasing, because
 it describes a shared hazard class rather than a live divergence, and this layer is where its
 correction lives.
@@ -2703,7 +2707,7 @@ a caller learns which of the two it named. The refusal is mirrored in `approveCo
 `:1479`, under F17's rule that every permanent refusal `spend` makes is also made at approval time.
 
 **What proves it.** `test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies`
-(`test/Views.t.sol:498-518`) asserts both halves for both addresses: the view answers `false`, and
+(`test/Views.t.sol:519-539`) asserts both halves for both addresses: the view answers `false`, and
 `spend` then reverts with the argument-encoded error. One test therefore covers F29's spend leg and
 all of F36. The model carries the same refusal on both paths, at `reference/policy.js:634` for a
 spend and `:1112` for an approval, with four `F29:` tests in `policy.test.js` including one that
@@ -3076,8 +3080,8 @@ reader: this is a recipient answer only. The caps, the nonce, the co-signature r
 ERC-8004 checks all remain outside it, so a `true` means "this payee is permitted", not "this spend will
 succeed". `spendable` answers how much can move.
 
-`test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` (`test/Views.t.sol:498-518`) is the proof
-for this finding and for F29's spend leg together: it asserts `false` for all four addresses and then
+`test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` (`test/Views.t.sol:519-539`) is the proof
+for this finding and for F29's spend leg together: it asserts `false` for all six addresses and then
 `payReverts` each of them, so the two claims are checked against each other rather than separately. A
 second test covers the unknown mandate. The model has no equivalent view — `evaluate` answers the whole
 question at once — so like F32 this is contract-only because of a shape difference, not an untested
@@ -3725,18 +3729,29 @@ guessing at a stranger's intent.
 ### F49 — A registry that answers successfully with data that will not decode reverts past the `catch` arm
 
 **Severity: low — every outcome is a refusal, and the difference is which revert the payer reads
-· Status: half FIXED in the constructor, half DOCUMENTED at both call sites, and the empirical test
-is written and passing as of 2026-09-02 · Confidence: certain, and the test is what raised it —
-the mechanism on its own was stated Solidity behaviour, which reaches high and stops there.**
+· Status: half FIXED in the constructor, half DOCUMENTED at all four call sites, and the empirical
+tests are written and passing — three as of 2026-09-02, a fourth and a re-stage as of 2026-09-20
+· Confidence: certain, and the tests are what raised it — the mechanism on its own was stated
+Solidity behaviour, which reaches high and stops there.**
 
-Both ERC-8004 reads sit inside `try`/`catch`, and the arm covers less than it appears to. Solidity
+All four ERC-8004 reads sit inside `try`/`catch`, and the arm covers less than it appears to. Solidity
 enters `catch` when the call itself returns false, so a call that succeeds and returns data which
 cannot be decoded into the declared types raises its revert while decoding, inside this contract's own
-frame, past the arm. `_checkIdentity` declares one `address`, which needs a full clean word;
-`_checkCredential` declares a six-component tuple containing a dynamic `string`, which additionally
-needs offsets inside the returned data and a length no larger than what follows it. Any answer that
-misses those requirements reverts with empty return data in place of `IdentityNotHeld` or
-`CredentialMissing`.
+frame, past the arm. `_checkIdentity` and `_requireIdentityAtGrant` each declare one `address`, which
+needs a full clean word; `_checkCredential` and `_requireCredentialAtGrant` each declare a
+six-component tuple containing a dynamic `string`, which additionally needs offsets inside the
+returned data and a length no larger than what follows it. Any answer that misses those requirements
+reverts with empty return data. At the two spend sites that stands in place of `IdentityNotHeld` or
+`CredentialMissing`; the two grant sites answer differently enough to need their own paragraph.
+
+**F13 doubled where this reaches, and made the credential half worse rather than better.** Until
+2026-09-10 the two reads sat only in `_checkIdentity` and `_checkCredential`, which run during a
+spend. `createMandate` now reads both registries itself, so an undecodable answer meets a payer at
+the grant as well. On the identity path that substitutes a selectorless revert for `IdentityNotHeld`,
+the same trade the spend path makes. On the credential path it is sharper: absence of an attestation
+is a verdict rather than a typo, so the `catch` arm there returns instead of reverting and a grant
+against a registry holding no record is meant to succeed. An answer that will not decode is therefore
+the only way that helper refuses a grant it could not read, and the payer sees no selector saying so.
 
 **This is F24's unresolved consequence, and one of its two halves is now closed.** F24 recorded that
 `createMandate` compares a registry against `address(0)` and never against its code size, so a
@@ -3750,11 +3765,14 @@ they are used — they are `immutable`, so past that line the only remedy is a f
 the one this repository already records: `test/mocks/MockRegistries.sol` documents the live registries
 sitting behind ERC-1967 proxies, and a proxy pointed at a codeless implementation returns zero bytes
 while holding code of its own, so the constructor's check would have passed at deployment. A contract
-with an unrelated ABI at a plausible-looking address does the same. The result is a spend refused with
-no selector, which costs the payer gas and reads as a chain fault rather than as a policy answer; the
-mandate can be revoked and the allowance withdrawn, and no funds move either way.
+with an unrelated ABI at a plausible-looking address does the same. What the payer sees depends on
+when the answer changed. A registry already answering that way when the payer arrives refuses the
+grant, and they pay gas for a mandate they do not get. One that decoded at the grant and stops
+afterwards refuses the spend, and the mandate stands holding authority it can no longer exercise.
+Either way the revert reads as a chain fault rather than as a policy answer, the allowance can be
+withdrawn, and no money moves.
 
-**Manual decoding was considered at both sites and declined.** Replacing the typed return with a
+**Manual decoding was considered on both paths and declined.** Replacing the typed return with a
 low-level call plus a hand-written bounds check would let each site answer in its own error, and it
 would also move the type check from the compiler into this file. On the credential path the dynamic
 `string` makes that check the same work the decoder already performs correctly, and an error in it
@@ -3762,17 +3780,31 @@ would read a value from the wrong offset rather than reverting — turning a ref
 answer, which is the one outcome worse than an opaque revert. The declared tuples stay and the limit
 is stated beside each of them.
 
-**The test this owed is F24's, with its shape changed by the fix.** Constructing a manager with
+**The test this owed is F24's, with its shape changed twice.** Constructing a manager with
 `address(0xdead)` for either registry now reverts at construction, so one half is
 `vm.expectRevert(RegistryHasNoCode.selector)`, and the other needs a stub registry that holds code
 and returns zero bytes to settle what `catch` does. **Three landed on 2026-09-02 rather than two, and
-in two files rather than the one this paragraph predicted**:
+in two files rather than the one this paragraph predicted; a fourth followed F13 on 2026-09-20**:
 `test_f49_aRegistryWithNoCode_isRefusedAtConstruction` and
 `test_f49_zeroAndRealRegistriesAreBothAccepted` in `test/Creation.t.sol`, and
-`test_f49_aRegistryThatAnswersUndecodably_revertsPastTheCatch` in `test/Gates.t.sol` against a new
-`SilentRegistry` mock. The decode case went where the gate reads live, since the revert it
-demonstrates happens during a spend and not during a deployment, and the two halves are still each
+`test_f49_aRegistryThatAnswersUndecodably_revertsPastTheCatch` with
+`test_f49_aRegistrySilentFromTheStart_isRefusedAtGrantWithoutASelector` in `test/Gates.t.sol`.
+The decode cases went where the gate reads live, and the two constructor halves are still each
 other's control across the split.
+
+**The decode test had to be re-staged, and the staging is now part of the claim it makes.** It ran
+against `SilentRegistry` — code present, zero bytes to every selector — until `createMandate` began
+reading both registries itself, at which point no mandate could be granted against such a registry
+and the spend the test was built on stopped being reachable. That failure was the fix working, not a
+regression: the payer is now refused before committing to authority no spend could ever have
+satisfied. The test runs against `SilenceableRegistry` instead, which answers properly, is granted
+against, is spent through once on each path, and is then told to stop. That leaves one route to the
+gap this finding documents, and it is not a contrived one, since both registry addresses are
+`immutable` and the change therefore has to come from inside the registry — a proxy upgrade — rather
+than from repointing this contract. The successful spend before the flip is a control rather than
+scene-setting: without it, a refusal afterwards would be equally consistent with a mandate that was
+never spendable, and the assertion would pin nothing to the decode. `SilentRegistry` keeps the one
+claim it can still carry, which F13 moved from the spend to the grant, and that is the fourth test.
 
 ---
 

@@ -545,7 +545,7 @@ contract MandateManager {
     // Errors.
     //
     // The correspondence with reference/policy.js is one-directional, and v1's
-    // comment here claimed it both ways. Every one of the model's 26 `Denial`
+    // comment here claimed it both ways. Every one of the model's 27 `Denial`
     // reasons and all 4 of its `ApprovalRefusal` codes have an error below with the
     // same name — that is the direction that matters, because a denial the contract
     // could not express would be a real divergence. The reverse does not hold:
@@ -556,20 +556,24 @@ contract MandateManager {
     // rather than policy outcomes — plus TransferFailed, which the model cannot have
     // an opinion about because it has no token, and RegistryHasNoCode, which belongs
     // to a deployment step the model never performs.
-    // 26 + 4 + 9 = 39, which is the number of `error` declarations below. Derived from
+    // 27 + 4 + 9 = 40, which is the number of `error` declarations below. Derived from
     // both files on 2026-08-30, and the ninth term added on 2026-09-02, by mapping each
-    // code to its PascalCase name rather than counting by eye.
+    // code to its PascalCase name rather than counting by eye. The first term went from 26
+    // to 27 on 2026-09-10, when F13 split `CredentialFailed` out of `CredentialMissing`. It
+    // lands in the Denial column rather than among the nine because it refuses a SPEND; a
+    // grant-time mistake would have landed in the nine. F13's other half is why that had to
+    // be decided by what the error MEANS rather than by where it is raised — see below.
     //
-    // SpendCountCeiling is the newest of the 26, and the one whose mirror took an
-    // argument to settle: JavaScript has no uint32, and the condition sits 2^32 spends
-    // away. It is mirrored for the reason `MAX_AMOUNT` gives about the uint96 amount
-    // ceiling, which is that a width the model does not enforce leaves the model MORE
-    // PERMISSIVE than the thing it specifies, and a model that allows what the contract
-    // refuses is not a specification of it. What decides it is that this condition denies
-    // a spend. The eight above sit outside the model because they are grant-time mistakes,
-    // or because they belong to a token the model does not have, and a counter at its
-    // ceiling is neither of those: it is a spend the contract will not perform, so the
-    // specification has to say so too.
+    // SpendCountCeiling is one of the 27 — CredentialFailed is the newest — and the
+    // one whose mirror took an argument to settle: JavaScript has no uint32, and the
+    // condition sits 2^32 spends away. It is mirrored for the reason `MAX_AMOUNT`
+    // gives about the uint96 amount ceiling, which is that a width the model does not
+    // enforce leaves the model MORE PERMISSIVE than the thing it specifies, and a
+    // model that allows what the contract refuses is not a specification of it. What
+    // decides it is that this condition denies a spend. The nine above sit outside the
+    // model because they are grant-time mistakes, or because they belong to a token the
+    // model does not have, and a counter at its ceiling is neither of those: it is a
+    // spend the contract will not perform, so the specification has to say so too.
     //
     // v1's version of this note said "23 + 10 = 33" and named BadConfig and NotCosigner
     // among the ten with no counterpart. Both are model codes — they are two of the four
@@ -579,10 +583,18 @@ contract MandateManager {
     // about derived numbers applies: a total that comes out right is not evidence that
     // its terms do.
     //
-    // The model's own v2 additions are the five codes its `Denial` block marks NEW IN v2:
-    // SelfPayment, UnrecoverableRecipient, NonceReserved, CosignExpired and SpendCountCeiling.
-    // The grant-time refusals `createMandate` gained in v2 add no code, because the model
-    // throws for those rather than naming one.
+    // The model's own v2 additions are the six codes its `Denial` block marks NEW IN v2:
+    // SelfPayment, UnrecoverableRecipient, NonceReserved, CosignExpired, SpendCountCeiling and
+    // CredentialFailed, the last of which F13 adds in the same commit as the check below.
+    //
+    // MOST of the grant-time refusals `createMandate` gained in v2 add no code, because the
+    // model throws for those rather than naming one. F13 is the exception, and it is called
+    // out here because it breaks the tidy rule the paragraph above leans on: `createMandate`
+    // now raises IdentityNotHeld, CredentialWrongValidator and CredentialWrongAgent — three
+    // DENIAL codes, at grant time, and that reuse is deliberate rather than an oversight. The
+    // three already name the conditions the grant-time check tests, and a payer who reads one
+    // of them learns the true and useful thing: this mandate would not spend right now. Three
+    // grant-only twins would have said the same in new words for three more selectors.
     //
     // When called through Memo, Arc wraps a child revert in MemoFailed(bytes), so
     // clients must unwrap one layer before decoding these.
@@ -651,7 +663,7 @@ contract MandateManager {
     /// did and the window closed, so the agent should ask the same human again rather than
     /// wonder whether the request ever reached them. Carrying the deadline says WHEN it
     /// died, which is the fact an operator reconstructing a failed run actually needs. The
-    /// same reasoning splits `CredentialMissing` under #23.
+    /// same reasoning splits `CredentialMissing`, which F13 did under #23 — `CredentialFailed`.
     error CosignExpired(bytes32 spendHash, uint40 validUntil);
     /// NEW IN v2 (F16). A `validUntil` at or below `block.timestamp` would be born dead, and
     /// one past `MAX_COSIGN_TTL` is the tail F16 exists to end. Refused rather than clamped:
@@ -684,6 +696,20 @@ contract MandateManager {
     /// state the public interface refuses to create, and the reason is written there.
     error IdentityTransferred();
     error CredentialMissing();
+    /// NEW IN v2 (F13). Split out of `CredentialMissing`, which named three different facts at
+    /// three sites: the registry call reverting, a zero validator address, and an attestation
+    /// whose response sits below the payer's floor. The first two mean NO ATTESTATION EXISTS,
+    /// which is an integration problem for whoever wired the agent up. This one means one does
+    /// exist and SAYS THE AGENT FAILED, which is a reason to revoke. A payer debugging could not
+    /// tell those apart, and they call for opposite actions.
+    ///
+    /// The same split, for the same reason, as `CosignRequired` and `CosignExpired` above.
+    ///
+    /// Raised only by `spend`. The grant-time credential check F13 added in the same change
+    /// deliberately does NOT raise it: `minResponse` is the gate's verdict rather than one of
+    /// its identifiers, and a verdict is what `spend` re-asks on every payment. See
+    /// `_requireCredentialAtGrant` for why the gate divides there.
+    error CredentialFailed();
     error CredentialStale();
     error CredentialWrongValidator();
     error CredentialWrongAgent();
@@ -958,6 +984,17 @@ contract MandateManager {
         // stays legal and is the ordinary case — it is what mandate 2 does on Arc today.
         if (p.cosigner == p.spender) revert BadConfig();
 
+        // F52. F45's rule and F51's, carried onto the third role field — the one they missed.
+        // `approveCosignFor` requires `msg.sender == m.cosigner`, and no path in this contract
+        // makes an external call to itself, so a mandate naming this address as its cosigner
+        // can never have an approval written for it. There is no `setCosigner`, and no path
+        // anywhere clears a mandate, so the salt answers `MandateExists` forever while every
+        // spend above the threshold answers `CosignRequired` for the life of the mandate, with
+        // `getMandate` reporting F_COSIGN set and a plausible cosigner throughout. That is
+        // exactly what the paragraph above refuses: a grant carrying the appearance of a
+        // control and none of its substance. Unconditional for the same reason that one is.
+        if (p.cosigner == address(this)) revert BadConfig();
+
         if (p.windows.length > MAX_WINDOWS) revert BadWindow();
 
         _mandates[mandateId] = Mandate({
@@ -1089,6 +1126,13 @@ contract MandateManager {
             if (p.identity.expectedOwner != address(0) && p.identity.expectedOwner != p.spender) {
                 revert BadConfig();
             }
+            // ---- F13: and now the registry has to agree -------------------------------
+            // Last in this block on purpose. The two refusals above are pure comparisons on
+            // calldata, so a payer who mistyped the struct gets that diagnosis without paying
+            // for a registry read; this line is the external call. It is also where
+            // `createMandate` stops being a function that touches nothing outside itself —
+            // the accepted cost of that is argued at the helper, not restated here.
+            _requireIdentityAtGrant(p.identity.agentId, p.spender);
             _identity[mandateId] = p.identity;
         }
         if (flags & F_CREDENTIAL != 0) {
@@ -1125,6 +1169,27 @@ contract MandateManager {
             // `_checkCredential` documents and keeps; this line closes the half that lets a
             // stranger choose the record being read.
             if (p.credential.requestHash == 0) revert BadConfig();
+            // ---- F13: and the named attestation is validated if it exists --------------
+            // Same placement rule as the identity gate above, and the same accepted cost. The
+            // attestation does NOT have to exist at grant time, and it does not have to PASS:
+            // `minResponse` and `maxStaleness` are the verdict this check defers rather than
+            // its identifiers, and `spend` re-asks them on every payment. F43 is what settles
+            // absence; `_requireCredentialAtGrant` is where that whole division is argued.
+            //
+            // The fallback agent id is read THROUGH THE FLAG rather than straight off
+            // `p.identity`, and the difference is worth the extra term. `_identity[mandateId]`
+            // is written only inside the `F_IDENTITY` block above, so with that flag clear the
+            // identity struct in calldata is never stored and never validated here. F32 above
+            // does refuse a non-zero `identity.agentId` whenever the flag is clear, so as the
+            // code stands the ternary and the raw field are provably the same number and this
+            // term is redundancy rather than a repair. It stays because the equality it leans
+            // on is enforced by a different feature's guard a hundred lines up: reading the
+            // field raw would let a later edit to F32 rebind this grant to leftover junk, which
+            // `_checkCredential` would then look for in storage, find as zero, and skip, leaving
+            // this function to revert `CredentialWrongAgent` on a mandate every `spend` would
+            // have honoured. Mirroring the storage read keeps the writer and the enforcer asking
+            // the same question without resting on a check two features away.
+            _requireCredentialAtGrant(p.credential, (flags & F_IDENTITY != 0) ? p.identity.agentId : 0);
             _credential[mandateId] = p.credential;
         }
 
@@ -1615,7 +1680,7 @@ contract MandateManager {
         uint256 expectedAgent = c.agentId != 0 ? c.agentId : _identity[mandateId].agentId;
         if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();
 
-        if (response < c.minResponse) revert CredentialMissing();
+        if (response < c.minResponse) revert CredentialFailed();
         // F31. The `nowTs > lastUpdate` conjunct this replaces stopped an unsigned subtraction
         // underflowing by treating a future-dated attestation as fresh forever. A validator
         // that sets `lastUpdate` ahead of the chain clock buys an attestation that never
@@ -1631,6 +1696,184 @@ contract MandateManager {
         if (c.maxStaleness != 0 && (lastUpdate > nowTs || nowTs - lastUpdate > c.maxStaleness)) {
             revert CredentialStale();
         }
+    }
+
+    /**
+     * @notice F13's grant-time half of the identity gate: the question `_checkIdentity` asks on
+     * every spend, asked once more at the moment the authority is written.
+     *
+     * NEW IN v2 (F13). `createMandate` previously checked only that `identityRegistry` was
+     * non-zero and that `agentId` was non-zero (F33), so `F_IDENTITY` with a mistyped id
+     * produced a mandate `isLive` reported true for, `spendable` reported full headroom for,
+     * and every `spend` refused. Fail-closed, so no funds were ever at risk; what failed was a
+     * payer believing they had delegated when they had not.
+     *
+     * THE ACCEPTED COST, written beside the check rather than left to be rediscovered as a
+     * surprise: this gives `createMandate` a liveness dependency it never had. A grant now
+     * REVERTS when the identity registry is unreachable, which is a new failure mode for a
+     * function that previously touched nothing external. That is the correct trade for a
+     * control whose entire purpose is that the payer can believe it. `isLive` and
+     * `policyHeadroom` keep making no external calls at all — see `policyHeadroom` for why the
+     * pre-flight views stay offline, a justification this change does not disturb.
+     *
+     * WHAT THE REVERT DOES NOT TELL THE PAYER, and why no error is named for it. The
+     * `IIdentityRegistry` note above this contract records that ERC-8004 identities are
+     * ERC-721, so `ownerOf` REVERTS for a nonexistent or burned id rather than answering
+     * `address(0)`. The catch arm therefore cannot separate "this registry is unreachable"
+     * from "no such agent" — and the second is the commoner mistake by a wide margin, being
+     * the one a typo produces. An error named for unreachability would be wrong most of the
+     * times it fired. The constructor already refuses a registry that is non-zero and holds
+     * no code, so what is left here is narrow: a proxy whose implementation was removed, or
+     * one that reverts everything.
+     *
+     * WHY THIS REFUSES WHAT `_requireCredentialAtGrant` PERMITS, since the two sit side by side
+     * answering an absent record in opposite directions. F43 says a grant the enforcer would
+     * honour must not be refused by the writer, comparing the two AT ONE INSTANT, on the same
+     * registry state. Read across time it would forbid every grant-time check there is, F13's
+     * included. Under the instant reading this helper is compliant by construction: it is
+     * `_checkIdentity` with `spender` where `msg.sender` stands, so a grant it refuses is a spend
+     * that would have reverted in the same block with the same error.
+     *
+     * The credential helper differs in what it OBSERVES, not in the rule it obeys. A registry
+     * holding no record is not saying the spend fails: `spend` re-reads the verdict every time,
+     * a validator who files between the grant and the first payment turns that same mandate into
+     * one `spend` honours, and lateness is the point of the `F_CREDENTIAL` gate. `ownerOf`
+     * carries no such later at all. It reports which token exists and who holds it now, and a
+     * payer whose grant the registry contradicts has in almost every case mistyped the id. A
+     * missing identity is a typo; a missing attestation is a delay.
+     *
+     * What strictness costs is the payer naming an id that will be minted, or transferred to the
+     * spender, after the grant — and that payer can grant again once it is. What relaxing would
+     * cost is the mandate F13 exists to prevent: authority that reads as granted, agreed with by
+     * `isLive` and `spendable`, and usable by no spend. The refusal reaches the payer while they
+     * still hold the context to fix it, the direction this contract takes whenever the two are in
+     * tension.
+     *
+     * ONE FAILURE MODE IS NOT CAUGHT, and cannot be. F49 records that a registry succeeding with
+     * data that will not decode as one `address` — fewer than 32 bytes, or a word with any of
+     * its top twelve set — reverts while decoding, inside this frame, past the arm above. Here
+     * that stands in place of `IdentityNotHeld` and carries no selector at all. `_checkIdentity`
+     * makes the same trade at spend time, where the note states the limit in full, and the
+     * constructor's code-size check closes the plainest route to it.
+     *
+     * Reentrancy is not a new concern here, and the reason is structural rather than argued:
+     * `IIdentityRegistry.ownerOf` is declared `view`, so solc emits STATICCALL and the callee
+     * cannot write state or re-enter this contract. What a hostile registry CAN still do is
+     * burn gas or revert, and both land on the grant of the payer who chose to set the flag.
+     *
+     * @param agentId The identity token the gate names. Already required non-zero by the caller.
+     * @param spender The delegate this mandate is being written for, and the actor the
+     * comparison must use. `_checkIdentity` compares against `msg.sender`, which is the SPENDER
+     * at spend time and the PAYER here — reusing that helper would assert the payer owns the
+     * agent's token, which is wrong, and wrong in the direction that refuses valid grants.
+     */
+    function _requireIdentityAtGrant(uint256 agentId, address spender) private view {
+        address owner;
+        try identityRegistry.ownerOf(agentId) returns (address o) {
+            owner = o;
+        } catch {
+            owner = address(0);
+        }
+
+        // Shaped to mirror `_checkIdentity` line for line, so a reviewer diffing the two sees
+        // the sender difference and nothing else. The zero arm is redundant on its own terms —
+        // `spender` was required non-zero at the top of `createMandate`, so a zero owner already
+        // fails the second comparison — and it is kept because a silent divergence in this exact
+        // comparison is the thing the two helpers must never be allowed to develop.
+        if (owner == address(0) || owner != spender) revert IdentityNotHeld();
+    }
+
+    /**
+     * @notice F13's grant-time half of the credential check. Deliberately NOT the whole of
+     * `_checkCredential`: it validates the gate's IDENTIFIERS and leaves its VERDICT alone.
+     *
+     * NEW IN v2 (F13). That division is the useful part of this function, so it is stated
+     * plainly rather than left to be inferred from which lines are present.
+     *
+     * `requestHash`, `validator` and `agentId` name WHICH attestation the gate reads, and the
+     * payer fixes all three at grant time. A record filed under a mistyped hash never becomes
+     * the record the payer meant, so the three are compared here whenever the registry holds a
+     * record for them to be compared against, which spares the payer a useless mandate.
+     *
+     * `minResponse` and `maxStaleness` judge WHAT that attestation currently says, and re-asking
+     * that on every payment is the entire reason the gate exists. Checking them here would
+     * refuse an agent whose validator files a passing attestation between the grant and the
+     * first payment, and would refuse on Monday a grant that Friday's clock would have accepted.
+     * So the identifiers are checked once, here, and the verdict is checked every time, there.
+     *
+     * WHAT AN ABSENT RECORD MEANS HERE, and the case F43 decides: a hash the registry has never
+     * seen leaves the grant PERMITTED. An earlier version of this function refused it, and that
+     * refusal contradicted the rule this function's own last comment states — `spend` honours a
+     * mandate whose validator files afterwards, so refusing the grant withheld a mandate the
+     * enforcer would have accepted. Absence and a typo are ONE observation at grant time, so no
+     * check here can refuse the typo while admitting a validator who has not filed yet, and F43
+     * settles which way that ambiguity resolves.
+     *
+     * The whole tuple comes back either way, so the two identifier comparisons past existence
+     * add no call and no decode — only the comparisons themselves.
+     *
+     * `getValidationStatus` is `view`, so this is a STATICCALL for the reason
+     * `_requireIdentityAtGrant` gives. One failure mode is NOT caught and cannot be: F49 records
+     * that a registry which succeeds but returns data that will not decode into the declared
+     * tuple reverts while decoding, inside this contract's own frame, past the catch arm. The
+     * dynamic `string` in that tuple is what widens it. That revert is now the ONLY way this
+     * helper refuses a grant it cannot read, and it carries no selector, which is the whole of
+     * what F49 costs a payer here.
+     *
+     * @param c The credential struct exactly as the payer supplied it, in calldata.
+     * @param fallbackAgentId The identity gate's agent id, used when the credential names none.
+     * The call site passes `p.identity.agentId` under `F_IDENTITY` and zero otherwise, rather
+     * than `_identity[mandateId].agentId`, which is what `_checkCredential` reads. The two are
+     * equal in every case a caller can construct: F32 refuses a non-zero `identity.agentId`
+     * whenever `F_IDENTITY` is unset, and the identity block above writes exactly this value
+     * when it is set. Calldata is cheaper and needs no ordering dependency on that block.
+     */
+    function _requireCredentialAtGrant(CredentialGate calldata c, uint256 fallbackAgentId) private view {
+        address gotValidator;
+        uint256 gotAgentId;
+
+        try validationRegistry.getValidationStatus(c.requestHash) returns (
+            address v, uint256 aid, uint8, bytes32, string memory, uint256
+        ) {
+            gotValidator = v;
+            gotAgentId = aid;
+        } catch {
+            // Absence, and on Arc this is the arm absence actually takes. The live
+            // ValidationRegistry answers a hash it has never seen by reverting `Error("unknown")`,
+            // measured 2026-08-24 and recorded in `test/mocks/MockRegistries.sol`, so a payer who
+            // grants before the validator files arrives HERE rather than at the zero test below.
+            // Relaxing only that test would have left this defect whole on the one chain that
+            // matters. A registry broken for some other reason lands here too and is treated the
+            // same, since the two are indistinguishable from inside this frame; the cost is a
+            // mandate that cannot spend until the registry answers, which the payer may revoke.
+            return;
+        }
+
+        // The zero tuple is the other shape a registry uses for "never seen", and it is NOT
+        // subsumed by the comparison beneath it: the biconditional in `createMandate` already
+        // forces `c.validator` non-zero whenever this runs, so without this line a zero answer
+        // would fall through and report a WRONG validator when the truth is that no record
+        // exists. Returning rather than reverting is what keeps F17 reachable — a cosigner must
+        // be able to approve a mandate whose attestation a third party has yet to file, which
+        // `test_f17_approvingWhileACredentialIsMissing_isAllowed` asserts in passing, and which
+        // F13's own section in `test/Gates.t.sol` now asserts as the thing under test.
+        if (gotValidator == address(0)) return;
+        if (gotValidator != c.validator) revert CredentialWrongValidator();
+
+        // The same fallback `_checkCredential` applies, including its documented gap: with both
+        // ids zero the comparison is skipped and the gate binds to a request rather than to an
+        // agent. That gap is argued at the spend-time site and must not be closed unilaterally
+        // here, because a grant the enforcer would honour must not be refused by the writer —
+        // that is F43's rule read in the other direction.
+        //
+        // `fallbackAgentId` is passed in rather than read from `_identity[mandateId]` here, and the
+        // caller's contract is that it must equal whatever that slot holds. It does, twice over: the
+        // `F_IDENTITY` block in `createMandate` writes the slot immediately before this runs, and
+        // F32 refuses a non-zero calldata agent id when that flag is clear, so the argument and the
+        // slot agree whether or not the call site screens the field. The argument is taken instead
+        // of the slot because the load costs more than the parameter, not because the two diverge.
+        uint256 expectedAgent = c.agentId != 0 ? c.agentId : fallbackAgentId;
+        if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();
     }
 
     // =====================================================================
@@ -1943,9 +2186,9 @@ contract MandateManager {
         // The bound is on the line directly above, which is closer than `spend`'s
         // equivalent and sound for the same reason: the guard is unconditional and
         // nothing between it and the cast can change `amount`. Narrowing here rather
-        // than at the two uses below keeps one line to audit, and keeps the local the
-        // same width as the one `spend` hashes, which is what makes the two spend hashes
-        // agree. If the guard above is ever made conditional this becomes unsound.
+        // than at the two uses below keeps one line to audit. It has nothing to do with
+        // the two spend hashes agreeing: both sites hash the uint256 `amount`, not this
+        // local. If the guard above is ever made conditional this becomes unsound.
         // forge-lint: disable-next-line(unsafe-typecast)
         uint96 amount96 = uint96(amount);
 
@@ -2352,6 +2595,9 @@ contract MandateManager {
         // What this still does not cover, stated rather than implied: a lifetime cap with no
         // headroom left, and a nonce already burned. Both need the amount or the nonce, neither
         // of which this signature carries, and `spendable` is the view that answers the first.
+        // The spend-count ceiling was a third omission until F53, and it needed neither — which
+        // is why the argument in this paragraph could never have caught it, and why the cover
+        // it now has sits in `_isPermanentlyDead` rather than in another clause here.
         // forge-lint: disable-next-line(block-timestamp)
         return validUntil != 0 && block.timestamp < validUntil && !_isPermanentlyDead(_mandates[mandateId]);
     }
@@ -2453,10 +2699,10 @@ contract MandateManager {
         return validUntil != 0 && nowTs < validUntil;
     }
 
-    /// @dev The permanent half of `isLive`: the mandate does not exist, has been revoked, or is
-    /// past its own expiry. No later block can undo any of the three.
+    /// @dev The permanent half of `isLive`: the mandate does not exist, has been revoked, is
+    /// past its own expiry, or has burned its last spend. No later block can undo any of the four.
     ///
-    /// Split out for `isCosignApproved`, which needs exactly these three and must not fold in
+    /// Split out for `isCosignApproved`, which needs exactly these four and must not fold in
     /// the `notBefore` test the way `isLive` does. Approving ahead of a mandate's start is a
     /// supported flow — the scheduled-payment case — so a stored approval waiting for its
     /// mandate to open is live, and F35 reused `isLive` here and reported every such approval as
@@ -2469,6 +2715,13 @@ contract MandateManager {
     /// @return True if no later block can make this mandate spendable again.
     function _isPermanentlyDead(Mandate storage m) private view returns (bool) {
         if (m.payer == address(0) || m.revoked) return true;
+        // F53 adds the fourth term, the one the `@return` above always implied. `spend` refuses
+        // `spendCount == type(uint32).max` unconditionally, so a mandate at the ceiling can never
+        // spend again — without this line the stated postcondition was false, and both views built
+        // on it reported such a mandate as live and its stored approvals as honourable. Both
+        // callers are views, so no spend path changes. The state needs 2^32 spends and is not
+        // expected to occur; the line is here because the predicate claims to be exhaustive.
+        if (m.spendCount == type(uint32).max) return true;
         // forge-lint: disable-next-line(block-timestamp)
         return m.flags & F_EXPIRY != 0 && block.timestamp >= m.expiresAt;
     }

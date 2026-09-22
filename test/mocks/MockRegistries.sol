@@ -219,3 +219,100 @@ contract SilentRegistry {
     fallback() external {}
 }
 
+/**
+ * A registry that answers decodably until it is told to stop.
+ *
+ * NEW IN F13. `SilentRegistry` above can no longer carry F49's claim by itself, because
+ * `createMandate` reads both registries at grant time now and the empty answer fails to decode
+ * there first. The mandate F49 needs in order to reach a spend cannot be created against a
+ * registry that was silent all along. That is an improvement rather than a loss, since the payer
+ * is refused before committing to a mandate no spend could ever have satisfied, and it leaves one
+ * route to the gap F49 documents: a registry that decoded correctly at grant and returns the
+ * wrong shape afterwards.
+ *
+ * `SilentRegistry`'s own comment names that survivor as the case it stands for, "a registry
+ * upgraded into returning the wrong shape", and this mock is that sentence made reachable.
+ * `MandateManager` holds both registry addresses as `immutable`, so the address behind a live
+ * mandate can never be repointed. The change has to come from inside the registry itself, exactly
+ * as an upgrade behind a proxy would do on a real chain.
+ *
+ * A bare `fallback` cannot express this, since a declared selector always matches and control
+ * never reaches the fallback. Each typed function therefore answers with zero bytes through an
+ * assembly `return(0, 0)` once `goSilent` has been called, which is the same empty answer and the
+ * same decode failure as before, arriving this time from a contract that was answering properly a
+ * moment earlier.
+ */
+contract SilenceableRegistry {
+    struct Status {
+        address validator;
+        uint256 agentId;
+        uint8 response;
+        bytes32 responseHash;
+        string tag;
+        uint256 lastUpdate;
+    }
+
+    bool public silent;
+
+    mapping(uint256 => address) private _owner;
+    mapping(bytes32 => Status) private _status;
+
+    function mint(uint256 agentId, address to) external {
+        _owner[agentId] = to;
+    }
+
+    function setStatus(bytes32 requestHash, address validator, uint256 agentId, uint8 response, uint256 lastUpdate)
+        external
+    {
+        _status[requestHash] = Status({
+            validator: validator,
+            agentId: agentId,
+            response: response,
+            responseHash: bytes32(0),
+            tag: "verified",
+            lastUpdate: lastUpdate
+        });
+    }
+
+    /// Flip to the upgraded-into-the-wrong-shape behaviour, one way only. A mock that could flip
+    /// back would invite a staging order the case being modelled cannot produce, since a registry
+    /// is upgraded forward in time and a mandate granted before the upgrade cannot be re-granted
+    /// after it.
+    function goSilent() external {
+        silent = true;
+    }
+
+    /// The `memory-safe` annotation is honest rather than convenient: a length of zero reads no
+    /// memory at all, so the offset is immaterial and no region outside the allowed ones is
+    /// touched. `return` is not a state-modifying instruction, which is what keeps this `view`.
+    function ownerOf(uint256 agentId) external view returns (address) {
+        if (silent) {
+            assembly ("memory-safe") {
+                return(0, 0)
+            }
+        }
+        return _owner[agentId];
+    }
+
+    function getValidationStatus(bytes32 requestHash)
+        external
+        view
+        returns (
+            address validatorAddress,
+            uint256 agentId,
+            uint8 response,
+            bytes32 responseHash,
+            string memory tag,
+            uint256 lastUpdate
+        )
+    {
+        if (silent) {
+            assembly ("memory-safe") {
+                return(0, 0)
+            }
+        }
+        Status memory s = _status[requestHash];
+        return (s.validator, s.agentId, s.response, s.responseHash, s.tag, s.lastUpdate);
+    }
+}
+

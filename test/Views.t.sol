@@ -40,6 +40,27 @@ contract ViewsTest is Base {
         vm.prank(payer);
         mm.revoke(id);
         assertFalse(mm.isLive(id), "revoked");
+
+        // The fourth condition, and the one this test's name was wrong about until F53. `spend`
+        // refuses `spendCount == type(uint32).max` unconditionally, so a mandate at the ceiling
+        // can never spend again: the same finality `revoked` has, arrived at by a counter instead
+        // of by a call. The counter is placed rather than reached, for the reason
+        // `Base.placeSpendCount` gives.
+        bytes32 capped = grant(simpleParams());
+        placeSpendCount(capped, type(uint32).max - 1);
+
+        // One spend short of the ceiling it is live, and that spend settles. This half pins the
+        // answer below to the width of the counter rather than to any large value of it: a view
+        // off by one, or one calling any heavily used mandate dead, would fail here.
+        assertTrue(mm.isLive(capped), "one spend short of the ceiling is still live");
+        pay(capped, 1);
+        assertEq(uint256(mm.getMandate(capped).spendCount), uint256(type(uint32).max), "the counter is at its ceiling");
+
+        assertFalse(mm.isLive(capped), "F53: a mandate that can never spend again is not live");
+
+        // And the view agrees with the contract rather than merely with itself, which is the
+        // whole point of a pre-flight view.
+        payReverts(capped, 1, MandateManager.SpendCountCeiling.selector);
     }
 
     // ------------------------------------------------------ policyHeadroom
