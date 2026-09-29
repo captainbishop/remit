@@ -632,9 +632,15 @@ contract GatesTest is Base {
      * and two of those three are refusals — which is exactly the shape a mutation census reports
      * as a survivor, since deleting the line turns nothing red.
      *
-     * The identity half is deliberately absent here. `_requireIdentityAtGrant` REFUSES an absent
-     * record while this helper PERMITS one, and whether that asymmetry is correct is an open
-     * question for the payer-facing design rather than one an assertion here should foreclose.
+     * The identity half is asserted here in one direction only. `_requireIdentityAtGrant` refuses on
+     * two input classes — an identity held by NO ONE (`owner == address(0)`) and an identity held by
+     * SOMEONE OTHER than the spender (`owner != spender`) — and only the second is asserted below. The
+     * wrong-owner refusal is the exact analog of the two credential refusals: an identifier the payer
+     * got wrong, born dead, moved to the one transaction the payer is watching.
+     *
+     * The absent-record arm is left unasserted on purpose. `_requireIdentityAtGrant` REFUSES an absent
+     * record while this helper PERMITS one, and whether that asymmetry is correct is an open question
+     * for the payer-facing design rather than one an assertion here should foreclose.
      */
 
     /// Arc's measured shape for a hash the registry has never seen is a revert, so a payer who
@@ -719,6 +725,17 @@ contract GatesTest is Base {
         grantReverts(
             withCredential(simpleParams(), boss, KYC_HASH, 999, 1 days), MandateManager.CredentialWrongAgent.selector
         );
+    }
+
+    /// The identity analog of the two refusals above, and design-neutral in the sense the section
+    /// header reserves. `setUp` mints `AGENT_ID` to `agent`; here it is transferred to `other` before
+    /// the grant, so the mandate names an identity its spender does not hold. Every spend would answer
+    /// `IdentityNotHeld`, so the grant refuses it at the one transaction the payer is watching. This
+    /// says nothing about an identity held by NO ONE — that arm stays open per the header, and this
+    /// test still passes if it is ever relaxed, because a third party's identity is refused either way.
+    function test_f13_grantNamingAnIdentityHeldByAnother_isRefused() public {
+        identity.transferAgent(AGENT_ID, other);
+        grantReverts(withIdentity(simpleParams(), AGENT_ID, agent), MandateManager.IdentityNotHeld.selector);
     }
 
     /**

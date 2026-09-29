@@ -420,6 +420,103 @@ HAND = {
             },
         ],
     },
+    "_requireIdentityAtGrant": {
+        "cases": [
+            {
+                # F13's grant-time identity guard is one two-arm disjunction, so the removal
+                # operator can only delete the whole refusal, which the bare census caught at line
+                # 1783. What removal cannot see is one disjunct going missing, and the wrong-owner
+                # arm is the load-bearing one: without it a grant naming an identity a STRANGER
+                # holds is written, and every spend on it then answers IdentityNotHeld forever.
+                # Gates.t.sol's test_f13_grantNamingAnIdentityHeldByAnother_isRefused transfers the
+                # token to `other` before the grant, so it is exactly the input this arm stops
+                # refusing, and it is the sole grant-time killer.
+                "label": "the wrong-owner arm is dropped, so a stranger's identity is accepted",
+                "find": ["if (owner == address(0) || owner != spender) revert IdentityNotHeld();"],
+                "replace": ["        if (owner == address(0)) revert IdentityNotHeld();"],
+            },
+            {
+                # The zero-owner arm, EQUIVALENT for the reason the guard's own comment gives:
+                # `p.spender == address(0)` is refused with BadConfig at the top of createMandate
+                # (line 846), this helper's ONLY caller (line 1135), so `spender` is non-zero
+                # whenever this runs. An absent identity reads owner == address(0), and against a
+                # non-zero spender the surviving `owner != spender` is then true, so it refuses the
+                # identical input under the identical selector. The arms diverge only at
+                # spender == address(0), which no grant reaches. If that guard ever goes this stops
+                # being equivalent, and the gate will say so on the next run.
+                "label": "the zero-owner arm is dropped",
+                "find": ["if (owner == address(0) || owner != spender) revert IdentityNotHeld();"],
+                "replace": ["        if (owner != spender) revert IdentityNotHeld();"],
+                "survives": (
+                    "spender is refused when zero by the BadConfig guard at the top of "
+                    "createMandate (line 846), this helper's only caller, so an absent identity "
+                    "(owner == address(0)) still fails the surviving `owner != spender` against a "
+                    "non-zero spender. The arms diverge only at spender == address(0), which no "
+                    "grant can reach; the arm is kept so this mirrors spend-time _checkIdentity."
+                ),
+            },
+        ],
+    },
+    "_requireCredentialAtGrant": {
+        "cases": [
+            {
+                # F13/F17 in the must-not-refuse direction, which removal cannot state: there is no
+                # revert on the catch arm to delete, only a `return` that DEFERS the verdict to
+                # spend time. Rewriting that return into a refusal is the way to prove a test forbids
+                # it. On Arc a hash the registry has never seen reverts (measured 2026-08-24), so a
+                # payer who grants before the validator files lands here;
+                # test_f13_grantingBeforeTheAttestationIsFiled_isAllowed grants against an unfiled
+                # hash and requires the grant to stand, so it catches this.
+                "label": "the catch arm refuses an unfiled credential instead of deferring",
+                "find": ["return;"],
+                "replace": ["            revert CredentialMissing();"],
+            },
+            {
+                # The zero-tuple shape of the same "never seen" answer, and the other must-not-refuse
+                # return. A registry that returns a zero validator rather than reverting has still
+                # filed nothing, so the grant has to defer here too.
+                # test_f13_grantingAgainstAZeroTupleRegistry_isAllowed sets revertOnUnknown false and
+                # grants against an unfiled hash, reaching this arm, so it is the killer.
+                "label": "the zero-tuple arm refuses instead of deferring",
+                "find": ["if (gotValidator == address(0)) return;"],
+                "replace": ["        if (gotValidator == address(0)) revert CredentialMissing();"],
+            },
+            {
+                # The conjunct that keeps F43's documented no-agent-binding gap open at grant time.
+                # With both ids zero `expectedAgent` is zero and the check is skipped, so the gate
+                # binds to a request rather than an agent — a weakening F43 keeps on purpose so the
+                # writer refuses nothing the enforcer allows. Dropping the conjunct closes the gap on
+                # the writer's side alone. test_f43_theGrantKeepsTheSameAgentBindingGapAsTheSpend
+                # files a record about agent 999, grants with no agent binding, and requires both the
+                # grant and the spend to succeed, so it catches this.
+                "label": "the no-agent-binding conjunct is dropped, closing F43's gap on one side",
+                "find": ["if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
+                "replace": ["        if (gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
+            },
+            {
+                # The agent comparison inverted: refuse when the record's agent MATCHES, admit when
+                # it differs. This is the mirror of the wrong-agent refusal the bare census caught,
+                # reached from the other side — every happy-path grant whose record names the right
+                # agent (e.g. test_f13_grantingWhileTheAttestationFails_isAllowed) would now revert
+                # CredentialWrongAgent instead of standing, so it is caught.
+                "label": "the agent comparison is inverted, refusing the matching agent",
+                "find": ["if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
+                "replace": ["        if (expectedAgent != 0 && gotAgentId == expectedAgent) revert CredentialWrongAgent();"],
+            },
+            {
+                # The fallback ternary that feeds expectedAgent. Its job is to inherit the identity
+                # gate's agent id when the credential names none, and one test makes the two
+                # disagree: test_f13_theInheritedAgentIdIsTheOneComparedAtGrant pins agent 999 through
+                # the identity gate, leaves credential.agentId zero, and files a record about a
+                # different agent. Flipping the condition makes expectedAgent read zero instead of
+                # the inherited 999, the check is skipped, and the grant that test requires to be
+                # refused would stand — so it is the killer.
+                "label": "the inherit-fallback ternary is inverted, so the identity id is not inherited",
+                "find": ["uint256 expectedAgent = c.agentId != 0 ? c.agentId : fallbackAgentId;"],
+                "replace": ["        uint256 expectedAgent = c.agentId == 0 ? c.agentId : fallbackAgentId;"],
+            },
+        ],
+    },
 }
 
 # ---------------------------------------------------------------- proven equivalences
