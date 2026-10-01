@@ -426,8 +426,8 @@ HAND = {
                 # F13's grant-time identity guard is one two-arm disjunction, so the removal
                 # operator can only delete the whole refusal, which the bare census caught at line
                 # 1783. What removal cannot see is one disjunct going missing, and the wrong-owner
-                # arm is the load-bearing one: without it a grant naming an identity a STRANGER
-                # holds is written, and every spend on it then answers IdentityNotHeld forever.
+                # arm is the one that carries the refusal: without it a grant naming an identity a
+                # STRANGER holds is written, and every spend on it then answers IdentityNotHeld forever.
                 # Gates.t.sol's test_f13_grantNamingAnIdentityHeldByAnother_isRefused transfers the
                 # token to `other` before the grant, so it is exactly the input this arm stops
                 # refusing, and it is the sole grant-time killer.
@@ -486,9 +486,9 @@ HAND = {
                 # With both ids zero `expectedAgent` is zero and the check is skipped, so the gate
                 # binds to a request rather than an agent — a weakening F43 keeps on purpose so the
                 # writer refuses nothing the enforcer allows. Dropping the conjunct closes the gap on
-                # the writer's side alone. test_f43_theGrantKeepsTheSameAgentBindingGapAsTheSpend
-                # files a record about agent 999, grants with no agent binding, and requires both the
-                # grant and the spend to succeed, so it catches this.
+                # the writer's side alone, which test_f43_theGrantKeepsTheSameAgentBindingGapAsTheSpend
+                # exercises by filing a record about agent 999, granting with no agent binding, and
+                # requiring both the grant and the spend to succeed.
                 "label": "the no-agent-binding conjunct is dropped, closing F43's gap on one side",
                 "find": ["if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
                 "replace": ["        if (gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
@@ -497,15 +497,15 @@ HAND = {
                 # The agent comparison inverted: refuse when the record's agent MATCHES, admit when
                 # it differs. This is the mirror of the wrong-agent refusal the bare census caught,
                 # reached from the other side — every happy-path grant whose record names the right
-                # agent (e.g. test_f13_grantingWhileTheAttestationFails_isAllowed) would now revert
-                # CredentialWrongAgent instead of standing, so it is caught.
+                # agent (such as test_f13_grantingWhileTheAttestationFails_isAllowed) would now
+                # revert CredentialWrongAgent instead of standing, so it is caught.
                 "label": "the agent comparison is inverted, refusing the matching agent",
                 "find": ["if (expectedAgent != 0 && gotAgentId != expectedAgent) revert CredentialWrongAgent();"],
                 "replace": ["        if (expectedAgent != 0 && gotAgentId == expectedAgent) revert CredentialWrongAgent();"],
             },
             {
                 # The fallback ternary that feeds expectedAgent. Its job is to inherit the identity
-                # gate's agent id when the credential names none, and one test makes the two
+                # guard's agent id when the credential names none, and one test makes the two
                 # disagree: test_f13_theInheritedAgentIdIsTheOneComparedAtGrant pins agent 999 through
                 # the identity gate, leaves credential.agentId zero, and files a record about a
                 # different agent. Flipping the condition makes expectedAgent read zero instead of
