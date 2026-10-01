@@ -331,7 +331,7 @@ must hold no delegated code for the life of the mandate — and name EIP-7702 ex
   `F_CREDENTIAL` ⟺ `validator != 0` biconditional is permanent.
 - **Inline `IValidationRegistry` tuple-shape mismatch** — **retired**, not merely unproven: the
   6-field flat shape was decoded word by word from a live 2026-08-24 probe recorded at
-  `test/mocks/MockRegistries.sol:92-107`. Single-sample, but a real measurement.
+  `test/mocks/MockRegistries.sol:104-119`. Single-sample, but a real measurement.
 - **Precompiles as burn recipients** — **refuted by Arc**: "Sending value to a precompile address
   reverts."
 - **Multicall3From cap bypass** — **refuted:** every cap is re-read from committed state per

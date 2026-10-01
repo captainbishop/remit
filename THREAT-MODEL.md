@@ -2364,7 +2364,7 @@ no one took.
 
 **Severity: informational · Status: open, one comment · Confidence: certain, and this is the weakest finding in the document.**
 
-`MockRegistries.sol:124` declares `error NoSuchRequest(bytes32 requestHash)` and reverts with it
+`MockRegistries.sol:136` declares `error NoSuchRequest(bytes32 requestHash)` and reverts with it
 for an unknown request. Its **own header** records that the live registry does something
 different: on 2026-08-24 three non-existent request hashes were queried directly and all three
 reverted with the standard `Error(string)` selector `0x08c379a0` and the string `"unknown"`.
@@ -2950,7 +2950,7 @@ it read that `getValidationStatus(0)` names no request, so it answers with an em
 zero-validator check refuses it, and `CredentialMissing` is the only outcome that mandate can reach.
 **Corrected 2026-09-02**, from evidence this repository already held. The live probe of 2026-08-24 found
 a real record filed under `bytes32(0)` — validator `0xB152c3B6436318aD340153f1d30C9BBb8634681A`, agentId
-`16330`, response `1`, tag `"verified"` — which `test/mocks/MockRegistries.sol:92-96` keeps and
+`16330`, response `1`, tag `"verified"` — which `test/mocks/MockRegistries.sol:104-108` keeps and
 `DESIGN.md` reads as a failed attestation carrying a passing label.
 
 Zero is therefore an occupied key, and a mandate keyed there reads whatever a stranger filed. Usually the
@@ -4069,7 +4069,7 @@ still be hiding there.
   **The immutable rename was then measured, and it is declined.** Two costs expected of it
   turn out to be absent. No interface in the repo declares `usdc()`, `identityRegistry()` or
   `validationRegistry()`, and each getter has exactly one call site, all three in
-  `script/Deploy.s.sol:148-150`. The rename is width-neutral too, since `USDC` matches `usdc`
+  `script/Deploy.s.sol:179-181`. The rename is width-neutral too, since `USDC` matches `usdc`
   exactly and the two registry names grow one column each on two guard lines that sit well
   inside any formatter limit. Line citations are the one small cost that is real: three live
   pointers land on the immutable declarations, all three from `FORGE.md`'s own note table, and

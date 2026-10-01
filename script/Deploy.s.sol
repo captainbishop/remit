@@ -76,6 +76,10 @@ contract Deploy is Script {
     error RegistryHasNoCode(address registry);
     /// Two constructor arguments name the same address.
     error DuplicateArgument(address repeated);
+    /// A pinned registry does not answer `supportsInterface` the way its role requires: the
+    /// identity registry must be an ERC-721 and the validation registry must not be. Raised by
+    /// `run()` after a swap of the two pinned constants' values, which every read-back misses.
+    error RegistryInterfaceMismatch(address registry);
 
     // ---------------------------------------------------------------------
     // Pinned arguments. Every address below is commented with what it is and
@@ -138,6 +142,33 @@ contract Deploy is Script {
         if (address(mm.identityRegistry()) != ARC_TESTNET_IDENTITY) revert WiringMismatch();
         if (address(mm.validationRegistry()) != ARC_TESTNET_VALIDATION) revert WiringMismatch();
         console.log("read back against the pinned constants, not against the arguments");
+
+        // The read-backs above catch a transposed argument ORDER, but not a swap of the two
+        // registry CONSTANTS' own values: exchange the two pinned registry addresses at the top of
+        // this file and each read-back still compares a constant against itself, so all three hold
+        // and the mandate ships wired backwards. What a value-swap cannot fake is the interface each
+        // registry answers. The identity registry is an ERC-721 — this script's own `_checkIdentity`
+        // reasoning rests on `ownerOf` reverting for a missing token — and the validation registry
+        // is not; it answers a bespoke `getValidationStatus` tuple and has no `supportsInterface` at
+        // all. Measured live on Arc Testnet 2026-10-01 (evidence/arc-probe4.log): the identity
+        // address answers `supportsInterface(0x80ac58cd)` true and `supportsInterface(0xffffffff)`
+        // false, a spec-correct ERC-165, so its ERC-721 answer can be trusted; the validation
+        // address reverts the call outright. A swap puts the validation registry in the identity
+        // slot, where this probe no longer finds an ERC-721, and the identity registry in the
+        // validation slot, where it now finds one that should not be there.
+        //
+        // run()-only, not folded into `_checkRegistries`: that helper is shared with `runWith`,
+        // whose registries are whatever a caller types for a local chain and need not be ERC-721.
+        // These two addresses are pinned and their interfaces are measured, so the assertion is
+        // grounded here and nowhere else. It runs after the broadcast for the same reason the three
+        // read-backs do, and the documented dry-run surfaces it before any real deployment.
+        if (ARC_TESTNET_IDENTITY != address(0) && !_supportsErc721(ARC_TESTNET_IDENTITY)) {
+            revert RegistryInterfaceMismatch(ARC_TESTNET_IDENTITY);
+        }
+        if (ARC_TESTNET_VALIDATION != address(0) && _supportsErc721(ARC_TESTNET_VALIDATION)) {
+            revert RegistryInterfaceMismatch(ARC_TESTNET_VALIDATION);
+        }
+        console.log("identity registry is ERC-721, validation registry is not");
     }
 
     /**
@@ -294,5 +325,20 @@ contract Deploy is Script {
         if (usdc_ == identity_) revert DuplicateArgument(usdc_);
         if (usdc_ == validation_) revert DuplicateArgument(usdc_);
         if (identity_ == validation_ && identity_ != address(0)) revert DuplicateArgument(identity_);
+    }
+
+    /**
+     * True when `reg` affirmatively claims ERC-721 support through ERC-165, with every other
+     * answer — a revert, a short return, a word that is not `true` — read as "no". Mirrors
+     * `_checkDecimals`' raw-staticcall idiom rather than a typed call, so a registry that reverts
+     * (the validation registry does) or returns something undecodable cannot propagate out of this
+     * frame; it simply reads as unsupported. That is why the probe is fail-closed in only one
+     * direction: a true answer is trusted, and everything else denies. `supportsInterface`'s own
+     * selector is `0x01ffc9a7` and the ERC-721 interface id is `0x80ac58cd`.
+     */
+    function _supportsErc721(address reg) private view returns (bool) {
+        (bool ok, bytes memory ret) =
+            reg.staticcall(abi.encodeWithSignature("supportsInterface(bytes4)", bytes4(0x80ac58cd)));
+        return ok && ret.length == 32 && abi.decode(ret, (bool));
     }
 }

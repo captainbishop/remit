@@ -54,6 +54,18 @@ contract MockIdentityRegistry {
         if (o == address(0)) revert ERC721NonexistentToken(agentId);
         return o;
     }
+
+    /// ERC-165 / ERC-721, modelling the live Arc identity registry measured 2026-10-01 in
+    /// `evidence/arc-probe4.log`: `supportsInterface(0x01ffc9a7)` and `(0x80ac58cd)` are both
+    /// true and `(0xffffffff)` is false, which is a spec-correct ERC-165. `script/Deploy.s.sol`'s
+    /// `run()` reads this to tell the identity registry (an ERC-721) apart from the validation
+    /// registry (which has no `supportsInterface` and reverts the call), so a swap of the two
+    /// pinned addresses is refused. Without it that probe's happy path could not be exercised,
+    /// since the etched identity registry would otherwise revert the same call the live one
+    /// answers.
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7 || interfaceId == 0x80ac58cd;
+    }
 }
 
 /**

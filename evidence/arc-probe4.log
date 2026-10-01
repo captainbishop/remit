@@ -1,0 +1,40 @@
+Arc Testnet, 2026-10-01. The interface split that grounds script/Deploy.s.sol's run()
+registry-swap probe: the identity registry answers ERC-165/ERC-721, and the validation
+registry has no supportsInterface and reverts the call. RPC https://rpc.testnet.arc.io.
+Re-run any line below to confirm; a true answer on the identity address and a revert on
+the validation address are what the deploy-time check relies on.
+
+=== identity registry 0x8004A818BFB912233c491871b3d84c89A494BD9e ===
+
+$ cast call 0x8004A818BFB912233c491871b3d84c89A494BD9e "supportsInterface(bytes4)(bool)" 0x01ffc9a7 --rpc-url https://rpc.testnet.arc.io
+true
+$ cast call 0x8004A818BFB912233c491871b3d84c89A494BD9e "supportsInterface(bytes4)(bool)" 0x80ac58cd --rpc-url https://rpc.testnet.arc.io
+true
+$ cast call 0x8004A818BFB912233c491871b3d84c89A494BD9e "supportsInterface(bytes4)(bool)" 0xffffffff --rpc-url https://rpc.testnet.arc.io
+false
+
+=== validation registry 0x8004Cb1BF31DAf7788923b405b754f57acEB4272 ===
+
+$ cast call 0x8004Cb1BF31DAf7788923b405b754f57acEB4272 "supportsInterface(bytes4)(bool)" 0x01ffc9a7 --rpc-url https://rpc.testnet.arc.io
+Error: server returned an error response: error code 3: execution reverted
+$ cast call 0x8004Cb1BF31DAf7788923b405b754f57acEB4272 "supportsInterface(bytes4)(bool)" 0x80ac58cd --rpc-url https://rpc.testnet.arc.io
+Error: server returned an error response: error code 3: execution reverted
+$ cast call 0x8004Cb1BF31DAf7788923b405b754f57acEB4272 "supportsInterface(bytes4)(bool)" 0xffffffff --rpc-url https://rpc.testnet.arc.io
+Error: server returned an error response: error code 3: execution reverted
+
+Reading:
+  0x01ffc9a7 is the ERC-165 interface id and the supportsInterface selector; 0x80ac58cd is
+  ERC-721; 0xffffffff is the value a spec-correct ERC-165 must answer false. The identity
+  address returns true, true, false — ERC-165 that affirmatively claims ERC-721. The
+  validation address reverts all three: it exposes a bespoke getValidationStatus tuple (see
+  arc-probe3.log) and no supportsInterface, so an unknown selector hits no function and no
+  fallback and reverts with empty data.
+
+  This is the discriminator the two pinned registry constants' VALUES cannot both satisfy at
+  once. A swap of those two addresses survives every immutable read-back in run(), because
+  each then compares a constant against itself, but it puts the validation registry in the
+  identity slot where supportsInterface(0x80ac58cd) no longer answers true. run() therefore
+  requires ERC-721 on the identity slot and its ABSENCE on the validation slot, and refuses
+  with RegistryInterfaceMismatch otherwise. The probe is read-only (eth_call) and the check
+  is grounded only for these two measured addresses, which is why it lives in run() and not
+  in the arbitrary-argument runWith path.

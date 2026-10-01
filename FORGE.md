@@ -584,7 +584,7 @@ of them is a naming or file-layout convention rather than a defect:
 | `multi-contract-file` | `MandateManager.sol` :147, :156, :164, :200 | 4 |
 | `screaming-snake-case-immutable` | `MandateManager.sol` :211, :216, :220 | 3 |
 | `screaming-snake-case-const` | `MockUSDC.sol` :69, :70, :71 | 3 |
-| `multi-contract-file` | `MockRegistries.sol` :25, :109 | 2 |
+| `multi-contract-file` | `MockRegistries.sol` :25, :121 | 2 |
 
 `multi-contract-file` objects to the four declarations in one file, which is the zero-import
 single-file design chosen on purpose and described under Layout; splitting the three
@@ -597,7 +597,7 @@ measurement is recorded here so the reasoning can be checked instead of taken on
 
 Two of the costs expected of it turned out to be absent. Nothing breaks structurally: no
 interface in the repo declares any of the three getters, and each getter has exactly one
-call site, all three inside `script/Deploy.s.sol:148-150`. The rename also leaves every line
+call site, all three inside `script/Deploy.s.sol:179-181`. The rename also leaves every line
 number where it stands, because `usdc` and `USDC` are the same width, so the two longest
 reference lines at 111 columns do not move, and `identityRegistry` and `validationRegistry`
 grow by one column each on the two `BadConfig` guards at 99 and 103. Line citations keep

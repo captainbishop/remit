@@ -321,4 +321,36 @@ contract DeployTest is Base {
         vm.expectRevert(Deploy.WiringMismatch.selector);
         twin.runChecked();
     }
+
+    // ------------------------------- a swapped registry CONSTANT, caught by the interface probe
+
+    /// A swap of the VALUES of the two pinned registry constants (the addresses at the top of the
+    /// script exchanged) survives every immutable read-back, because each then compares a constant
+    /// against itself. `run()`'s interface probe is what catches it: the identity slot would hold
+    /// the validation registry, which is not an ERC-721. Simulated by etching each registry's code
+    /// at the OTHER's pinned address, since a test cannot edit the script's constants. The three
+    /// WiringMismatch read-backs still pass here — the constructor was handed the pinned addresses
+    /// unchanged — which is the whole point: they are blind to this, and the probe is not.
+    function test_run_ATTACK_swappedRegistryConstants_caughtByInterfaceProbe() public {
+        vm.etch(ARC_USDC, address(token).code);
+        vm.etch(ARC_IDENTITY, address(validation).code);
+        vm.etch(ARC_VALIDATION, address(identity).code);
+        vm.chainId(ARC_TESTNET);
+
+        vm.expectRevert(abi.encodeWithSelector(Deploy.RegistryInterfaceMismatch.selector, ARC_IDENTITY));
+        script.run();
+    }
+
+    /// The validation leg of the probe in isolation: an ERC-721 sitting in the validation slot is
+    /// refused even though it holds code and its address is distinct from the others. The identity
+    /// slot is wired correctly here, so the refusal can only come from the validation check.
+    function test_run_ATTACK_erc721InTheValidationSlot_caughtByInterfaceProbe() public {
+        vm.etch(ARC_USDC, address(token).code);
+        vm.etch(ARC_IDENTITY, address(identity).code);
+        vm.etch(ARC_VALIDATION, address(identity).code);
+        vm.chainId(ARC_TESTNET);
+
+        vm.expectRevert(abi.encodeWithSelector(Deploy.RegistryInterfaceMismatch.selector, ARC_VALIDATION));
+        script.run();
+    }
 }
