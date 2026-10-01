@@ -215,14 +215,12 @@ Everything is public: every cap, every recipient, every payment.
 
 The protocol is Remit; the object it issues is a **mandate**. That
 split is deliberate. "Mandate" is the existing term of art for standing, bounded
-authority to take money from someone else's account — SEPA direct debit runs on
-mandates — so the on-chain type keeps a name that a payments person already
+authority to take money from someone else's account (SEPA direct debit runs on
+mandates), so the on-chain type keeps a name that a payments person already
 recognizes, and the contract stays `MandateManager`. "Remit" is the outward-facing
 name because *within your remit* is precisely what the primitive expresses: authority
-that is real, and also has an edge. One known sharp corner, recorded rather than
-hidden: *to remit* also means to send payment, which is the one thing this protocol
-does not do — it never holds or moves money on its own behalf, it bounds someone
-else's ability to move yours.
+that is real and bounded. The protocol never holds or moves money on its own behalf;
+it only bounds someone else's ability to move yours.
 
 ## Where to start
 

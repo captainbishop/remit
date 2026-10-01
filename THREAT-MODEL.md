@@ -632,6 +632,78 @@ the whole commercial relationship it implies. This is the subject of `PRIVACY.md
 **The proposer chooses transaction order.** Arc's deterministic finality removes reorgs;
 it does not remove the mempool. See F4.
 
+**The attack surface that has actually drained funds in production lives around the contract,
+not inside it, and almost none of it is in Remit's power to fix.** The incidents that take token
+systems down in practice are rarely contract bugs: a cloud region goes dark, a package's
+publishing credentials are stolen and a malicious version is pushed, a front-end domain is
+hijacked so a cloned site harvests an off-chain signature, or a client library on a developer's
+machine is swapped for one carrying a remote-access tool. Remit is one on-chain component sitting
+underneath all of it. What each class can and cannot reach is set out below, because a payer who
+assumes the contract's guarantees extend to this surface will over-trust the primitive.
+
+**An availability failure costs liveness, never safety.** If a cloud provider, an RPC endpoint, an
+indexer or the agent's own host goes down, nothing in a mandate moves and nothing is at risk: the
+caps, the expiry and the allowlist are state the contract already holds, and `isLive` keeps
+enforcing them with no off-chain service running anywhere. The one control a payer might want
+during an outage is the ability to end a mandate, and that path depends on no Remit
+infrastructure. `revoke`, `setRevoker` and `approve(usdc, remit, 0)` are on-chain transactions
+that any funded account the payer controls can send through any RPC or directly against a node,
+and the kill switch is enforced by Circle's token rather than by a server Remit operates (§1,
+F42). The failure mode of the entire off-chain stack is therefore that the agent stops paying, not
+that the payer loses the ability to stop it.
+
+**Remit accepts no off-chain signature anywhere, which removes the exact mechanism behind the
+sign-once, drain-later attacks.** Every action that grants or exercises authority is a transaction
+from the party the contract names: `createMandate` records `msg.sender` as the payer, `spend`
+requires `msg.sender == m.spender` (F22), `approveCosignFor` requires the co-signer to send it,
+and `revoke` and `setRevoker` require the payer or the named revoker. There is no `permit`, no
+EIP-712 typed-data entry point, no `ecrecover` and no EIP-1271 contract-signature check in the
+contract at all. The consequence for the hijacked-domain phishing class is precise: a cloned Remit
+front-end has no signature to harvest, because granting a mandate is not something a payer can be
+induced to sign off-chain and have replayed against the contract later. The co-signature route is
+the one place an off-chain signature would improve the UX, and the source records that
+leaving it out was a choice and not an oversight (its own words are "a deliberate omission rather
+than an oversight"); the effect of the choice is that the surface stays shut. The most a hostile
+front-end can do is get the payer to send a transaction, live, from their own wallet.
+
+**That residual turns the last line of defence into whether the payer can read what they are
+signing, which makes transaction legibility a security obligation on any Remit front-end rather
+than a UX nicety.** A `createMandate` that sets an unlimited allowance, names an attacker's address
+as the spender and omits the allowlist is, in a bare wallet prompt, an opaque block of calldata
+that even a careful payer cannot evaluate. A Remit interface must therefore state, in plain
+language and with as little jargon as the content allows, exactly what each transaction it asks the
+payer to sign will do before they confirm it: who the spender is; the per-transaction cap and the
+window and lifetime caps in human units; the expiry and not-before times; whether an allowlist is
+set and to which addresses; and whether a co-signer is required. The reason is adversarial, not
+cosmetic. If a tampered or cloned interface swaps the spender or drops the allowlist, a
+legible signing prompt is what lets the payer catch the discrepancy on their own device, where the
+attacker's control does not reach. Blind-signing is the exposure, and a transaction the payer can
+actually read is the mitigation; because the contract cannot enforce it, the threat model names it
+as a requirement the front-end owns.
+
+**A compromised dependency on the payer's or the agent's own machine stays inside the mandate's
+bounds.** If an SDK in the build or a package on the host is replaced with a malicious one, it
+still cannot raise a cap, extend an expiry or add itself to an allowlist, because each of those is
+fixed on-chain at `createMandate` and the contract has no path to widen them afterward (§1; §3
+records that there are no admin functions, no `delegatecall`, no `selfdestruct` and no upgrade
+path). The two things such a compromise can do are already in scope above and are the real
+exposure: if it holds the spender's key it can spend within the mandate that key already controls,
+which is the compromised-delegate case the caps and `F_ALLOWLIST` exist for (F19, F22), and it can
+try to steer the payer into granting a bad mandate, which the legibility requirement is meant to
+defeat. The property doing the work in both is that the bound is set once and cannot be widened by
+anything that runs later off-chain, so the standing `approve(usdc, remit, 0)` remains the payer's
+unilateral exit whatever the client stack has become. The one piece of code here that the payer
+does not control and that can change under them is the pair of ERC-8004 registries
+behind Circle-operated proxies; that dependency is real but conjunctive and cap-bounded, and is
+treated in full at F23 rather than restated here.
+
+**Taken together, the surface collapses to two things the payer must still own: the key that
+signs, and the ability to read a transaction before signing it.** Remit makes that collapse
+possible by accepting only transactions and never signatures, and by fixing every bound on-chain
+at grant time. Everything an attacker would reach from the surrounding software is then either out
+of range or reduced to persuading the payer to sign something specific, and the front-end's duty
+is to make that something legible at the moment of signing.
+
 ## 3. Properties the contract does enforce, and the guard for each
 
 Derived by walking the source, not by reading the test names. Seven functions change
