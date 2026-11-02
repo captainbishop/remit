@@ -21,7 +21,7 @@ what it does not, and which areas remain unexamined.
 > **This anchor was `f2d3b35` and had already gone wrong, in one day, which is recorded
 > here rather than corrected without comment.** #22 added 39 lines to the contract
 > (1,171 → 1,204) and wrote *post*-#22 numbers into a document whose banner still said
-> pre-#22 — so five of the nine distinct numbers here landed on a blank line under the
+> pre-#22, so five of the nine distinct numbers here landed on a blank line under the
 > banner's own recovery command (`v2:424`, `v2:433`, `v2:446`, `v2:608`, `v2:1012`) while
 > the other four were correct only against the old blob (`v2:432` → `465`,
 > `v2:636-641` → `669-674`, `v2:649` → `682`, `v2:664` → `697`). Both halves were verified
@@ -35,13 +35,13 @@ what it does not, and which areas remain unexamined.
 > `git diff 92445dd -- contracts/MandateManager.sol` is empty, so the anchor blob and the
 > working tree are byte-identical and `v2:NNN` is unambiguous either way. Every number that
 > sweep added was printed out of `git show 92445dd:contracts/MandateManager.sol` before being
-> written down, which caught one wrong citation carried in from a working note — `v2:856-863`
+> written down, which caught one wrong citation carried in from a working note, `v2:856-863`
 > for the 6-decimal truncation note, which actually lives at `v2:1077-1084`; 856-863 is the
 > credential `try`/`catch` body and has nothing to do with decimals.
 >
 > **That byte-identity ENDED on 2026-08-27, when #28 landed F15 and F16.** The anchor itself
 > is unchanged and every `v2:NNN` in this file still resolves against `92445dd` exactly as it
-> always did — but it is no longer *also* the working tree, so the sentence above must be read
+> always did, but it is no longer *also* the working tree, so the sentence above must be read
 > as history. `contracts/MandateManager.sol` went 1,204 → 1,376 lines, `approveCosign` was
 > deleted outright and `spendHash` lost a parameter, which means every citation into the
 > co-signature region now points at code that has been replaced. Those citations are kept
@@ -51,7 +51,7 @@ what it does not, and which areas remain unexamined.
 >
 > **The test tree moved with it, so "green at 157/157" above is now also history.** #28 took the
 > source declaration count to 165 and the custom-error count from 31 to 33, and `forge test` has
-> not been run since, so there is currently **no** green figure for the working tree — only a
+> not been run since, so there is currently **no** green figure for the working tree, only a
 > source count. §5's four mechanical checks were re-derived against it and say so in place.
 > Nothing in this document should be read as claiming a v2 suite has passed; #14 owns that.
 >
@@ -72,15 +72,15 @@ what it does not, and which areas remain unexamined.
 > is left visible rather than overwritten. **(2)** "from 31 to 33" was correct *for `HEAD`*; the
 > working tree is at 34, F17 having added `CosignNotRequired`. **(3)** "there is currently **no**
 > green figure for the working tree" has been retired: `forge test` was run on 2026-08-28 and the
-> tree is **green at 178/178**, a figure derived twice — as the sum of the thirteen per-suite
-> lines and again from the run's own summary — and matched by
+> tree is **green at 178/178**, a figure derived twice, as the sum of the thirteen per-suite
+> lines and again from the run's own summary, and matched by
 > `grep -cE '^    function (test|invariant)'` over `test/*.t.sol`.
 > #14 still owns re-measurement; what it no longer owns is the existence of a green run.
 >
 > **The F17 block below cites bare line numbers, and they are WORKING-TREE numbers, not `v2:NNN`.**
 > This is stated rather than fixed because the alternative was to describe a seventeen-guard
-> inventory without saying where the guards are. The rule the first paragraph states — prefer the
-> function name — is why the numbers appear *beside* quoted guard text everywhere they appear. The
+> inventory without saying where the guards are. The rule the first paragraph states (prefer the
+> function name) is why the numbers appear *beside* quoted guard text everywhere they appear. The
 > danger is concrete, not theoretical: `approveCosignFor` does not exist in `92445dd` at all, so
 > the banner's own recovery command cannot reach any of them, and it fails **with no error** rather than
 > landing on a blank line the way the `f2d3b35` breakage did. Checked one by one against the anchor
@@ -93,13 +93,13 @@ what it does not, and which areas remain unexamined.
 > that exists in both blobs, and even it has moved: `92445dd:682`, working tree `763`. To reach what
 > the F17 block read, use the working tree, or `4661bad` plus the F17 diff.
 >
-> **Do not "fix" the other bare-looking numbers — they are prefixed, and the prefix carries.** A
+> **Do not "fix" the other bare-looking numbers; they are prefixed, and the prefix carries.** A
 > grep for four-digit citations also returns `` `713` `` in §4 and §6, which look unanchored on
 > their own line but are the tail of a `v2:`-prefixed run (`v2:614`, `615`, `690`, `713`) and are
 > correct against the anchor. This was written wrong here first, on exactly one grep hit and
 > without reading the line above it, which is the same mistake the document keeps recording in
 > other people's code: **a grep returns a match, not a meaning.** The unanchored citations are all
-> F17's and all inside §4 — **nine distinct numbers over eleven instances** (`763`, `1101`, `1130`,
+> F17's and all inside §4: **nine distinct numbers over eleven instances** (`763`, `1101`, `1130`,
 > `1132`, `1136`, `1164`×2, `1173`, `1189`×2, `1194`), eight of them in the F17 finding and three
 > in *"What a green suite cannot mean"*. That count is itself a correction: the first pass here
 > said "five", because it was derived with a pattern matching only `at NNN` and `lines NNN` and so
@@ -108,12 +108,12 @@ what it does not, and which areas remain unexamined.
 > the first banner paragraph asks for.
 >
 > **2026-08-28, F19+F25: the three blobs are still three, they are not the same three, and after
-> `65f05d8` all three are actually blobs — none of them is a working tree any more.** F17 committed
+> `65f05d8` all three are actually blobs; none of them is a working tree any more.** F17 committed
 > as `088813d`, which is
 > the single most useful consequence of that commit for this document: the nine bare numbers
 > described two paragraphs above as "WORKING-TREE numbers" have stopped being working-tree numbers
 > and become citations into a blob. All nine were re-checked against it one at a time and all nine
-> land on the code they claim — `763` and `1164` on the two `TotalSpentCeiling` guards, `1132` on
+> land on the code they claim: `763` and `1164` on the two `TotalSpentCeiling` guards, `1132` on
 > `Revoked`, `1136` on `Expired`, `1173` on `CosignNotRequired`, `1189` on the
 > `validUntil > m.expiresAt` `BadDeadline`, `1101` on `function approveCosignFor(`, `1130` on the
 > comment it quotes, `1194` on the function's closing brace. **The recovery command for them is
@@ -132,7 +132,7 @@ what it does not, and which areas remain unexamined.
 > meant, and cite `65f05d8` for anything about today's code.
 >
 > **What that costs: the nine no longer match the working tree either.** F19 inserted its error
-> declaration above them and its two guards among them, so every one of the nine has moved — by
+> declaration above them and its two guards among them, so every one of the nine has moved, by
 > **+15** for those between the new `error SelfPayment();` and the cosign mirror (`1132`→`1147`,
 > `1136`→`1151`), and by **+22** for those after it (`1164`→`1186`, `1173`→`1195`, `1189`→`1211`,
 > `1194`→`1216`); `763`→`778` and `1101`→`1116`. Those deltas are recorded rather than applied,
@@ -141,19 +141,19 @@ what it does not, and which areas remain unexamined.
 > to give the working-tree bounds `1116–1216` for the guard count**, which is the one place a
 > reader needs today's tree rather than yesterday's blob.
 >
-> **F19's own citations — `710` and `1160` — are ANCHORED as of `65f05d8`, so this file has no
+> **F19's own citations, `710` and `1160`, are ANCHORED as of `65f05d8`, so this file has no
 > floating line numbers left.** `git show 65f05d8:contracts/MandateManager.sol` is 1,523 lines and
 > 35 `error` declarations, and both numbers were checked against it one at a time rather than
 > assumed to have survived the commit. The blob table above is therefore four rows now, not three,
 > and `65f05d8` is the row that agrees with the working tree. **`grep -n 'revert SelfPayment'
 > contracts/MandateManager.sol` remains the better recovery command** than either number, because
-> the guard is a single distinctive line in each function — `if (recipient == m.payer) revert
+> the guard is a single distinctive line in each function: `if (recipient == m.payer) revert
 > SelfPayment();`, identical text in both places — and per the first paragraph's rule the function
 > names are `spend` and `approveCosignFor`, which do not move at all. The next commit that touches
 > the contract makes `710` and `1160` stale again; the grep will not go stale.
 >
-> **The green figure is now 182/182, not 178/178.** Derived the same two ways as before — the run's
-> own summary line and the sum of the thirteen per-suite lines — and matched by
+> **The green figure is now 182/182, not 178/178.** Derived the same two ways as before, the run's
+> own summary line and the sum of the thirteen per-suite lines, and matched by
 > `grep -chE '^    function (test|invariant_)' test/*.t.sol`, which is the corrected pattern: the
 > earlier `^    function test` form returns 179 here because it misses the three `invariant_`
 > functions in `WindowInvariant.t.sol`. That undercount was made and caught during F19, and
@@ -163,7 +163,7 @@ what it does not, and which areas remain unexamined.
 > an assumption.** `DESIGN.md`, `README.md`, `IMMUTABILITY.md`, `FORGE.md`, `GAS-ABSTRACTION.md`,
 > `PRIVACY.md`, `START-HERE.md` and `evidence/README.md` were grepped for guard counts, error
 > counts, and every spelling of self-payment, self-transfer and `recipient == m.payer`. **Not one
-> of them makes a claim either fix touches** — the only stale numbers there are the v1-era `140
+> of them makes a claim either fix touches**: the only stale numbers there are the v1-era `140
 > tests` and `57 tests` figures, which predate v2 entirely and belong to #14's relabelling pass, not
 > to this one. The F19/F25 blast radius inside the docs is therefore exactly three files: this one,
 > `CHANGELIST.md` and `L3-VAULT.md`. Recorded so the next fix does not re-run the same eight greps
@@ -171,12 +171,12 @@ what it does not, and which areas remain unexamined.
 >
 > **2026-08-28, F27 and F28: for the first time since #28 began, a new finding's contract
 > citations are unambiguous.** Both cite bare `contracts/MandateManager.sol:NNN` rather than
-> `v2:NNN`, on the F17 precedent above — but the hazard that precedent was hedging against is
+> `v2:NNN`, on the F17 precedent above, but the hazard that precedent was hedging against is
 > absent here, because **neither finding changes the contract.** `git diff --stat 65f05d8 --
 > contracts/MandateManager.sol` is empty, so the blob table's last row and the working tree are
 > byte-identical at 1,523 lines, and every number in F27 resolves identically against either.
-> They were printed out of the working tree one at a time before being written down — `276`,
-> `538`, `646`, `651`, `652`, `700`, `725`, `929`, `941`, `942` — and `_checkIdentity`'s
+> They were printed out of the working tree one at a time before being written down, `276`,
+> `538`, `646`, `651`, `652`, `700`, `725`, `929`, `941`, `942`, and `_checkIdentity`'s
 > single-caller claim was derived (`grep -c _checkIdentity` returns 2: the definition and the one
 > call), not assumed. As always the function names are the durable citation: `_checkIdentity` and
 > `createMandate` do not move.
@@ -184,7 +184,7 @@ what it does not, and which areas remain unexamined.
 > **What moved instead is the model and its suite, which this banner has never had to track
 > before.** `reference/policy.test.js` went **72 → 76 tests**, all passing, and
 > `reference/mutation-gate.js` grew a second target. The Solidity figure is untouched at
-> **182/182** because no `.sol` file was edited — stated because "the tests went up by four" and
+> **182/182** because no `.sol` file was edited; stated because "the tests went up by four" and
 > "the suite is still 182" are both true here and describe different suites. The gate figures are
 > the new evidence: `approveCosignFor` **22/22** (re-run as a regression on the refactor, not
 > quoted from the earlier run) and `evaluate` **31/31**, from **31 mutants: 24 removals and 7
@@ -192,8 +192,8 @@ what it does not, and which areas remain unexamined.
 >
 > **Two of those 31 kills are crash-kills, and the gate reports them separately on purpose.**
 > Neutering `evaluate`'s `UNKNOWN_MANDATE` or `CREDENTIAL_MISSING` return leaves the next line
-> dereferencing the very value the guard proved absent — `mandate.revoked` off `null`,
-> `att.validator` off `null` — so the tests that assert those denials throw before reaching their
+> dereferencing the very value the guard proved absent, `mandate.revoked` off `null`,
+> `att.validator` off `null`, so the tests that assert those denials throw before reaching their
 > assert. **That is structural and not a coverage gap:** no test written from outside the function
 > can reach an assertion once the guard is gone. An assertion-kill proves the suite knows the
 > right answer; a crash-kill proves only that it would not stay green. Both are kills; only the
@@ -202,7 +202,7 @@ what it does not, and which areas remain unexamined.
 >
 > **2026-08-28, F27+F28 ANCHORED as of `d4f15ac`, and for once nothing had to be re-checked.**
 > That commit carries `THREAT-MODEL.md`, `CHANGELIST.md`, `reference/mutation-gate.js` and
-> `reference/policy.test.js` — and **neither of the two files F27 and F28 cite is among them.**
+> `reference/policy.test.js`, and **neither of the two files F27 and F28 cite is among them.**
 > `git diff --stat 01541e7 d4f15ac -- reference/policy.js` is empty and so is the same command for
 > `contracts/`, so both findings' citations resolve against **`65f05d8`**, which is already the
 > blob table's last row and is the commit that last touched *both* cited files. F28's `:578` was
@@ -211,7 +211,7 @@ what it does not, and which areas remain unexamined.
 >
 > **The general rule this instance illustrates, since the last three commits each paid for it:** a
 > finding's line numbers are floating until a commit exists, and anchoring them is a separate step.
-> What made it free this time is that the commit changed **no cited file** — so the lowest-cost way to
+> What made it free this time is that the commit changed **no cited file**, so the lowest-cost way to
 > keep citations anchored is to keep evidence and subject in different commits, which is what
 > "no `.sol` file is touched" bought here beyond sparing a `forge` run.
 >
@@ -220,7 +220,7 @@ what it does not, and which areas remain unexamined.
 > `HEAD`, dated 2026-08-29, and `git diff af9df40 -- contracts/ reference/ test/ script/` is empty.
 > The only modified file in the tree is this one, which cites nothing inside itself, so every
 > citation in F29 through F37 resolves identically against the blob and against the working copy,
-> and the hazard the four paragraphs above keep paying for is absent again — for the second commit
+> and the hazard the four paragraphs above keep paying for is absent again, for the second commit
 > running, and for the opposite reason: `d4f15ac` was safe because it touched no cited file, and
 > `af9df40` is safe because it touched every cited file and then nothing else did.
 >
@@ -237,7 +237,7 @@ what it does not, and which areas remain unexamined.
 >
 > **Most of that growth is not findings, and saying so is the point of the row.** 1,523 → 2,043 is
 > +520 lines, and only **229** of them are `af9df40`'s. The other 291 arrived in three commits that
-> changed no behaviour — `bda6dcf` and `51c5750` (NatSpec on every externally visible declaration,
+> changed no behaviour: `bda6dcf` and `51c5750` (NatSpec on every externally visible declaration,
 > then the interfaces and every public constant) and `7223e73` (one uncovered branch closed, two
 > lint notices annotated). A contract that grew by a third since F19 invites the reading that there
 > is a third more surface to attack, and the derivation says otherwise: the majority of the new
@@ -245,7 +245,7 @@ what it does not, and which areas remain unexamined.
 >
 > **The green figures are 207 Solidity cases and 92 model tests, and the Solidity one needs its
 > provenance stated rather than quoted.** It comes from `mutgate-checkIdentity.log`'s control line,
-> `baseline: 207 passed, 0 failed  (17s)` — a real run of the whole suite, but one taken to be a
+> `baseline: 207 passed, 0 failed  (17s)`, a real run of the whole suite, but one taken to be a
 > *control* for a mutation gate rather than a measurement in its own right. #14 still owns a
 > standalone `forge test`. What has been done here instead is reconcile it against source two ways:
 > the tree declares **204 functions named `test*` plus 3 named `invariant_`**, which is 207 exactly,
@@ -253,7 +253,7 @@ what it does not, and which areas remain unexamined.
 > history**, as is 178/178 and 177/177 before it. The model went **76 → 92 tests**, all passing.
 >
 > **One thing this row cannot say is that the suite has caught up with the guards.** §5's owed-work
-> tally rose in the same commit that fixed eleven findings — six tests now, five before — because
+> tally rose in the same commit that fixed eleven findings (six tests now, five before) because
 > two of `af9df40`'s new guards are asserted by nothing yet. A blob row showing more code, more
 > errors and more tests is compatible with more untested behaviour than the row before it, and in
 > this case that is what it shows.
@@ -267,7 +267,7 @@ what it does not, and which areas remain unexamined.
 > `af9df40` land on the same numbers in the working tree because `af9df40` and the tree are
 > both 2,043 lines. The rest sit at earlier widths and resolve inside the blob they name: 101
 > at `92445dd` (1,204 lines), 66 at the `v1.0.0-arc-testnet` tag (873), and one at `9fa7ece`
-> (1,537). The model carries no such load, so it took four one-line insertions —
+> (1,537). The model carries no such load, so it took four one-line insertions:
 > `reference/policy.js` went **1,444 → 1,448** and `reference/policy.test.js` **2,387 → 2,392**.
 >
 > **The eight citations into `reference/policy.js` in this file are anchored at `af9df40`, and
@@ -287,17 +287,17 @@ what it does not, and which areas remain unexamined.
 > above is history, as 182/182, 178/178 and 177/177 were before it. Derived the same two ways as
 > every figure in this banner: the tree declares **206 functions named `test*` plus 3 named
 > `invariant_`**, and both of the day's gate logs open with `baseline: 209 passed, 0 failed`. The
-> per-file distribution sums to the same — `Cosign` 47, `Creation` 44, `Bounds` 29, `Views` 25,
+> per-file distribution sums to the same: `Cosign` 47, `Creation` 44, `Bounds` 29, `Views` 25,
 > `Gates` 24, `Windows` 14, `Idempotency` 13, `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4,
-> `Base` 0 — and the two files that moved are the two that gained a test, `Cosign` 46 → 47 for
+> `Base` 0, and the two files that moved are the two that gained a test, `Cosign` 46 → 47 for
 > `test_f29_approvingTheContractOrTheTokenAsRecipient_isRefused` and `Creation` 43 → 44 for
 > `test_createMandate_eachCredentialFieldWithoutTheFlag_isRefused`.
 > Eleven files and thirteen suites both still hold, for the reasons
 > `reference/vacuity-check.py:58-67` gives.
 >
-> **Eight targets and 84 mutants ran, all at that same baseline.** Six came back clean —
+> **Eight targets and 84 mutants ran, all at that same baseline.** Six came back clean:
 > `approveCosignFor` 24/24, `createMandate` 27/27, `spend` 19/19, `_checkAndCommitWindows` 1/1,
-> `spendHash` 1/1, `constructor` 1/1 — and two returned one survivor each, `_checkCredential:1261` and
+> `spendHash` 1/1, `constructor` 1/1, and two returned one survivor each, `_checkCredential:1261` and
 > `spendableAcross:2010`. Both are **equivalent mutants**, a fourth class this document had not met:
 > the successor guard refuses the same input under the same error name, so no test can ever kill them.
 > §5 carries the reasoning and the mechanism that holds them, and two `--only` runs closed the two
@@ -307,15 +307,15 @@ what it does not, and which areas remain unexamined.
 >
 > **The contract is 2,043 lines before and after, and every line pointer in this repository still
 > resolves.** The day's only change to `contracts/MandateManager.sol` was a corrected comment above
-> `:2010` — the mutation run contradicted a sentence claiming that guard is what makes "the payer of
+> `:2010`, the mutation run contradicted a sentence claiming that guard is what makes "the payer of
 > nothing" unreachable, which the loop's own check does anyway. Six lines were rewritten as six, and
 > `python3 reference/code-unchanged.py HEAD` reports `540 code lines, all identical, none moved`.
 > **A survivor is also a claim-checker**: the sentence explaining why a guard matters is exactly the
 > sentence a mutation run is able to contradict.
 >
 > **2026-08-30, later the same day: F22's property reaches Solidity, and the census is 91 mutants.**
-> The suite is **212 cases** — 209 named `test*` plus 3 named `invariant_`, which
-> `reference/vacuity-check.py` reports directly — with `Cosign` 47 → 48, `Bounds` 29 → 31 and the
+> The suite is **212 cases**: 209 named `test*` plus 3 named `invariant_`, which
+> `reference/vacuity-check.py` reports directly, with `Cosign` 47 → 48, `Bounds` 29 → 31 and the
 > other eight case-bearing files unmoved.
 > `contracts/MandateManager.sol` is **byte-identical to HEAD**, so the census moved because the gate
 > learned a property rather than because the contract grew a guard. That is a first for this banner,
@@ -323,7 +323,7 @@ what it does not, and which areas remain unexamined.
 > operator set) and not of the contract alone.
 >
 > **What was missing.** `recipient == m.spender` is legal, and it is the case F22 exists to
-> document — a delegate paid by its own mandate is most of what mandates are for. That property was
+> document: a delegate paid by its own mandate is most of what mandates are for. That property was
 > asserted in `reference/policy.test.js` by name and nowhere in Solidity. No case among the 209 had
 > ever named the delegate as a recipient, checked by grep over `test/` rather than assumed, so
 > `if (recipient == m.spender) revert SelfPayment();` injected into `spend` would have survived a
@@ -338,16 +338,16 @@ what it does not, and which areas remain unexamined.
 > `test_f22_anAllowlistIsWhatStopsTheSpenderBeingPaid`, which pins `F_ALLOWLIST` as the only
 > mechanism that refuses a delegate.
 > `test/Cosign.t.sol` gained `test_f22_approvingTheSpenderAsRecipient_isAccepted`, the one case on
-> the approval path that must be **accepted** — and F17's `_assertSameRefusal` parity could never
+> the approval path that must be **accepted**, and F17's `_assertSameRefusal` parity could never
 > have reached it, because parity checks that the two paths answer alike, so folding the spender
 > into `SelfPayment` would make both paths refuse and report them in agreement.
 >
 > **The runs, at baseline 212 passed, 0 failed in both.** `spend`'s injection was caught by three
-> cases, 3 failing — all three of the above, since each moves money to the delegate through
+> cases, 3 failing, all three of the above, since each moves money to the delegate through
 > `spend`. `approveCosignFor` returned **5 of 5 caught**: its four F17 injections unchanged, which
 > is a regression check rather than a new result, and the fifth killed by exactly one case,
 > `test_f22_approvingTheSpenderAsRecipient_isAccepted`. **A single killer is a fact to record rather
-> than a result to be satisfied by** — delete that one case and the mirror injection survives again,
+> than a result to be satisfied by**: delete that one case and the mirror injection survives again,
 > with nothing else among the 212 noticing. The two runs are logged in `evidence/`, as
 > `mutgate-sol-spend-inject.log` and `mutgate-sol-approve-inject.log`.
 >
@@ -357,13 +357,13 @@ what it does not, and which areas remain unexamined.
 > so the bare removal census recorded earlier this same day cannot have regressed. The guard against
 > misreading is the gate's own `SCOPE: injections only` block, which names the 19 and 20 removals it
 > declined to build. **A narrowed log is not a census, and the gate now refuses to let one look like
-> one.** The census stands at **91 — 85 removals plus 6 injections**, one of the six on `spend` and
+> one.** The census stands at **91: 85 removals plus 6 injections**, one of the six on `spend` and
 > five on `approveCosignFor`, against the 89 this banner recorded earlier the same day.
 >
 > **2026-08-30, #24: four findings closed, and two of their own fix sketches were falsified on the
 > way.** F3, F9, F10 and F11 all landed, taking the fixed-in-code bucket from eighteen to
 > **twenty-two of thirty-seven**. `contracts/MandateManager.sol` is **2,138 lines and 38 errors**,
-> from 2,043 and 37 at `db1c08c`, both counted from the file. The suite is **219 cases** — 216 named
+> from 2,043 and 37 at `db1c08c`, both counted from the file. The suite is **219 cases**: 216 named
 > `test*` plus 3 named `invariant_`, which `reference/vacuity-check.py` reports directly. The
 > per-file distribution sums to the same: `Cosign` 48 → 53, `Bounds` 31 → 32, `Views` 25 → 26, and
 > the other seven case-bearing files unmoved at `Creation` 44, `Gates` 24, `Windows` 14,
@@ -377,12 +377,12 @@ what it does not, and which areas remain unexamined.
 > against 90, and **seven** assertion-bearing helpers against six, `payReverts` alone standing at 82
 > call sites. Its components sum to **408**: `assertRevertedWith` appears in the list for
 > information and stays out of the total, under the same rule §5 records for the 287-versus-290
-> discrepancy in the anchor — every `assert*(` across the `.t.sol` files, less the denial helper
+> discrepancy in the anchor, every `assert*(` across the `.t.sol` files, less the denial helper
 > counted once already. **A breakdown that has to be read with a rule will be re-added wrongly**, so
 > the rule sits here beside the figure rather than only in the tool's output.
 >
 > **Both mutation censuses moved, and one of the moves has no fix behind it.** The Solidity census is
-> **95 — 89 removals plus 6 injections** over eleven targets, from 91, and the four new sites are
+> **95: 89 removals plus 6 injections** over eleven targets, from 91, and the four new sites are
 > F3's two `SpendCountCeiling` guards and F11's `UnknownMandate` and `BadConfig` in
 > `withdrawCosign`. The JS census is **82**, at 27 for `approveCosignFor`, 35 for `evaluate` and 20
 > for `createMandate`, up from 78, and only two of those four new mutants came from F3. The other two
@@ -396,7 +396,7 @@ what it does not, and which areas remain unexamined.
 > `withdrawCosign` and `revoke`. `revoke` is the one a quick reading would have skipped: its two
 > refusals are untouched and its behaviour is unchanged, and its body is still not the body the
 > earlier run mutated. All four ran bare rather than narrowed, so each re-establishes its own
-> census — 21, 26, 3 and 2, for **52 mutants, every one caught by a named test at a baseline of 219
+> census: 21, 26, 3 and 2, for **52 mutants, every one caught by a named test at a baseline of 219
 > green**.
 >
 > **Two of the four fixes are invisible to both censuses.** F9's clamp and F11's two conditional
@@ -414,7 +414,7 @@ what it does not, and which areas remain unexamined.
 >
 > **2026-08-30, the window geometries: four accepted shapes now have a spend through them, and the
 > suite is 225 cases.** Six tests went into `test/Windows.t.sol`, which moves 14 → 20, taking the
-> total 219 → **225** — 222 named `test*` plus 3 named `invariant_`, read off
+> total 219 → **225**: 222 named `test*` plus 3 named `invariant_`, read off
 > `reference/vacuity-check.py` rather than counted by hand. The other case-bearing files are
 > unmoved at `Cosign` 53, `Creation` 44, `Bounds` 32, `Views` 26, `Gates` 24, `Idempotency` 13,
 > `WindowInvariant` 5, `ArcParity` 4, `WindowFuzz` 4 and `Base` 0, and `FORGE.md`'s per-file
@@ -448,7 +448,7 @@ what it does not, and which areas remain unexamined.
 > copy rather than from a blob, because there is no blob yet: `git status --porcelain` reports six
 > modified files and nothing staged. That is stated first because every other layer here names a
 > commit, and a reader who assumes this one does too will look for a sha that does not exist. The
-> `forge` half of the evidence is owed for the same reason — the contract, the model and the tests
+> `forge` half of the evidence is owed for the same reason: the contract, the model and the tests
 > are written and `node --test reference/policy.test.js` is **99 of 99**, up from 94, but nothing
 > has been compiled.
 >
@@ -463,7 +463,7 @@ what it does not, and which areas remain unexamined.
 > **byte-identical to the working tree**, and that stopped being true at `db1c08c`, two commits
 > and four findings ago. It is left as written because it was true of the tree the row was measured
 > against, which is the rule the `reference/policy.js` ladder four paragraphs up states for
-> itself — but a reader arriving at that table today should read the label as dated, not as live.
+> itself, but a reader arriving at that table today should read the label as dated, not as live.
 >
 > **Two new private helpers, and both exist to stop a list disagreeing with a copy of itself.**
 > `_isUndebitable` holds the four addresses that can accept USDC and never send it on, read by
@@ -476,8 +476,8 @@ what it does not, and which areas remain unexamined.
 > `test_isAllowedRecipient_appliesEveryRecipientRuleSpendApplies` are what kill it.
 >
 > **The suite should be 231 cases and the model census 83, both owed to a run.** Six Solidity tests
-> were written — one for F38, three for F39 and two for F40, plus one existing case in
-> `test/Views.t.sol` extended from four recipient rules to six — against 225 at `efe43a7`.
+> were written: one for F38, three for F39 and two for F40, plus one existing case in
+> `test/Views.t.sol` extended from four recipient rules to six, against 225 at `efe43a7`.
 > `test/Cosign.t.sol` moves 53 → **59** and `Views` stays at **26**, because its change lengthened a
 > case rather than adding one, and the per-file sum is 228 named `test*` plus 3 named `invariant_`.
 > The JS mutation gate census goes 82 → **83**, the single new mutant being F40's `throw refuse(`
@@ -497,8 +497,8 @@ an instance of, rather than by working the item as written:
 
 - `CHANGELIST.md` listed a revert for a cosign requirement that can never be met. Asking instead
   *in how many ways can a mandate display a co-signature requirement without having
-  one?* gave five, of which the worst — a mandate whose cosigner is its own spender, so
-  the agent approves its own spend hash — was on no list anywhere and was accepted by
+  one?* gave five, of which the worst (a mandate whose cosigner is its own spender, so
+  the agent approves its own spend hash) was on no list anywhere and was accepted by
   both the contract and the reference model.
 - The `uint96 totalSpent` liveness cliff was on no list at all.
 - The joint-ceiling view was listed as "additive, low risk"; the naive implementation
@@ -517,10 +517,10 @@ contract itself.
 What the contract holds is *authority*: the standing ERC-20 allowance that the payer
 granted it, which it may exercise only through `spend`. The blast radius of a total
 compromise of Remit's logic is therefore exactly **the payer's allowance to this
-contract, intersected with the payer's balance** — not the payer's whole balance, and
+contract, intersected with the payer's balance**, not the payer's whole balance, and
 not any other payer's anything.
 
-Five actors appear in the code: `payer` grants and revokes; `spender` (the delegate —
+Five actors appear in the code: `payer` grants and revokes; `spender` (the delegate:
 an AI agent, a payroll bot, a subscription service) spends; `cosigner` approves
 individual spends above a threshold; `recipient` receives; and everyone else is a
 third party with no role.
@@ -539,7 +539,7 @@ guarantee. Any module with execution rights can also transfer native USDC regard
 allowance state."* If the payer is a 4337 smart account, a Circle SCA or a Safe, any
 module with execution rights on that account can therefore move the same USDC without
 consulting Remit at all. Remit bounds what *the delegate* can do through *this contract*;
-it cannot bound what the payer's own account can do, and it never claimed to — `DESIGN.md`
+it cannot bound what the payer's own account can do, and it never claimed to; `DESIGN.md`
 already makes the `msg.value` point. What is added here is the smart-account consequence,
 which matters because the L3 vault design in `L3-VAULT.md` makes a contract the payer.
 
@@ -561,7 +561,7 @@ cap consumed, no nonce burned) but it is not something Remit controls.
 
 **Both ERC-8004 registries are in the trust boundary, and Remit can never be pointed at
 different ones.** `identityRegistry` and `validationRegistry` are `immutable`, set once in the
-constructor, in a contract with no upgrade path — while the live Arc Testnet ValidationRegistry
+constructor, in a contract with no upgrade path, while the live Arc Testnet ValidationRegistry
 was found on 2026-08-24 to sit behind an ERC-1967 proxy, so the code behind that fixed address
 can be replaced without Remit knowing. Arc publishes the three registry addresses in a tutorial
 rather than in its contract-address reference, with no stated stability or upgradeability
@@ -580,15 +580,15 @@ that the validator is *honest*. In particular the staleness test is
 `nowTs > lastUpdate && nowTs - lastUpdate > c.maxStaleness`, so an attestation dated in
 the **future** skips the freshness check entirely and is treated as fresh forever. A
 validator can therefore defeat the payer's own freshness requirement permanently. This
-is a trust statement rather than a bug — a payer who does not trust the validator should
-not name it — but it is not currently written down anywhere.
+is a trust statement rather than a bug, a payer who does not trust the validator should
+not name it, but it is not currently written down anywhere.
 
 A related property of the same check **is** already written down, and the contrast is
 instructive. When neither `credential.agentId` nor the identity gate's `agentId` is set,
 `_checkCredential` skips the agent comparison entirely and the check degrades to "the
 named validator filed a passing, fresh attestation under this exact `requestHash`", with
 nothing tying it to the spender. That is reachable by omission, since zero is a struct
-field's default — and the source says so in ten lines of comment, names the design reason
+field's default, and the source says so in ten lines of comment, names the design reason
 (an attestation about a *request* rather than about an agent is a legitimate shape, and
 `requestHash` is payer-fixed at grant time so the spender cannot redirect the lookup), and
 points at a test that pins the behaviour by name:
@@ -600,12 +600,12 @@ future-dated staleness hole should be brought up to.
 attack.** `spend` requires `msg.sender == m.spender` (`v2:610`) and constrains the recipient
 only against zero and against the allowlist (`v2:614-615`), so on a mandate granted without
 `F_ALLOWLIST`, `recipient = m.spender` is a valid spend and the delegate needs no colluding
-vendor, no second address and no cleverness — it transfers the payer's USDC to itself, up to
+vendor, no second address and no cleverness; it transfers the payer's USDC to itself, up to
 `perTxCap` per transaction and up to every window and lifetime cap in total. This is not a
 defect and it is not fixable: a spending mandate that could stop the spender choosing the
 recipient would not be a spending mandate. It is the sentence that says what the caps are
-*for*. The caps are the entire protection, and they hold — the window search found no
-sequence that exceeds them in 3.0M trials — but "the delegate cannot steal" is false and
+*for*. The caps are the entire protection, and they hold, the window search found no
+sequence that exceeds them in 3.0M trials, but "the delegate cannot steal" is false and
 "the delegate cannot steal more than the cap, and cannot steal at all from anyone the payer
 did not allowlist" is true. **`F_ALLOWLIST` is what converts the bound from an amount into an
 amount *and* a set of counterparties**, and it is the one flag whose absence changes the
@@ -613,7 +613,7 @@ threat model rather than the arithmetic. A payer granting to an agent they do no
 should treat it as mandatory. `v2:482` refuses `cosigner == spender`, so the co-signature
 route cannot be self-approved, but nothing refuses `recipient == spender` and nothing should.
 
-[**#28, F19: the recipient is constrained three ways in the working tree, not two** — zero, the
+[**#28, F19: the recipient is constrained three ways in the working tree, not two**: zero, the
 payer, and the allowlist. `v2:614-615` above is correct against this banner's anchor and is left
 alone; `spend` additionally reverts `SelfPayment` on `recipient == m.payer` since 2026-08-28.
 **None of this paragraph changes**, and the reason is a distinction the document now has to be
@@ -621,7 +621,7 @@ careful about: F19 refuses paying *the payer*, F22 is about paying *the spender*
 called a "self-payment" in English although they are opposite cases. Paying the payer moves
 nothing and was refused because it lies to a reconciler. Paying the spender moves everything and
 must stay legal, because forbidding it would mean the delegate could not be the recipient of its
-own mandate — which is most of what mandates are for. **A guard named `SelfPayment` that refused
+own mandate, which is most of what mandates are for. **A guard named `SelfPayment` that refused
 `recipient == m.spender` would break Remit; the one that shipped refuses `recipient == m.payer`
 and breaks nothing.** If that name ever has to be read quickly, read the condition instead.]
 
@@ -708,8 +708,8 @@ is to make that something legible at the moment of signing.
 
 Derived by walking the source, not by reading the test names. Seven functions change
 state: `createMandate`, `spend`, `revoke`, `approveCosignFor`, `withdrawCosign`,
-`clearReservation` and `setRevoker`. One of them is a setter — `setRevoker`, which names the
-mandate's revoker and is described in F51 — and there are no admin functions, no
+`clearReservation` and `setRevoker`. One of them is a setter: `setRevoker`, which names the
+mandate's revoker and is described in F51, and there are no admin functions, no
 `delegatecall`, no `selfdestruct` and no upgrade path. **This sentence read "Five functions"
 and "There are no setters" until 2026-09-05, and F20's row had already priced that exact
 failure**: `clearReservation` arrived with F47 on 2026-09-02 and `setRevoker` with F51 three
@@ -752,31 +752,31 @@ false or overstated claims in comments and documents rather than defects in code
 for a primitive whose entire product is *legibility of authority* is not a lesser
 category.
 
-**Fifty-one findings, counted from the headings below rather than asserted** — `grep -c
+**Fifty-one findings, counted from the headings below rather than asserted**: `grep -c
 "^\*\*Severity"` and `grep -c "^### F[0-9]"` both return 51, which is the check, not the
-memory of having added some. The count is not a measure of anything — it is a function of how
+memory of having added some. The count is not a measure of anything; it is a function of how
 long the search ran. They partition exactly, which is more useful than the total: **thirty-five are
 already fixed in code** (F1, F5 in #22; F15, F16, F17, F19, F25 in #28; eleven in `af9df40` on
-2026-08-29 — F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; F3, F9,
+2026-08-29: F27 and F29 through F36 in `contracts/`, F28 and F37 in `reference/policy.js`; F3, F9,
 F10, F11 in #24 on 2026-08-30; F38, F39, F40 in `8487b5a` later the same day; F43, F44, F45, F46
 in `9b701ee` on 2026-09-01, written on 2026-08-31 under the rule the paragraphs below record; F47
 through F50 in `6b1e4d7` on 2026-09-02; F24, whose guard half landed in that same commit while its
 consequence half became F49; and F51 on 2026-09-05); **two
 were fixed in this document as it was being written** (F22 and F23, both missing trust
-boundaries — §2 gained its sixth and seventh in one day); **one has a fix that changes v2's
+boundaries: §2 gained its sixth and seventh in one day); **one has a fix that changes v2's
 behaviour** (F13); **eight are comment rewrites** that change nothing any code does (F4, F7, F8, F14,
-F21, F41 and F42 in the contract, F26 in the mocks — that last one is in `test/`, so it is free of the
+F21, F41 and F42 in the contract, F26 in the mocks; that last one is in `test/`, so it is free of the
 frozen-metadata constraint that governs `contracts/`; F41 is the only member of the bucket that also
 brought a test, and F42 is the only one whose other half is a paragraph in §2, which is why it sits
 here rather than under documentation); **three are documentation** (F2, F6, F18); **one needs a
 decision before it can be sized** (F20, whether the contract gains a payer-facing mutator over a
-mandate's recipients — an objection F51 has since spent, since `setRevoker` is one); and **one needs
+mandate's recipients, an objection F51 has since spent, since `setRevoker` is one); and **one needs
 nothing** (F12). 35 + 2 + 1 + 8 + 3 + 1 + 1 = 51, which is the arithmetic and
 not a second assertion of the same number.
 
 **This paragraph was stale by one for a day, and the failure is the one it warns about.** F42 landed
 with its own section and never entered the partition, so the sentence above read *forty-one* while
-both `grep -c` commands it cites returned 42 — a count asserted from memory in the one paragraph that
+both `grep -c` commands it cites returned 42, a count asserted from memory in the one paragraph that
 exists to say counts are derived. Re-derived on 2026-08-31 by running both commands and rebuilding
 the buckets from the headings.
 
@@ -787,7 +787,7 @@ written, by running both commands again and rebuilding the buckets from the head
 adding five to the old total. Two corrections came out of the rebuild that adding five would have
 missed. F24 had left the bucket that held it: that bucket existed because F24 needed a four-line test
 before it could be sized, and the test question moved to F49 while F24's guard half shipped, so the
-bucket is empty and gone rather than sitting at zero — the same rule that emptied the model-divergence
+bucket is empty and gone rather than sitting at zero, the same rule that emptied the model-divergence
 bucket on 2026-08-29. And F20's parenthetical was pricing a cost that had already been paid, since it
 called recipient removal the contract's first mutator of a mandate after creation and `setRevoker` is
 one. **A count that is re-derived only when it changes goes stale in the gap**, which is the argument
@@ -795,7 +795,7 @@ for deriving it on every pass through §4 and not only on the passes that add a 
 
 **The fixed bucket carried two statuses for one day, and now carries one again.** F38, F39 and F40
 were written into the working tree and counted as fixed before any of it had been committed,
-compiled, or run — the code existed, the tests that assert it existed, and each of the three entries
+compiled, or run: the code existed, the tests that assert it existed, and each of the three entries
 below said so in its own status line rather than leaving a reader to infer it from a missing sha.
 **CLOSED 2026-08-30.** All three landed in `8487b5a`, the suite came back at 232 passing, and their
 status lines now name the commit like every other member of the bucket. The note stays because the
@@ -803,12 +803,12 @@ weaker claim was made in writing, and a document that upgrades its own evidence 
 is harder to audit than one that records when it did.
 
 **And it carried two statuses again, from 2026-08-31.** F43, F44, F45 and F46 sat in the working tree
-with a test each, and none of it had been compiled or run — every Solidity build, `forge test`,
+with a test each, and none of it had been compiled or run: every Solidity build, `forge test`,
 `forge lint` and mutation-gate run in this project happens on the author's machine rather than in the
 session that writes the code, so there is a window between a fix being written and a fix being
 evidenced, and each of the four status lines named that window instead of implying a green run. What
 was owed before they could read like the rest of the bucket: a clean build, the suite passing with the
-four new tests in it, and a mutation-gate run over every guard the commit touches — which for these
+four new tests in it, and a mutation-gate run over every guard the commit touches, which for these
 four is the whole point, since a removed guard no test notices is the failure mode all four findings
 are instances of.
 
@@ -816,22 +816,22 @@ are instances of.
 tests in it, and the gate ran over both functions the commit touched: 29 removals and injections on
 `createMandate` and 27 on `approveCosignFor`, every one caught, plus ten hand-written cases of which
 nine were caught and one is registered as an equivalent mutant. The third item on that list earned
-its place — the gate's first pass over `createMandate` left one existing expiry test green with a
+its place: the gate's first pass over `createMandate` left one existing expiry test green with a
 guard deleted, which no amount of passing suite output would have shown, and the F45 entry below
 carries what that cost and what it taught. The note stays for the same reason the one above it does.
 
 **A whole bucket emptied on 2026-08-29, by this document's own rule.** The first bucket is a status
-and the rest are costs, so a finding moves into it when it lands — F19 was in "changes v2's
+and the rest are costs, so a finding moves into it when it lands: F19 was in "changes v2's
 behaviour" and F25 in "comment rewrites" until 2026-08-28. F27 made the same move a day later, and
 F28 was the sole member of a ninth bucket for a divergence between the reference model and the
 contract; both landed in `af9df40`, so that bucket has no members left and is gone from the list
 above rather than sitting at zero. Nine of the eleven findings in `af9df40` were opened and closed
 the same day, which is why the fixed bucket doubled while nothing else grew. F27 and F28 arrived on
-2026-08-28 from a different direction entirely — neither came from reading the contract, which is
+2026-08-28 from a different direction entirely; neither came from reading the contract, which is
 what §6 now has to account for, along with F37, which came from the same place a day later.
 
 **Four more findings landed on 2026-08-30, and two of the eight buckets shrank to make room.** #24
-took F3, F9, F10 and F11 — the four the table below priced at one error, five lines and a comment
+took F3, F9, F10 and F11, the four the table below priced at one error, five lines and a comment
 between them. F3, F9 and F11 came out of "changes v2's behaviour", leaving F13 alone in it, and F10
 came out of "comment rewrites", leaving six. The fixed bucket is twenty-two of thirty-seven now, so
 a majority of the findings in this document are closed, and the remainder is one behavioural change,
@@ -847,8 +847,8 @@ read as naming a pair until `spend` and `approveCosignFor` are checked against e
 **Three more landed later on 2026-08-30, and all three are mirrors, which is the fifth, sixth and
 seventh time.** F38, F39 and F40 came in together from a twelve-agent parallel sweep, and none of
 them opened a bucket or emptied one: each went straight into the fixed bucket, taking it to
-twenty-five of forty. What they have in common is not a subject — an address list, a nonce
-reservation and a window cap have nothing to do with each other — but a shape. **Each is one rule
+twenty-five of forty. What they have in common is not a subject (an address list, a nonce
+reservation and a window cap have nothing to do with each other) but a shape. **Each is one rule
 holding on one path and not on its twin.** F38's list was written out by hand in three places and
 two of the three entries were reasoned about in all three, so the two that were added later went
 into none. F39's refusal was unconditional in `spend` and unconditional again in
@@ -860,8 +860,8 @@ all in `approveCosignFor`, where a comment argued it should not have one.
 as a coincidence.** #24 recorded that "a sketch naming one guard should be read as naming a pair
 until `spend` and `approveCosignFor` are checked against each other", and the next three findings
 were all found by doing exactly that. A rule of thumb earned from four undercounts turned out to be
-a search strategy, and F38's own fix — one helper read from three sites instead of three copies of
-one condition — is the structural version of the same lesson: **a mirror that is a shared line of
+a search strategy, and F38's own fix (one helper read from three sites instead of three copies of
+one condition) is the structural version of the same lesson: **a mirror that is a shared line of
 code cannot fall out of step, and a mirror that is a copy always eventually does.**
 
 **F13 is the only member of its bucket now, and this pass did not settle whether it belongs there.**
@@ -927,7 +927,7 @@ only loosens in one direction, so it can be tightened before deployment and neve
 
 **Three rows in this table said "uncommitted" for two days after the commit landed, and six findings
 had no row at all.** F38, F39 and F40 shipped in `8487b5a` on 2026-08-30 and their own status lines
-named it that day, while the cells above kept the weaker claim until 2026-09-01 — one status held in
+named it that day, while the cells above kept the weaker claim until 2026-09-01, one status held in
 two places, drifting in the copy a reader meets first. F41 through F46 were absent for the plainer
 reason that a finding gets its section written and its row forgotten; F12 is the only finding
 deliberately outside the table, and the paragraph below says why. Both are repaired above, and F38
@@ -942,24 +942,24 @@ contract or to the token stayed inside every cap the payer granted and destroyed
 "no spend exceeds its cap" and "no spend loses funds" are two claims and only the first one was ever
 proven. The first still holds, and the second held only after `af9df40`, because two addresses
 are now refused rather than because anything about the caps changed. **F23 is the closest thing to a
-counterexample on the cap claim and it is not one** — a replaced ERC-8004 registry can make a mandate
+counterexample on the cap claim and it is not one**: a replaced ERC-8004 registry can make a mandate
 with the registry checks set behave like one without them, which widens the mandate back out to its
 caps and cannot take it past them, because those checks only ever refuse. What this list is mostly
 about is the gap between what a
-payer is *shown* and what is *enforced*, which is the thing Remit sells — and F15 extends
+payer is *shown* and what is *enforced*, which is the thing Remit sells, and F15 extends
 that gap to a second party, since the payer is not the only participant who is shown
 something, while F19 extends it to a second *reader*, since a reconciler diffing `Spend`
 events against Arc's system log is shown a discrepancy that is not one. F25 extends it once
 more, to the most credulous reader of all: a passing test.
 
 Both of those last two closed on 2026-08-28, and **they closed by opposite means.** F19's
-reader was satisfied by removing the state that lied — a spend that
+reader was satisfied by removing the state that lied, a spend that
 emits `Spend` and moves nothing is now refused, so there is nothing left for a reconciler to
 mis-see. F25's reader could not be satisfied that way, because the credulous reader is a test and
 the lie is in Remit's own mock: the divergence was documented and deliberately *left in place*, since
 making `MockUSDC` agree with Arc would have converted an honest simplification into an
 unverified claim wearing the clothes of evidence. **A gap between display and enforcement is
-closed by deleting the display or by deleting the enforcement gap — never by making the display
+closed by deleting the display or by deleting the enforcement gap, never by making the display
 more convincing**, and F25 is the case where that distinction had teeth.
 
 **`af9df40` added four more instalments of the same theme, and they landed at three different
@@ -967,7 +967,7 @@ layers.** F35 and F36 are the two views telling a co-signer and a caller somethi
 would refuse, closed by making each view answer the question it was actually asked. F32 is the
 version where the display is the payer's own flags: the receipt agreed with a grant the payer did
 not make, and the fix refuses the ambiguous grant rather than improving the receipt. F29 is the
-version where the display was correct and the *enforcement* was missing — the caps, the nonce and
+version where the display was correct and the *enforcement* was missing: the caps, the nonce and
 the event all reported a real payment, because a real payment is what happened. Eleven findings
 landed in that commit and four of them are a version of one participant being shown a claim about
 storage and hearing a claim about a payment.

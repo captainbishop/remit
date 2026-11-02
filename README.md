@@ -1,6 +1,39 @@
-# Remit
+<div align="center">
 
-Bounded, revocable, non-custodial spending authority over USDC on Arc.
+<img src="assets/remit-logo.png" alt="Remit" width="360" />
+
+<p><strong>Bounded, revocable, non-custodial spending authority over USDC on Arc.</strong></p>
+
+<p>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-3fb950" /></a>
+  <img alt="Solidity 0.8.28" src="https://img.shields.io/badge/Solidity-0.8.28-363636" />
+  <img alt="Built with Foundry" src="https://img.shields.io/badge/Built%20with-Foundry-2775CA" />
+  <a href="https://testnet.arcscan.app/address/0x3744e93b9e796e05cb66311d897559b6f3860196"><img alt="Arc Testnet: verified" src="https://img.shields.io/badge/Arc%20Testnet-verified-2775CA" /></a>
+  <img alt="Model tests: 119 passing" src="https://img.shields.io/badge/model%20tests-119%20passing-3fb950" />
+  <img alt="Audited: no" src="https://img.shields.io/badge/audited-no-f85149" />
+</p>
+
+<table align="center">
+<tr>
+  <td align="center"><strong>119</strong><br/>model tests</td>
+  <td align="center"><strong>13</strong><br/>Forge suites</td>
+  <td align="center"><strong>51</strong><br/>threat-model findings</td>
+  <td align="center"><strong>0</strong><br/>owner or admin keys</td>
+  <td align="center"><strong>100%</strong><br/>payer custody</td>
+</tr>
+</table>
+
+<p>
+  <a href="#the-problem">Problem</a> &nbsp;·&nbsp;
+  <a href="#the-solution">Solution</a> &nbsp;·&nbsp;
+  <a href="#what-youre-signing">What you're signing</a> &nbsp;·&nbsp;
+  <a href="#the-limits">Limits</a> &nbsp;·&nbsp;
+  <a href="#deployed-on-arc-testnet">Deployed</a> &nbsp;·&nbsp;
+  <a href="SECURITY.md">Security</a> &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+</div>
 
 A payer grants a delegate capped, rate-limited, allowlisted, expiring authority to spend
 the payer's USDC, and the funds stay in the payer's wallet throughout. Every spend carries
@@ -86,6 +119,44 @@ recipient and an auditor each read the same history without having to trust one 
 Arc has deterministic finality, so once the revocation is included it cannot be undone. A
 spend already sitting in the mempool can still be included ahead of it, which makes
 revocation immediate on inclusion rather than on submission.
+
+## What you're signing
+
+Remit is one contract, and every action on it is a single transaction your wallet asks you to
+confirm. A clear view of what each confirmation authorises is itself a security control, so this
+section states each one in plain words. Read the request before you approve it.
+
+**Granting an allowance (the payer).** Your wallet shows `approve(USDC, Remit, amount)`, sent to the
+USDC token. This lets Remit move up to `amount` of your USDC on your behalf, and it is the ceiling
+on everything that follows. Your money stays in your wallet until a spend actually happens, so set
+the allowance to the budget you intend.
+
+**Writing the policy (the payer).** Your wallet shows `createMandate(salt, params)`, sent to Remit.
+This records the rules a delegate must obey: the per-transaction cap, the total cap, the rolling
+windows, the recipient allowlist, the start time and expiry, and any co-signer or ERC-8004
+requirement. The transaction moves no money; it stores the policy and emits `MandateCreated`.
+
+**Making a payment (the delegate).** Your wallet shows `spend(mandateId, recipient, amount, ref,
+nonce)`, sent to Remit. This asks Remit to pay `amount` of the payer's USDC to `recipient`, tagged
+with a reference and a one-time nonce. Remit checks the payment against every rule in the mandate,
+then either sends it straight from the payer to the recipient or stops with a named error. The
+`recipient` and the `amount` are the two fields to read first.
+
+**Ending the mandate (the payer or the revoker).** Your wallet shows `revoke(mandateId)`, sent to
+Remit. This stops the authority on the next block, after which the delegate can spend nothing.
+Either the payer or a named revoker may send it.
+
+**Approving one payment above the threshold (the co-signer).** When a payment needs a second
+signature, the co-signer sends `approveCosignFor(mandateId, recipient, amount, ref, nonce,
+validUntil)` to Remit, and that call approves the one payment named by its recipient, amount,
+reference, and nonce, valid only until `validUntil`. Approving it grants nothing beyond that
+payment, and the companion call `withdrawCosign(mandateId, hash, nonce)` takes the approval back
+before it is used.
+
+**The hard stop (the payer).** Your wallet shows `approve(USDC, Remit, 0)`, sent to the USDC token.
+This sets Remit's allowance to zero, and USDC enforces it, so the delegate can spend nothing further
+whatever the mandate still records. It is the one control that needs no cooperation from Remit or
+the delegate.
 
 ## Who grants a mandate
 
@@ -245,7 +316,7 @@ one of which lives in USDC rather than in this codebase.
 
 ```
 reference/policy.js        the normative spec — executable model of every decision
-reference/policy.test.js   116 tests, including boundary-aiming fuzzers
+reference/policy.test.js   119 tests, including boundary-aiming fuzzers
 reference/                 also holds the seven checkers, and the house style they enforce
 contracts/MandateManager.sol   on-chain implementation; v1 is live on Arc Testnet
 test/                      325 Forge tests in 13 files, against the real storage layout
@@ -278,7 +349,7 @@ Node 18+, no dependencies, no network.
 node --test reference/policy.test.js
 ```
 
-Expected: `# tests 116 / # pass 116 / # fail 0`.
+Expected: `# tests 119 / # pass 119 / # fail 0`.
 
 The tests are the actual correctness evidence for this project. They include named
 attack cases (tumbling-window boundary burst, backwards clock, co-signature
@@ -391,7 +462,7 @@ for `revoke` — outside the delegate's reach for as long as the mandate lasts.
 
 ## Status
 
-**Verified.** The reference model runs and passes 99 tests. It found six real
+**Verified.** The reference model runs and passes 119 tests. It found six real
 cap-bypass bugs during development: four in the window algorithm (K-bucket
 undercount, backwards-clock refill, commit overwriting live history, sentinel
 collision at low timestamps) and two in the credential check (unchecked validator,
@@ -564,7 +635,7 @@ the model returns encodes directly into the contract's struct with no second lay
 defaults to disagree with. A specification that needs a translator has moved the bug
 rather than fixed it.
 
-The model now matches on all ten, which took its suite from 41 tests to 46 — and to 99 over
+The model now matches on all ten, which took its suite from 41 tests to 46 — and to 119 over
 the course of v2, which added the counter-ceiling denial, three co-signature refusals, six
 joint-ceiling tests, the lifetime-bound narrowing, and every later fix's own regression.
 One Forge test was also rewritten for proving nothing — it tripped two `BadWindow`
